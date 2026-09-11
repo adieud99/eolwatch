@@ -1,0 +1,6 @@
+aws_region            = "ap-northeast-2"
+project_name          = "eolwatch"
+service_instance_type = "t4g.micro"
+target_instance_type  = "t4g.micro"
+target_instance_count = 3
+root_volume_gb        = 16

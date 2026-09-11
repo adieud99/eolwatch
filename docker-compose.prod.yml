@@ -1,0 +1,72 @@
+services:
+  db:
+    image: postgres:16.10-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-eolwatch}
+      POSTGRES_USER: ${POSTGRES_USER:-eolwatch}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-eolwatch}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-eolwatch}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-eolwatch}
+      CORS_ORIGINS: https://${DOMAIN}
+      AUTO_CREATE_SCHEMA: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build: ./backend
+    command: ["python", "-m", "app.worker"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-eolwatch}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-eolwatch}
+      AUTO_CREATE_SCHEMA: "false"
+      SSH_PRIVATE_KEY_PATH: /run/secrets/eolwatch_ssh_key
+      SSH_KNOWN_HOSTS_PATH: /run/secrets/known_hosts
+      SSH_STRICT_HOST_KEY: "true"
+      COLLECTION_HOUR: ${COLLECTION_HOUR:-8}
+      COLLECTION_MINUTE: ${COLLECTION_MINUTE:-30}
+      SCHEDULER_TIMEZONE: Asia/Seoul
+    volumes:
+      - ./secrets:/run/secrets:ro
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+
+  web:
+    build: ./frontend
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.10-alpine
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN is required}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infrastructure/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+      - api
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

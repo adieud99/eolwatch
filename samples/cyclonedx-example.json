@@ -1,0 +1,59 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:2b7f4952-45d8-47c6-9f2b-2a9ac83cda01",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-09-11T12:00:00Z",
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "name": "EOLWatch infrastructure inventory generator",
+          "version": "1.0.0"
+        }
+      ]
+    },
+    "component": {
+      "bom-ref": "urn:eolwatch:asset:DB-SRV-001",
+      "type": "platform",
+      "name": "DB-SRV-001 infrastructure stack",
+      "version": "1.0.0",
+      "supplier": { "name": "EOLWatch demo environment" }
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "pkg:generic/ubuntu@22.04",
+      "type": "operating-system",
+      "supplier": { "name": "Canonical" },
+      "name": "Ubuntu Server",
+      "version": "22.04",
+      "purl": "pkg:generic/ubuntu@22.04",
+      "licenses": [{ "expression": "LicenseRef-various" }]
+    },
+    {
+      "bom-ref": "pkg:generic/postgresql@16.4",
+      "type": "application",
+      "supplier": { "name": "PostgreSQL Global Development Group" },
+      "name": "PostgreSQL",
+      "version": "16.4",
+      "purl": "pkg:generic/postgresql@16.4",
+      "licenses": [{ "license": { "name": "PostgreSQL License" } }]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "urn:eolwatch:asset:DB-SRV-001",
+      "dependsOn": ["pkg:generic/ubuntu@22.04", "pkg:generic/postgresql@16.4"]
+    },
+    {
+      "ref": "pkg:generic/ubuntu@22.04",
+      "dependsOn": []
+    },
+    {
+      "ref": "pkg:generic/postgresql@16.4",
+      "dependsOn": []
+    }
+  ]
+}

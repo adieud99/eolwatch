@@ -1,0 +1,59 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: eolwatch
+      POSTGRES_USER: eolwatch
+      POSTGRES_PASSWORD: eolwatch
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eolwatch"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://eolwatch:eolwatch@db:5432/eolwatch
+      CORS_ORIGINS: http://localhost:5173,http://localhost:8080
+      AUTO_CREATE_SCHEMA: "false"
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build: ./backend
+    command: ["python", "-m", "app.worker"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://eolwatch:eolwatch@db:5432/eolwatch
+      AUTO_CREATE_SCHEMA: "false"
+      SSH_PRIVATE_KEY_PATH: /run/secrets/eolwatch_ssh_key
+      SSH_KNOWN_HOSTS_PATH: /run/secrets/known_hosts
+      SSH_STRICT_HOST_KEY: "true"
+      COLLECTION_HOUR: "8"
+      COLLECTION_MINUTE: "30"
+      SCHEDULER_TIMEZONE: Asia/Seoul
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_started
+    volumes:
+      - ./secrets:/run/secrets:ro
+    restart: unless-stopped
+
+  web:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
