@@ -26,11 +26,16 @@ services:
       TEAMS_RECIPIENT_LABEL: ${TEAMS_RECIPIENT_LABEL:-EOLWatch 운영 채널}
       PUBLIC_BASE_URL: http://localhost:8080
       DEMO_TARGET_IPS: ${DEMO_TARGET_IPS:-}
+      SSH_PRIVATE_KEY_PATH: /run/secrets/eolwatch_ssh_key
+      SSH_KNOWN_HOSTS_PATH: /run/secrets/known_hosts
+      SSH_STRICT_HOST_KEY: "true"
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - ./secrets:/run/secrets:ro
     restart: unless-stopped
 
   worker:

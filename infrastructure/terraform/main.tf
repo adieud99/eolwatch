@@ -13,6 +13,8 @@ data "aws_ami" "amazon_linux" {
   }
 }
 
+data "aws_caller_identity" "current" {}
+
 locals {
   common_tags = {
     Project   = var.project_name
@@ -127,6 +129,25 @@ resource "aws_iam_instance_profile" "ec2" {
   role = aws_iam_role.ec2.name
 }
 
+resource "aws_iam_role" "target" {
+  name = "${var.project_name}-target-ec2-role"
+  assume_role_policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [{ Effect = "Allow", Principal = { Service = "ec2.amazonaws.com" }, Action = "sts:AssumeRole" }]
+  })
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "target_ssm" {
+  role       = aws_iam_role.target.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "target" {
+  name = "${var.project_name}-target-ec2-profile"
+  role = aws_iam_role.target.name
+}
+
 resource "aws_s3_bucket" "backup" {
   bucket_prefix = "${var.project_name}-backup-"
   force_destroy = false
@@ -171,6 +192,22 @@ resource "aws_iam_role_policy" "backup" {
   })
 }
 
+resource "aws_iam_role_policy" "runtime_parameters" {
+  name = "${var.project_name}-runtime-parameters"
+  role = aws_iam_role.ec2.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "ssm:GetParameter",
+        "ssm:GetParameters"
+      ]
+      Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/production/*"
+    }]
+  })
+}
+
 resource "aws_instance" "service" {
   ami                    = data.aws_ami.amazon_linux.id
   instance_type          = var.service_instance_type
@@ -187,11 +224,14 @@ resource "aws_instance" "service" {
   user_data = <<-EOF
     #!/bin/bash
     set -euo pipefail
-    dnf install -y docker git curl openssh-clients tar gzip
+    dnf install -y docker git openssh-clients tar gzip
     install -d -m 755 /usr/local/lib/docker/cli-plugins
     curl -fsSL https://github.com/docker/compose/releases/download/v5.5.0/docker-compose-linux-aarch64 -o /tmp/docker-compose
     echo "ff42489f5a9b879d5d117c5ffea6defc27390b3286da8ad52cbc9c6ab5df590e  /tmp/docker-compose" | sha256sum --check
     install -m 755 /tmp/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose
+    curl -fsSL https://github.com/docker/buildx/releases/download/v0.37.1/buildx-v0.37.1.linux-arm64 -o /tmp/docker-buildx
+    echo "e5cc9fe3bbff5cbc91230981f7860e06076110730a2db997082652199042a1f2  /tmp/docker-buildx" | sha256sum --check
+    install -m 755 /tmp/docker-buildx /usr/local/lib/docker/cli-plugins/docker-buildx
     systemctl enable --now docker
     mkdir -p /opt/eolwatch
   EOF
@@ -216,7 +256,7 @@ resource "aws_instance" "target" {
   instance_type          = var.target_instance_type
   subnet_id              = aws_subnet.public.id
   vpc_security_group_ids = [aws_security_group.target.id]
-  iam_instance_profile   = aws_iam_instance_profile.ec2.name
+  iam_instance_profile   = aws_iam_instance_profile.target.name
 
   root_block_device {
     volume_size = 8

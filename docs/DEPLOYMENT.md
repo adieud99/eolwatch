@@ -42,11 +42,11 @@ terraform apply eolwatch.tfplan
 - 점검 대상 EC2 최대 3대
 - 80·443만 공개한 서비스 보안그룹
 - 서비스 보안그룹에서 오는 22번만 허용한 대상 보안그룹
-- SSM 접속용 IAM 역할
+- 서비스용 SSM·백업·운영 매개변수 역할과 대상 서버용 SSM 전용 역할
 - 암호화·공개 차단·7일 만료 정책이 적용된 S3 백업 버킷
 - 서비스 고정 IP용 Elastic IP
 
-Terraform은 실제로 리소스를 생성한다. 2026-09-15 서울 리전에 서비스 EC2 1대와 점검 대상 EC2 3대를 포함한 20개 리소스를 적용했다. 현재 식별정보와 검증 결과는 `AWS_DEPLOYMENT_RECORD.md`에 기록한다.
+Terraform은 실제로 리소스를 생성한다. 2026-09-15 서울 리전에 서비스 EC2 1대와 점검 대상 EC2 3대를 포함한 관리 리소스 24개를 적용했다. 현재 식별정보와 검증 결과는 `AWS_DEPLOYMENT_RECORD.md`에 기록한다.
 
 ## 3. DNS와 운영 환경변수
 
@@ -93,7 +93,7 @@ curl -fsS https://eolwatch.example.com/health
 - `ps -eo`
 - `dpkg-query -W` 또는 `rpm -qa`
 
-운영자가 대상 서버의 호스트 키 지문을 확인한 후 `secrets/known_hosts`에 넣는다. `SSH_STRICT_HOST_KEY=true`를 유지한다.
+운영자가 대상 서버의 호스트 키 지문을 확인한 후 `secrets/known_hosts`에 평문 호스트명 형식으로 넣는다. 현재 Paramiko 수집기는 해시 호스트명 항목을 조회하지 못하므로 `ssh-keyscan -H` 결과를 그대로 사용하지 않는다. 파일은 API와 worker 컨테이너에 읽기 전용으로 마운트하고 `SSH_STRICT_HOST_KEY=true`를 유지한다.
 
 ## 6. 배포 확인
 
