@@ -10,6 +10,7 @@
 6. [배포 절차](DEPLOYMENT.md) — 로컬·AWS·운영 Compose 배포
 7. [운영 절차](OPERATIONS.md) — 점검 실패·백업·복구·장애 대응
 8. [구현 현황](IMPLEMENTATION_STATUS.md) — 완료·검증·남은 작업
+9. [AWS 실제 배포 기록](AWS_DEPLOYMENT_RECORD.md) — 생성 리소스와 배치 검증 상태
 
 문서의 Mermaid 도면은 GitHub에서 바로 렌더링된다. 발표 자료에 사용할 때 GitHub 미리보기 또는 Mermaid Live Editor에서 SVG로 내보내면 확대해도 깨지지 않는다.
 

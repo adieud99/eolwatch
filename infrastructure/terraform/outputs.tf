@@ -11,6 +11,10 @@ output "target_private_ips" {
   value = aws_instance.target[*].private_ip
 }
 
+output "target_instance_ids" {
+  value = aws_instance.target[*].id
+}
+
 output "backup_bucket" {
   value = aws_s3_bucket.backup.id
 }

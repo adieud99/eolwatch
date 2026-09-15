@@ -1,6 +1,6 @@
 # EOLWatch 구현 현황
 
-기준일: 2026-09-12
+기준일: 2026-09-15
 
 ## 완료
 
@@ -68,14 +68,22 @@
 - `pg_dump → S3` 백업과 복구 스크립트
 - GitHub Actions 백엔드·프런트·컨테이너 CI
 - 합성 시연 데이터 생성 명령
+- 관리자·조회자 로그인과 Bearer 토큰 권한 검사
+- 변경 작업 감사 로그와 사용자 관리
+- 자산 CSV 일괄 등록 및 행별 오류 결과
+- SBOM 버전 간 추가·삭제·변경 비교
+- OSV 취약점 조회와 VEX 상태 관리
+- Teams Workflows 위험 건수 수동 알림과 전송 이력
+- 지원종료·인프라 점검 PDF 보고서
+- 프런트엔드 로그인 화면과 자동 테스트
 
-Terraform은 AWS provider 5.100으로 `init`과 `validate`를 통과했다. 실제 `apply`는 수행하지 않았다.
+Terraform은 AWS provider 5.100으로 검증했으며 2026-09-15 서울 리전에 실제 `apply`를 수행했다. 서비스 EC2 1대, 점검 대상 EC2 3대, VPC, 보안그룹, Elastic IP, S3 백업 버킷이 생성됐다. 애플리케이션 배치는 별도 기록 문서에서 추적한다.
 
 ## 검증 결과
 
 | 검사 | 결과 |
 |---|---|
-| 백엔드 테스트 | 6개 통과 |
+| 백엔드 테스트 | 8개 통과 |
 | CycloneDX 1.7 생성 문서 공식 스키마 검증 | 통과 |
 | Alembic upgrade→downgrade→upgrade | 통과 |
 | Alembic 모델 변경 누락 검사 | 변경 없음 |
@@ -85,27 +93,24 @@ Terraform은 AWS provider 5.100으로 `init`과 `validate`를 통과했다. 실�
 | PostgreSQL 마이그레이션과 API 기동 | 통과 |
 | 합성 데이터 대시보드 집계 | 통과 |
 | Terraform validate | 통과 |
+| 프런트엔드 자동 테스트 | 2개 통과 |
+| 실제 AWS Terraform apply | 리소스 20개 생성 |
 
 ## 남은 작업
 
-### 구현 필요
+### 구현 보완
 
-1. 관리자·조회자 로그인과 API 권한 검사
-2. 자산 CSV 일괄 등록과 행별 오류 보고
-3. SBOM 버전 간 구성요소 추가·삭제·변경 비교
-4. OSV 취약점과 VEX 상태
-5. Teams Workflows 알림과 전송 이력
-6. 일일 점검·지원종료 PDF 리포트
-7. 감사 로그
-8. 프런트엔드 자동 테스트와 로그인 화면
+1. 실제 Teams Workflow URL 연결 후 수동 전송 검증
+2. 실제 취약점이 존재하는 생태계 purl로 OSV·VEX 시연 데이터 검증
+3. 사용자 비밀번호 변경 흐름과 로그인 실패 제한
 
 ### 실제 외부 환경 필요
 
-1. 점검 전용 Linux 계정과 SSH 키를 생성해 EC2 3대에서 수집 실증
+1. 생성된 EC2 3대에 점검 전용 SSH 공개키를 배치해 수집 실증
 2. 실제 제조사·프로젝트의 EOL/EOSL 데이터를 공식 URL과 함께 입력
 3. 소유자가 있는 Teams Workflow URL 연결
-4. AWS 계정에서 Terraform plan 비용 확인 후 apply
-5. 실제 도메인의 DNS 연결과 Caddy 인증서 발급
+4. 서비스 EC2에 애플리케이션을 배치하고 HTTPS 기동
+5. 임시 DNS 또는 실제 도메인 연결과 Caddy 인증서 발급
 6. S3 백업 후 별도 DB에서 복구 훈련
 7. 운영 상태를 일정 기간 측정해 가동률·수집 성공률 계산
 

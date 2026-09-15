@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from typing import Optional
+import csv
+import io
+from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from pydantic import ValidationError
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -13,6 +16,33 @@ from ..services.risk import lifecycle_risk
 
 
 router = APIRouter(prefix="/assets", tags=["assets"])
+
+
+CSV_OPTIONAL_FIELDS = {
+    "site_id",
+    "model_release_id",
+    "manufacturer",
+    "model",
+    "serial_number",
+    "site",
+    "ip_address",
+    "ssh_username",
+    "introduced_on",
+    "support_end_date",
+    "lifecycle_source_url",
+}
+
+
+def _csv_payload(row: dict[str, str]) -> dict[str, Any]:
+    values: dict[str, Any] = {key.strip(): (value or "").strip() for key, value in row.items() if key}
+    for key in CSV_OPTIONAL_FIELDS:
+        if not values.get(key):
+            values[key] = None
+    for key in ("site_id", "model_release_id", "ssh_port"):
+        if values.get(key):
+            values[key] = int(values[key])
+    values["monitored"] = str(values.get("monitored", "false")).lower() in {"1", "true", "yes", "y", "예"}
+    return values
 
 
 def _asset_read(db: Session, asset: models.Asset) -> schemas.AssetRead:
@@ -44,6 +74,50 @@ def list_assets(
     if asset_type:
         query = query.where(models.Asset.asset_type == asset_type)
     return [_asset_read(db, asset) for asset in db.scalars(query).all()]
+
+
+@router.post("/import-csv", response_model=schemas.AssetCsvImportResult)
+async def import_assets_csv(file: UploadFile = File(), db: Session = Depends(get_db)):
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=422, detail="CSV 파일만 업로드할 수 있습니다")
+    try:
+        content = (await file.read()).decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=422, detail="CSV 파일은 UTF-8 인코딩이어야 합니다") from exc
+    reader = csv.DictReader(io.StringIO(content))
+    required = {"asset_tag", "name", "asset_type"}
+    if not reader.fieldnames or not required.issubset({name.strip() for name in reader.fieldnames if name}):
+        raise HTTPException(status_code=422, detail="필수 열은 asset_tag, name, asset_type입니다")
+
+    errors: list[schemas.CsvRowError] = []
+    created = 0
+    total = 0
+    for row_number, row in enumerate(reader, start=2):
+        if not any((value or "").strip() for value in row.values()):
+            continue
+        total += 1
+        try:
+            payload = schemas.AssetCreate.model_validate(_csv_payload(row))
+            if payload.site_id and not db.get(models.Site, payload.site_id):
+                raise ValueError("사이트가 없습니다")
+            if payload.model_release_id and not db.get(models.ProductRelease, payload.model_release_id):
+                raise ValueError("장비 모델 릴리스가 없습니다")
+            values = payload.model_dump()
+            if values.get("lifecycle_source_url"):
+                values["lifecycle_source_url"] = str(values["lifecycle_source_url"])
+            db.add(models.Asset(**values))
+            db.commit()
+            created += 1
+        except (ValidationError, ValueError, IntegrityError) as exc:
+            db.rollback()
+            if isinstance(exc, ValidationError):
+                message = "; ".join(error["msg"] for error in exc.errors())
+            elif isinstance(exc, IntegrityError):
+                message = "이미 사용 중인 자산번호이거나 참조 값이 올바르지 않습니다"
+            else:
+                message = str(exc)
+            errors.append(schemas.CsvRowError(row=row_number, asset_tag=row.get("asset_tag") or None, message=message))
+    return schemas.AssetCsvImportResult(total_rows=total, created=created, failed=len(errors), errors=errors)
 
 
 @router.post("", response_model=schemas.AssetRead, status_code=status.HTTP_201_CREATED)

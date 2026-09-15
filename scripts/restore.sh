@@ -1,6 +1,14 @@
 #!/usr/bin/env sh
 set -eu
 
+project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$project_dir"
+if [ -f .env ]; then
+  set -a
+  . ./.env
+  set +a
+fi
+
 if [ "$#" -ne 1 ]; then
   echo "사용법: $0 s3://버킷/postgres/백업.sql.gz" >&2
   exit 2

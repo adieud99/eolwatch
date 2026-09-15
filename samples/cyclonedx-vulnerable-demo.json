@@ -1,0 +1,41 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:7a88663f-2e66-40c2-ae67-3c84561454e2",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-09-15T03:00:00Z",
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "name": "EOLWatch vulnerability demonstration",
+          "version": "1.0.0"
+        }
+      ]
+    },
+    "component": {
+      "bom-ref": "urn:eolwatch:demo:vulnerable-python-app",
+      "type": "application",
+      "name": "취약점 조회 시연 애플리케이션",
+      "version": "1.0.0"
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "pkg:pypi/jinja2@2.4.1",
+      "type": "library",
+      "supplier": { "name": "Pallets" },
+      "name": "Jinja2",
+      "version": "2.4.1",
+      "purl": "pkg:pypi/jinja2@2.4.1",
+      "licenses": [{ "license": { "id": "BSD-3-Clause" } }]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "urn:eolwatch:demo:vulnerable-python-app",
+      "dependsOn": ["pkg:pypi/jinja2@2.4.1"]
+    }
+  ]
+}

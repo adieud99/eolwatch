@@ -1,6 +1,14 @@
 #!/usr/bin/env sh
 set -eu
 
+project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$project_dir"
+if [ -f .env ]; then
+  set -a
+  . ./.env
+  set +a
+fi
+
 : "${POSTGRES_USER:?POSTGRES_USER is required}"
 : "${POSTGRES_DB:?POSTGRES_DB is required}"
 : "${BACKUP_BUCKET:?BACKUP_BUCKET is required}"

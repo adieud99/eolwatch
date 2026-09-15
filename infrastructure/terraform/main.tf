@@ -186,7 +186,12 @@ resource "aws_instance" "service" {
 
   user_data = <<-EOF
     #!/bin/bash
-    dnf install -y docker git
+    set -euo pipefail
+    dnf install -y docker git curl openssh-clients tar gzip
+    install -d -m 755 /usr/local/lib/docker/cli-plugins
+    curl -fsSL https://github.com/docker/compose/releases/download/v5.5.0/docker-compose-linux-aarch64 -o /tmp/docker-compose
+    echo "ff42489f5a9b879d5d117c5ffea6defc27390b3286da8ad52cbc9c6ab5df590e  /tmp/docker-compose" | sha256sum --check
+    install -m 755 /tmp/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose
     systemctl enable --now docker
     mkdir -p /opt/eolwatch
   EOF
@@ -218,6 +223,13 @@ resource "aws_instance" "target" {
     volume_type = "gp3"
     encrypted   = true
   }
+
+  user_data = <<-EOF
+    #!/bin/bash
+    set -euo pipefail
+    id eolwatch >/dev/null 2>&1 || useradd --create-home --shell /bin/bash eolwatch
+    install -d -m 700 -o eolwatch -g eolwatch /home/eolwatch/.ssh
+  EOF
 
   metadata_options {
     http_endpoint = "enabled"

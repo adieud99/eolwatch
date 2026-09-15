@@ -46,7 +46,7 @@ terraform apply eolwatch.tfplan
 - 암호화·공개 차단·7일 만료 정책이 적용된 S3 백업 버킷
 - 서비스 고정 IP용 Elastic IP
 
-Terraform은 실제로 리소스를 생성하므로 현재 프로젝트에서는 `validate`까지만 자동 검증한다. `apply`는 AWS 비용과 외부 상태 변경이 발생하므로 실행 전에 계정·리전·예산을 직접 확인한다.
+Terraform은 실제로 리소스를 생성한다. 2026-09-15 서울 리전에 서비스 EC2 1대와 점검 대상 EC2 3대를 포함한 20개 리소스를 적용했다. 현재 식별정보와 검증 결과는 `AWS_DEPLOYMENT_RECORD.md`에 기록한다.
 
 ## 3. DNS와 운영 환경변수
 
@@ -60,6 +60,11 @@ POSTGRES_PASSWORD=충분히_긴_URL안전_비밀번호
 COLLECTION_HOUR=8
 COLLECTION_MINUTE=30
 BACKUP_BUCKET=terraform-output-bucket-name
+JWT_SECRET=32바이트_이상의_무작위_비밀값
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=충분히_긴_관리자_비밀번호
+PUBLIC_BASE_URL=https://eolwatch.example.com
+TEAMS_WEBHOOK_URL=
 ```
 
 실제 비밀번호와 SSH 개인키는 저장소에 커밋하지 않는다. 운영 단계에서는 SSM Parameter Store 값을 배포 시 환경 파일 또는 Docker Secret으로 주입한다.

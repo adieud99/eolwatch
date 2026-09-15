@@ -238,5 +238,81 @@ class CheckResult(Base):
     job: Mapped[CollectionJob] = relationship(back_populates="result")
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(500))
+    role: Mapped[str] = mapped_column(String(20), default="VIEWER", index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    username: Mapped[str] = mapped_column(String(80), index=True)
+    action: Mapped[str] = mapped_column(String(40), index=True)
+    method: Mapped[str] = mapped_column(String(10))
+    path: Mapped[str] = mapped_column(String(500))
+    status_code: Mapped[int] = mapped_column(Integer)
+    ip_address: Mapped[Optional[str]] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class Vulnerability(Base):
+    __tablename__ = "vulnerabilities"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    osv_id: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    summary: Mapped[Optional[str]] = mapped_column(Text)
+    details: Mapped[Optional[str]] = mapped_column(Text)
+    severity: Mapped[str] = mapped_column(String(20), default="UNKNOWN", index=True)
+    aliases: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    references: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    modified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    component_links: Mapped[list[ComponentVulnerability]] = relationship(
+        back_populates="vulnerability", cascade="all, delete-orphan"
+    )
+
+
+class ComponentVulnerability(Base):
+    __tablename__ = "component_vulnerabilities"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    component_id: Mapped[int] = mapped_column(ForeignKey("components.id", ondelete="CASCADE"), index=True)
+    vulnerability_id: Mapped[int] = mapped_column(ForeignKey("vulnerabilities.id", ondelete="CASCADE"), index=True)
+    vex_status: Mapped[str] = mapped_column(String(30), default="AFFECTED", index=True)
+    justification: Mapped[Optional[str]] = mapped_column(String(80))
+    response: Mapped[Optional[str]] = mapped_column(String(80))
+    detail: Mapped[Optional[str]] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    component: Mapped[Component] = relationship()
+    vulnerability: Mapped[Vulnerability] = relationship(back_populates="component_links")
+
+    __table_args__ = (UniqueConstraint("component_id", "vulnerability_id", name="uq_component_vulnerability"),)
+
+
+class NotificationDelivery(Base):
+    __tablename__ = "notification_deliveries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    channel: Mapped[str] = mapped_column(String(30), default="TEAMS")
+    event_type: Mapped[str] = mapped_column(String(50), index=True)
+    status: Mapped[str] = mapped_column(String(20), index=True)
+    response_code: Mapped[Optional[int]] = mapped_column(Integer)
+    error_message: Mapped[Optional[str]] = mapped_column(Text)
+    recipient_label: Mapped[Optional[str]] = mapped_column(String(160))
+    payload_summary: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
 # 기존 API 이름을 유지하면서 목표 ERD의 PRODUCT_RELEASE를 사용한다.
 SoftwareProduct = ProductRelease

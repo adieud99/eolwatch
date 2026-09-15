@@ -15,12 +15,25 @@ class Settings(BaseSettings):
     collection_minute: int = 30
     scheduler_timezone: str = "Asia/Seoul"
     auto_create_schema: bool = True
+    jwt_secret: str = "local-development-secret-change-before-deployment"
+    access_token_minutes: int = 480
+    admin_username: str = "admin"
+    admin_password: str = "Eolwatch!2026"
+    teams_webhook_url: str = ""
+    teams_recipient_label: str = "EOLWatch 운영 채널"
+    osv_api_url: str = "https://api.osv.dev/v1/querybatch"
+    public_base_url: str = "http://localhost:8080"
+    demo_target_ips: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def demo_target_ip_list(self) -> list[str]:
+        return [address.strip() for address in self.demo_target_ips.split(",") if address.strip()]
 
 
 @lru_cache

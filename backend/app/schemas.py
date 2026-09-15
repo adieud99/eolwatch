@@ -260,3 +260,127 @@ class ContractRead(ContractCreate):
     customer_name: str
     risk_level: str
     days_left: int
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=80)
+    password: str = Field(min_length=8, max_length=200)
+
+
+class UserRead(BaseModel):
+    id: int
+    username: str
+    role: str
+    active: bool
+    created_at: datetime
+    last_login_at: Optional[datetime]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: UserRead
+
+
+class UserCreate(BaseModel):
+    username: str = Field(min_length=3, max_length=80, pattern=r"^[A-Za-z0-9_.-]+$")
+    password: str = Field(min_length=10, max_length=200)
+    role: Literal["ADMIN", "VIEWER"] = "VIEWER"
+
+
+class UserUpdate(BaseModel):
+    role: Optional[Literal["ADMIN", "VIEWER"]] = None
+    active: Optional[bool] = None
+    password: Optional[str] = Field(default=None, min_length=10, max_length=200)
+
+
+class CsvRowError(BaseModel):
+    row: int
+    asset_tag: Optional[str] = None
+    message: str
+
+
+class AssetCsvImportResult(BaseModel):
+    total_rows: int
+    created: int
+    failed: int
+    errors: list[CsvRowError]
+
+
+class SbomDiffItem(BaseModel):
+    identity: str
+    name: str
+    before_version: Optional[str] = None
+    after_version: Optional[str] = None
+    purl: Optional[str] = None
+
+
+class SbomDiffRead(BaseModel):
+    base_sbom_id: int
+    target_sbom_id: int
+    added: list[SbomDiffItem]
+    removed: list[SbomDiffItem]
+    changed: list[SbomDiffItem]
+    unchanged_count: int
+
+
+class VulnerabilityRead(BaseModel):
+    link_id: int
+    component_id: int
+    component_name: str
+    component_version: Optional[str]
+    sbom_id: int
+    osv_id: str
+    summary: Optional[str]
+    severity: str
+    aliases: list[Any]
+    vex_status: str
+    justification: Optional[str]
+    response: Optional[str]
+    detail: Optional[str]
+    modified_at: Optional[datetime]
+
+
+class VulnerabilityScanResult(BaseModel):
+    sbom_id: int
+    queried_components: int
+    vulnerability_links: int
+    unique_vulnerabilities: int
+
+
+class VexUpdate(BaseModel):
+    status: Literal["AFFECTED", "NOT_AFFECTED", "FIXED", "UNDER_INVESTIGATION"]
+    justification: Optional[str] = Field(default=None, max_length=80)
+    response: Optional[str] = Field(default=None, max_length=80)
+    detail: Optional[str] = Field(default=None, max_length=2000)
+
+
+class NotificationRead(BaseModel):
+    id: int
+    channel: str
+    event_type: str
+    status: str
+    response_code: Optional[int]
+    error_message: Optional[str]
+    recipient_label: Optional[str]
+    payload_summary: dict[str, Any]
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AuditLogRead(BaseModel):
+    id: int
+    user_id: Optional[int]
+    username: str
+    action: str
+    method: str
+    path: str
+    status_code: int
+    ip_address: Optional[str]
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

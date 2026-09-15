@@ -161,19 +161,14 @@ erDiagram
     ASSET ||--o{ COLLECTION_JOB : checked_by
     USER_ACCOUNT o|--o{ COLLECTION_JOB : requested_by
     COLLECTION_JOB ||--o| CHECK_RESULT : produces
-    PRODUCT_RELEASE ||--o{ PRODUCT_VULNERABILITY : affected_by
-    VULNERABILITY ||--o{ PRODUCT_VULNERABILITY : affects
-    COLLECTION_JOB o|--o{ ALERT_LOG : triggers
-    ASSET o|--o{ ALERT_LOG : concerns
-    VULNERABILITY o|--o{ ALERT_LOG : concerns
+    SBOM_COMPONENT ||--o{ COMPONENT_VULNERABILITY : affected_by
+    VULNERABILITY ||--o{ COMPONENT_VULNERABILITY : affects
     USER_ACCOUNT ||--o{ AUDIT_LOG : performs
-    USER_ACCOUNT ||--o{ REPORT_HISTORY : generates
 
     USER_ACCOUNT {
         bigint id PK
-        varchar email UK
+        varchar username UK
         varchar password_hash
-        varchar display_name
         varchar role
         boolean is_active
         timestamptz last_login_at
@@ -219,28 +214,26 @@ erDiagram
         jsonb references
     }
 
-    PRODUCT_VULNERABILITY {
-        bigint product_release_id PK, FK
-        bigint vulnerability_id PK, FK
-        varchar match_source
+    COMPONENT_VULNERABILITY {
+        bigint id PK
+        bigint component_id FK
+        bigint vulnerability_id FK
         varchar vex_status
         text justification
-        timestamptz checked_at
+        varchar response
+        text detail
+        timestamptz updated_at
     }
 
-    ALERT_LOG {
+    NOTIFICATION_DELIVERY {
         bigint id PK
-        bigint asset_id FK
-        bigint collection_job_id FK
-        bigint vulnerability_id FK
-        varchar alert_type
-        varchar severity
         varchar channel
-        boolean is_success
-        integer response_status
+        varchar event_type
+        varchar status
+        integer response_code
         text error_message
-        jsonb payload
-        timestamptz sent_at
+        jsonb payload_summary
+        timestamptz created_at
     }
 
     AUDIT_LOG {
@@ -267,7 +260,7 @@ erDiagram
     }
 ```
 
-`ALERT_LOG`의 자산·점검·취약점 FK는 알림 종류에 따라 선택적으로 사용한다. 적어도 하나의 원인 정보가 존재하도록 애플리케이션에서 검증한다. `AUDIT_LOG.entity_id`는 여러 테이블을 가리키는 감사용 논리 참조이므로 실제 FK는 두지 않는다.
+`NOTIFICATION_DELIVERY`에는 외부 수신 주소를 저장하지 않고 운영자가 알아볼 수 있는 수신처 표시명과 전송 결과만 기록한다. `AUDIT_LOG`는 변경한 사용자, HTTP 방식, 경로, 결과 코드와 접속 IP를 보존한다.
 
 ## 4. 주요 코드값
 
@@ -308,7 +301,7 @@ erDiagram
 | SBOM_COMPONENT | `product_release_id`, `(sbom_document_id, bom_ref)` | 동일 구성요소 사용 자산 검색 |
 | COLLECTION_JOB | `(asset_id, started_at DESC)`, `(status, started_at)` | 최근 점검과 실패 작업 검색 |
 | VULNERABILITY | `vulnerability_id`, `severity` | CVE/OSV 검색 |
-| ALERT_LOG | `(is_success, sent_at)`, `asset_id` | 실패 알림 재처리와 이력 |
+| NOTIFICATION_DELIVERY | `(status, created_at)`, `event_type` | 실패 알림 확인과 전송 이력 |
 | AUDIT_LOG | `(entity_type, entity_id, created_at)` | 변경 추적 |
 
 ## 7. 데이터 보존

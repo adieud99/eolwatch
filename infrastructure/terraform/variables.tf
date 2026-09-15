@@ -13,7 +13,7 @@ variable "project_name" {
 variable "service_instance_type" {
   description = "웹/API/DB 서비스 인스턴스 유형"
   type        = string
-  default     = "t4g.micro"
+  default     = "t4g.small"
 }
 
 variable "target_instance_type" {

@@ -15,13 +15,59 @@ const riskText = { EXPIRED: '지원 종료', CRITICAL: '긴급', WARN: '주의',
 const typeText = { server: '서버', storage: '스토리지', network: '네트워크', security: '보안장비', vm: '가상머신', cloud: '클라우드', other: '기타' }
 
 async function api(path, options) {
-  const response = await fetch(`/api${path}`, options)
+  const headers = new Headers(options?.headers || {})
+  const token = localStorage.getItem('eolwatch_token')
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const response = await fetch(`/api${path}`, { ...options, headers })
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
     throw new Error(typeof body.detail === 'string' ? body.detail : '요청을 처리하지 못했습니다.')
   }
   if (response.status === 204) return null
   return response.json()
+}
+
+async function download(path, filename) {
+  const token = localStorage.getItem('eolwatch_token')
+  const response = await fetch(`/api${path}`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!response.ok) throw new Error('보고서를 내려받지 못했습니다.')
+  const url = URL.createObjectURL(await response.blob())
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
+function Login({ onLogin }) {
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  async function submit(event) {
+    event.preventDefault(); setBusy(true); setError('')
+    try {
+      const data = Object.fromEntries(new FormData(event.currentTarget))
+      const result = await api('/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+      localStorage.setItem('eolwatch_token', result.access_token)
+      localStorage.setItem('eolwatch_user', JSON.stringify(result.user))
+      onLogin(result.user)
+    } catch (reason) { setError(reason.message) }
+    finally { setBusy(false) }
+  }
+  return (
+    <main className="login-page">
+      <section className="login-card">
+        <div className="brand login-brand"><span className="brand-mark">E</span><div><strong>EOLWatch</strong><small>Lifecycle Intelligence</small></div></div>
+        <span className="eyebrow">SECURE ACCESS</span><h1>인프라 수명주기 관리</h1>
+        <p>승인된 운영 계정으로 로그인하세요.</p>
+        <form className="vertical-form" onSubmit={submit}>
+          <label>아이디<input name="username" autoComplete="username" required /></label>
+          <label>비밀번호<input name="password" type="password" autoComplete="current-password" required minLength="8" /></label>
+          {error && <p className="form-error">{error}</p>}
+          <button className="primary" disabled={busy}>{busy ? '확인 중…' : '로그인'}</button>
+        </form>
+      </section>
+    </main>
+  )
 }
 
 function RiskBadge({ level }) {
@@ -89,9 +135,10 @@ function Overview({ summary }) {
   )
 }
 
-function Assets({ assets, sites, onChanged }) {
+function Assets({ assets, sites, onChanged, canEdit }) {
   const [open, setOpen] = useState(false)
   const [error, setError] = useState('')
+  const [csvResult, setCsvResult] = useState(null)
   async function submit(event) {
     event.preventDefault()
     setError('')
@@ -106,12 +153,28 @@ function Assets({ assets, sites, onChanged }) {
       onChanged('자산을 등록했습니다.')
     } catch (reason) { setError(reason.message) }
   }
+  async function importCsv(event) {
+    const file = event.target.files[0]
+    if (!file) return
+    setError(''); setCsvResult(null)
+    const form = new FormData(); form.append('file', file)
+    try {
+      const result = await api('/assets/import-csv', { method: 'POST', body: form })
+      setCsvResult(result)
+      onChanged(`CSV에서 자산 ${result.created}건을 등록했습니다.`)
+    } catch (reason) { setError(reason.message) }
+    event.target.value = ''
+  }
   return (
     <section className="panel full-panel">
       <div className="panel-heading">
         <div><span className="eyebrow">Infrastructure</span><h2>인프라 자산</h2></div>
-        <button className="primary" onClick={() => setOpen(!open)}>{open ? '닫기' : '+ 자산 등록'}</button>
+        <div className="action-row">
+          {canEdit && <label className="file-button">CSV 등록<input type="file" accept=".csv,text/csv" onChange={importCsv} /></label>}
+          {canEdit && <button className="primary" onClick={() => setOpen(!open)}>{open ? '닫기' : '+ 자산 등록'}</button>}
+        </div>
       </div>
+      {csvResult && <div className="inline-result">전체 {csvResult.total_rows}행 · 성공 {csvResult.created} · 실패 {csvResult.failed}{csvResult.errors.map((item) => <small key={item.row}>{item.row}행 {item.asset_tag || '-'}: {item.message}</small>)}</div>}
       {open && (
         <form className="asset-form" onSubmit={submit}>
           <label>자산번호<input name="asset_tag" required placeholder="SRV-001" /></label>
@@ -141,7 +204,7 @@ function Assets({ assets, sites, onChanged }) {
                 <td>{typeText[asset.asset_type]}</td><td>{asset.manufacturer} {asset.model}</td>
                 <td>소프트웨어 {asset.software_count} · SBOM {asset.sbom_count}</td>
                 <td><RiskBadge level={asset.risk_level} /> <small>{asset.days_left === null ? '날짜 미입력' : `${asset.days_left}일`}</small></td>
-                <td><button className="table-button" disabled={!asset.ip_address || !asset.ssh_username} onClick={async () => {
+                <td><button className="table-button" disabled={!canEdit || !asset.ip_address || !asset.ssh_username} onClick={async () => {
                   try {
                     const job = await api(`/checks/assets/${asset.id}/run`, { method: 'POST' })
                     onChanged(job.status === 'SUCCESS' ? '인프라 점검을 완료했습니다.' : `점검 실패: ${job.failure_message}`)
@@ -157,7 +220,7 @@ function Assets({ assets, sites, onChanged }) {
   )
 }
 
-function Organization({ customers, sites, onChanged }) {
+function Organization({ customers, sites, onChanged, canEdit }) {
   const [error, setError] = useState('')
   async function createCustomer(event) {
     event.preventDefault(); setError('')
@@ -178,21 +241,21 @@ function Organization({ customers, sites, onChanged }) {
     <section className="split-grid">
       <article className="panel">
         <span className="eyebrow">Customer</span><h2>고객사 등록</h2>
-        <form className="vertical-form" onSubmit={createCustomer}>
+        {canEdit && <form className="vertical-form" onSubmit={createCustomer}>
           <label>고객사 코드<input name="customer_code" required placeholder="CUST-001" /></label>
           <label>고객사명<input name="name" required placeholder="시연 고객사" /></label>
           <button className="primary">고객사 저장</button>
-        </form>
+        </form>}
         <div className="simple-list">{customers.map((item) => <div key={item.id}><strong>{item.name}</strong><small>{item.customer_code} · 사이트 {item.site_count} · 자산 {item.asset_count}</small></div>)}</div>
       </article>
       <article className="panel">
         <span className="eyebrow">Site</span><h2>사이트 등록</h2>
-        <form className="vertical-form" onSubmit={createSite}>
+        {canEdit && <form className="vertical-form" onSubmit={createSite}>
           <label>고객사<select name="customer_id" required><option value="">선택</option>{customers.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
           <label>사이트 코드<input name="site_code" required placeholder="SEOUL-DC" /></label>
           <label>사이트명<input name="name" required placeholder="서울 전산실" /></label>
           <button className="primary" disabled={!customers.length}>사이트 저장</button>
-        </form>
+        </form>}
         {error && <p className="form-error">{error}</p>}
         <div className="simple-list">{sites.map((item) => <div key={item.id}><strong>{item.name}</strong><small>{item.customer_name} · 자산 {item.asset_count}</small></div>)}</div>
       </article>
@@ -218,7 +281,7 @@ function Checks({ checks }) {
   )
 }
 
-function Software({ software, assets, onCreated }) {
+function Software({ software, assets, onCreated, canEdit }) {
   const [open, setOpen] = useState(false)
   const [error, setError] = useState('')
   async function submit(event) {
@@ -238,7 +301,7 @@ function Software({ software, assets, onCreated }) {
     <section className="panel full-panel">
       <div className="panel-heading">
         <div><span className="eyebrow">Infrastructure software</span><h2>인프라 소프트웨어</h2></div>
-        <button className="primary" onClick={() => setOpen(!open)}>{open ? '닫기' : '+ 소프트웨어 등록'}</button>
+        {canEdit && <button className="primary" onClick={() => setOpen(!open)}>{open ? '닫기' : '+ 소프트웨어 등록'}</button>}
       </div>
       {open && (
         <form className="asset-form" onSubmit={submit}>
@@ -276,10 +339,13 @@ function Software({ software, assets, onCreated }) {
   )
 }
 
-function Sboms({ sboms, assets, onImported }) {
+function Sboms({ sboms, assets, onImported, canEdit }) {
   const [file, setFile] = useState(null)
   const [assetId, setAssetId] = useState('')
   const [error, setError] = useState('')
+  const [baseId, setBaseId] = useState('')
+  const [targetId, setTargetId] = useState('')
+  const [diff, setDiff] = useState(null)
   async function upload(event) {
     event.preventDefault()
     if (!file) return
@@ -292,7 +358,13 @@ function Sboms({ sboms, assets, onImported }) {
       onImported('SBOM을 분석해 저장했습니다.')
     } catch (reason) { setError(reason instanceof SyntaxError ? '올바른 JSON 파일이 아닙니다.' : reason.message) }
   }
+  async function compare() {
+    setError(''); setDiff(null)
+    try { setDiff(await api(`/sboms/${baseId}/compare/${targetId}`)) }
+    catch (reason) { setError(reason.message) }
+  }
   return (
+    <>
     <section className="split-grid sbom-grid">
       <article className="panel import-card">
         <span className="eyebrow">CycloneDX JSON</span><h2>SBOM 가져오기</h2>
@@ -301,7 +373,7 @@ function Sboms({ sboms, assets, onImported }) {
           <label className="file-drop"><input type="file" accept="application/json,.json" onChange={(e) => setFile(e.target.files[0])} /><b>{file ? file.name : 'JSON 파일 선택'}</b><small>CycloneDX 1.4 ~ 1.7</small></label>
           <label>연결할 인프라 자산<select value={assetId} onChange={(e) => setAssetId(e.target.value)}><option value="">연결하지 않음</option>{assets.map((asset) => <option key={asset.id} value={asset.id}>{asset.asset_tag} · {asset.name}</option>)}</select></label>
           {error && <p className="form-error">{error}</p>}
-          <button className="primary wide" disabled={!file}>분석 후 가져오기</button>
+          <button className="primary wide" disabled={!canEdit || !file}>분석 후 가져오기</button>
         </form>
       </article>
       <article className="panel">
@@ -318,10 +390,93 @@ function Sboms({ sboms, assets, onImported }) {
         </div>
       </article>
     </section>
+    <section className="panel compare-panel">
+      <div className="panel-heading"><div><span className="eyebrow">CHANGE ANALYSIS</span><h2>SBOM 버전 비교</h2></div></div>
+      <div className="compare-controls">
+        <label>기준 SBOM<select value={baseId} onChange={(event) => setBaseId(event.target.value)}><option value="">선택</option>{sboms.map((item) => <option value={item.id} key={item.id}>#{item.id} · {item.serial_number.slice(-12)}</option>)}</select></label>
+        <label>대상 SBOM<select value={targetId} onChange={(event) => setTargetId(event.target.value)}><option value="">선택</option>{sboms.map((item) => <option value={item.id} key={item.id}>#{item.id} · {item.serial_number.slice(-12)}</option>)}</select></label>
+        <button className="primary submit" disabled={!baseId || !targetId || baseId === targetId} onClick={compare}>비교</button>
+      </div>
+      {diff && <div className="diff-grid">
+        <DiffList title="추가" items={diff.added} />
+        <DiffList title="변경" items={diff.changed} />
+        <DiffList title="삭제" items={diff.removed} />
+        <article><b>동일</b><strong>{diff.unchanged_count}개</strong></article>
+      </div>}
+    </section>
+    </>
   )
 }
 
+function DiffList({ title, items }) {
+  return <article><b>{title}</b><strong>{items.length}개</strong>{items.slice(0, 5).map((item) => <small key={item.identity}>{item.name} {item.before_version || '-'} → {item.after_version || '-'}</small>)}</article>
+}
+
+function Security({ sboms, vulnerabilities, onChanged, canEdit }) {
+  const [sbomId, setSbomId] = useState('')
+  const [busy, setBusy] = useState(false)
+  async function scan() {
+    setBusy(true)
+    try {
+      const result = await api(`/vulnerabilities/scan/sbom/${sbomId}`, { method: 'POST' })
+      onChanged(`OSV 조회 완료: 취약점 연결 ${result.vulnerability_links}건`)
+    } catch (reason) { onChanged(reason.message, true) }
+    finally { setBusy(false) }
+  }
+  async function updateVex(linkId, status) {
+    try {
+      await api(`/vulnerabilities/${linkId}/vex`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) })
+      onChanged('VEX 상태를 변경했습니다.')
+    } catch (reason) { onChanged(reason.message, true) }
+  }
+  return <section className="panel full-panel">
+    <div className="panel-heading">
+      <div><span className="eyebrow">OSV + VEX</span><h2>소프트웨어 취약점</h2></div>
+      <div className="action-row"><select value={sbomId} onChange={(event) => setSbomId(event.target.value)}><option value="">SBOM 선택</option>{sboms.map((item) => <option value={item.id} key={item.id}>#{item.id} · 구성요소 {item.component_count}</option>)}</select><button className="primary" disabled={!canEdit || !sbomId || busy} onClick={scan}>{busy ? '조회 중…' : 'OSV 조회'}</button></div>
+    </div>
+    <div className="table-wrap"><table><thead><tr><th>OSV ID</th><th>구성요소</th><th>심각도</th><th>요약</th><th>VEX 상태</th></tr></thead>
+      <tbody>{vulnerabilities.map((item) => <tr key={item.link_id}><td><code>{item.osv_id}</code><small>{item.aliases.slice(0, 2).join(', ')}</small></td><td><strong>{item.component_name}</strong><small>{item.component_version}</small></td><td><span className={`severity severity-${item.severity.toLowerCase()}`}>{item.severity}</span></td><td>{item.summary || '설명 없음'}</td><td><select value={item.vex_status} disabled={!canEdit} onChange={(event) => updateVex(item.link_id, event.target.value)}><option value="AFFECTED">영향 있음</option><option value="NOT_AFFECTED">영향 없음</option><option value="FIXED">조치 완료</option><option value="UNDER_INVESTIGATION">조사 중</option></select></td></tr>)}{!vulnerabilities.length && <tr><td colSpan="5" className="empty">조회된 취약점이 없습니다. SBOM을 선택해 OSV 조회를 실행하세요.</td></tr>}</tbody>
+    </table></div>
+  </section>
+}
+
+function Operations({ notifications, auditLogs, users, onChanged, canEdit }) {
+  async function createUser(event) {
+    event.preventDefault()
+    try {
+      const data = Object.fromEntries(new FormData(event.currentTarget))
+      await api('/auth/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+      event.currentTarget.reset(); onChanged('사용자 계정을 만들었습니다.')
+    } catch (reason) { onChanged(reason.message, true) }
+  }
+  async function sendSummary() {
+    try {
+      const result = await api('/notifications/risk-summary', { method: 'POST' })
+      onChanged(result.status === 'SUCCESS' ? 'Teams에 위험 건수 요약을 보냈습니다.' : result.error_message)
+    } catch (reason) { onChanged(reason.message, true) }
+  }
+  async function getReport(path, filename) {
+    try { await download(path, filename); onChanged('PDF 보고서를 내려받았습니다.') }
+    catch (reason) { onChanged(reason.message, true) }
+  }
+  return <>
+    <section className="metric-grid operations-grid">
+      <article className="panel operation-card"><span className="eyebrow">REPORT</span><h2>PDF 보고서</h2><p>현재 위험 현황과 최근 점검 이력을 제출용 PDF로 생성합니다.</p><div className="action-row"><button className="primary" onClick={() => getReport('/reports/lifecycle.pdf', 'eolwatch-lifecycle.pdf')}>지원종료 보고서</button><button className="secondary" onClick={() => getReport('/reports/daily-checks.pdf', 'eolwatch-checks.pdf')}>점검 보고서</button></div></article>
+      <article className="panel operation-card"><span className="eyebrow">TEAMS WORKFLOWS</span><h2>운영 알림</h2><p>내부 식별정보를 제외한 위험 등급별 건수만 전송합니다.</p><button className="primary" disabled={!canEdit} onClick={sendSummary}>위험 요약 전송</button></article>
+    </section>
+    {canEdit && <section className="split-grid operations-section">
+      <article className="panel"><span className="eyebrow">ACCESS CONTROL</span><h2>사용자 관리</h2><form className="vertical-form" onSubmit={createUser}><label>아이디<input name="username" minLength="3" required /></label><label>초기 비밀번호<input name="password" type="password" minLength="10" required /></label><label>권한<select name="role"><option value="VIEWER">조회자</option><option value="ADMIN">관리자</option></select></label><button className="primary">계정 생성</button></form><div className="simple-list">{users.map((item) => <div key={item.id}><strong>{item.username}</strong><small>{item.role} · {item.active ? '사용 중' : '비활성'}</small></div>)}</div></article>
+      <article className="panel"><span className="eyebrow">DELIVERY HISTORY</span><h2>알림 전송 이력</h2><div className="simple-list">{notifications.map((item) => <div key={item.id}><strong>{item.event_type} · {item.status}</strong><small>{new Date(item.created_at).toLocaleString('ko-KR')} · {item.error_message || item.recipient_label}</small></div>)}{!notifications.length && <p className="empty">전송 이력이 없습니다.</p>}</div></article>
+    </section>}
+    {canEdit && <section className="panel full-panel audit-panel"><div className="panel-heading"><div><span className="eyebrow">AUDIT</span><h2>변경 감사 로그</h2></div><span className="subtle">최근 {auditLogs.length}건</span></div><div className="table-wrap"><table><thead><tr><th>시각</th><th>사용자</th><th>방식</th><th>경로</th><th>결과</th></tr></thead><tbody>{auditLogs.map((item) => <tr key={item.id}><td>{new Date(item.created_at).toLocaleString('ko-KR')}</td><td>{item.username}</td><td><code>{item.method}</code></td><td>{item.path}</td><td>{item.status_code}</td></tr>)}</tbody></table></div></section>}
+  </>
+}
+
 export default function App() {
+  const [user, setUser] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('eolwatch_user')) }
+    catch { return null }
+  })
   const [tab, setTab] = useState('overview')
   const [summary, setSummary] = useState(EMPTY_SUMMARY)
   const [assets, setAssets] = useState([])
@@ -330,19 +485,36 @@ export default function App() {
   const [customers, setCustomers] = useState([])
   const [sites, setSites] = useState([])
   const [checks, setChecks] = useState([])
+  const [vulnerabilities, setVulnerabilities] = useState([])
+  const [notifications, setNotifications] = useState([])
+  const [auditLogs, setAuditLogs] = useState([])
+  const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
-  async function load(message = '') {
+  const canEdit = user?.role === 'ADMIN'
+  async function load(message = '', isError = false) {
     try {
-      const [nextSummary, nextAssets, nextSoftware, nextSboms, nextCustomers, nextSites, nextChecks] = await Promise.all([api('/dashboard/summary'), api('/assets'), api('/software'), api('/sboms'), api('/customers'), api('/sites'), api('/checks')])
-      setSummary(nextSummary); setAssets(nextAssets); setSoftware(nextSoftware); setSboms(nextSboms); setCustomers(nextCustomers); setSites(nextSites); setChecks(nextChecks); setError(''); setMessage(message)
+      const [nextSummary, nextAssets, nextSoftware, nextSboms, nextCustomers, nextSites, nextChecks, nextVulnerabilities, nextNotifications, nextAuditLogs, nextUsers] = await Promise.all([
+        api('/dashboard/summary'), api('/assets'), api('/software'), api('/sboms'), api('/customers'), api('/sites'), api('/checks'), api('/vulnerabilities'), api('/notifications'),
+        canEdit ? api('/auth/audit-logs') : Promise.resolve([]), canEdit ? api('/auth/users') : Promise.resolve([]),
+      ])
+      setSummary(nextSummary); setAssets(nextAssets); setSoftware(nextSoftware); setSboms(nextSboms); setCustomers(nextCustomers); setSites(nextSites); setChecks(nextChecks); setVulnerabilities(nextVulnerabilities); setNotifications(nextNotifications); setAuditLogs(nextAuditLogs); setUsers(nextUsers)
+      setError(isError ? message : ''); setMessage(isError ? '' : message)
       if (message) setTimeout(() => setMessage(''), 2500)
-    } catch (reason) { setError(`API 연결 실패: ${reason.message}`) }
+    } catch (reason) {
+      if (reason.message.includes('로그인') || reason.message.includes('토큰')) logout()
+      else setError(`API 연결 실패: ${reason.message}`)
+    }
     finally { setLoading(false) }
   }
-  useEffect(() => { load() }, [])
+  function logout() {
+    localStorage.removeItem('eolwatch_token'); localStorage.removeItem('eolwatch_user'); setUser(null)
+  }
+  useEffect(() => { if (user) { setLoading(true); load() } }, [user?.id, user?.role])
+
+  if (!user) return <Login onLogin={setUser} />
 
   return (
     <div className="app-shell">
@@ -354,15 +526,17 @@ export default function App() {
           <button className={tab === 'assets' ? 'active' : ''} onClick={() => setTab('assets')}><span>□</span> 인프라 자산</button>
           <button className={tab === 'software' ? 'active' : ''} onClick={() => setTab('software')}><span>○</span> 인프라 SW</button>
           <button className={tab === 'sbom' ? 'active' : ''} onClick={() => setTab('sbom')}><span>◇</span> SBOM 관리</button>
+          <button className={tab === 'security' ? 'active' : ''} onClick={() => setTab('security')}><span>!</span> 취약점·VEX</button>
           <button className={tab === 'checks' ? 'active' : ''} onClick={() => setTab('checks')}><span>✓</span> 점검 이력</button>
+          <button className={tab === 'operations' ? 'active' : ''} onClick={() => setTab('operations')}><span>≡</span> 운영·보고서</button>
         </nav>
-        <div className="standard-note"><b>CycloneDX 기반</b><p>하드웨어와 소프트웨어의 관계를 추적합니다.</p><span>Spec 1.4–1.7</span></div>
+        <div className="standard-note"><b>{user.username}</b><p>{canEdit ? '관리자' : '조회자'} 권한으로 접속했습니다.</p><button className="logout" onClick={logout}>로그아웃</button></div>
       </aside>
       <main>
-        <header><div><span className="eyebrow">INFRASTRUCTURE LIFECYCLE</span><h1>{{ overview: '통합 현황', organization: '고객사와 사이트', assets: '인프라 자산', software: '인프라 소프트웨어', sbom: 'SBOM 관리', checks: '점검 이력' }[tab]}</h1></div><div className="today"><small>기준일</small><strong>{new Intl.DateTimeFormat('ko-KR', { dateStyle: 'long' }).format(new Date())}</strong></div></header>
+        <header><div><span className="eyebrow">INFRASTRUCTURE LIFECYCLE</span><h1>{{ overview: '통합 현황', organization: '고객사와 사이트', assets: '인프라 자산', software: '인프라 소프트웨어', sbom: 'SBOM 관리', security: '취약점과 VEX', checks: '점검 이력', operations: '운영과 보고서' }[tab]}</h1></div><div className="today"><small>기준일</small><strong>{new Intl.DateTimeFormat('ko-KR', { dateStyle: 'long' }).format(new Date())}</strong></div></header>
         {error && <div className="alert error">{error}</div>}
         {message && <div className="alert success">{message}</div>}
-        {loading ? <div className="loading">데이터를 불러오는 중입니다…</div> : tab === 'overview' ? <Overview summary={summary} /> : tab === 'organization' ? <Organization customers={customers} sites={sites} onChanged={load} /> : tab === 'assets' ? <Assets assets={assets} sites={sites} onChanged={load} /> : tab === 'software' ? <Software software={software} assets={assets} onCreated={load} /> : tab === 'checks' ? <Checks checks={checks} /> : <Sboms sboms={sboms} assets={assets} onImported={load} />}
+        {loading ? <div className="loading">데이터를 불러오는 중입니다…</div> : tab === 'overview' ? <Overview summary={summary} /> : tab === 'organization' ? <Organization customers={customers} sites={sites} onChanged={load} canEdit={canEdit} /> : tab === 'assets' ? <Assets assets={assets} sites={sites} onChanged={load} canEdit={canEdit} /> : tab === 'software' ? <Software software={software} assets={assets} onCreated={load} canEdit={canEdit} /> : tab === 'checks' ? <Checks checks={checks} /> : tab === 'security' ? <Security sboms={sboms} vulnerabilities={vulnerabilities} onChanged={load} canEdit={canEdit} /> : tab === 'operations' ? <Operations notifications={notifications} auditLogs={auditLogs} users={users} onChanged={load} canEdit={canEdit} /> : <Sboms sboms={sboms} assets={assets} onImported={load} canEdit={canEdit} />}
       </main>
     </div>
   )

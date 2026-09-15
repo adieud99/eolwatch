@@ -2,6 +2,18 @@
 
 대화형 명세는 서버 실행 후 <http://localhost:8000/docs>에서 확인한다.
 
+## 로그인
+
+`/health`와 로그인 API를 제외한 모든 API에는 Bearer 토큰이 필요하다. 조회자는 GET 요청만 사용할 수 있고 관리자는 등록·수정·점검·스캔을 실행할 수 있다.
+
+```bash
+curl -X POST http://localhost:8000/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"Eolwatch!2026"}'
+```
+
+응답의 `access_token`을 이후 요청에 `Authorization: Bearer 토큰값` 헤더로 전달한다.
+
 ## 자산 등록
 
 ```bash
@@ -100,4 +112,21 @@ curl -X POST http://localhost:8000/api/contracts \
     "service_level":"24x7",
     "asset_ids":[1]
   }'
+```
+
+## CSV·SBOM 비교·취약점·보고서
+
+```bash
+curl -X POST http://localhost:8000/api/assets/import-csv \
+  -H 'Authorization: Bearer 토큰값' \
+  -F 'file=@samples/assets-import.csv'
+
+curl -H 'Authorization: Bearer 토큰값' \
+  http://localhost:8000/api/sboms/1/compare/2
+
+curl -X POST -H 'Authorization: Bearer 토큰값' \
+  http://localhost:8000/api/vulnerabilities/scan/sbom/1
+
+curl -H 'Authorization: Bearer 토큰값' \
+  -o lifecycle.pdf http://localhost:8000/api/reports/lifecycle.pdf
 ```
