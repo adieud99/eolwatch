@@ -9,11 +9,11 @@
 .project-filters label { flex: 1; min-width: 140px; }
 .project-filters input, .project-filters select { width: 100%; }
 .project-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 20px 0 12px; }
-.project-summary > div { padding: 16px; border: 1px solid var(--line); border-radius: 6px; background: #f5f7f3; font-size: 12px; }
+.project-summary > div { padding: 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); font-size: 12px; }
 .project-summary p { margin: 10px 0; }
-.project-selected { background: #edf4ee; }
+.project-selected { background: var(--green-soft); }
 .project-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0; }
-.project-tabs [aria-selected="true"] { background: var(--green); color: white; }
+.project-tabs [aria-selected="true"] { background: var(--green); color: white; border-color: var(--green); }
 .project-comparison { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 16px; margin: 18px 0; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
 .project-comparison > div { flex: 1; min-width: 200px; }
 .project-pagination { display: flex; flex-wrap: wrap; gap: 14px; justify-content: space-between; align-items: center; margin: 18px 0; font-size: 12px; }

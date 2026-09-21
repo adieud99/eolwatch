@@ -12,7 +12,7 @@ function workPage(findings, url) {
 }
 
 function openHistoryView(name) {
-  fireEvent.click(screen.getByRole('button', { name: '▤ 검사 기록' }))
+  fireEvent.click(screen.getByRole('button', { name: '검사 기록' }))
   fireEvent.click(screen.getByRole('tab', { name }))
 }
 

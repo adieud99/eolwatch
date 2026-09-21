@@ -2,57 +2,31 @@
 .asset-editor-heading { display: flex; gap: .8rem; align-items: center; justify-content: space-between; flex-wrap: wrap; }
 .asset-editor-heading h3 { margin: 0; }
 .asset-editor-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .9rem; border: 0; padding: 1rem 0; margin: 0; }
-.asset-editor label { display: grid; gap: .35rem; font-size: .9rem; }
-.asset-editor input, .asset-editor select { width: 100%; box-sizing: border-box; min-height: 2.5rem; padding: .5rem; border: 1px solid #c7d1dc; border-radius: .4rem; background: #fff; color: #152b43; }
+.asset-editor label { display: grid; gap: .35rem; font-size: 12px; }
+.asset-editor input, .asset-editor select { width: 100%; box-sizing: border-box; min-height: 2.5rem; padding: .5rem; border: 1px solid var(--rule); border-radius: .4rem; background: #fff; color: var(--ink); }
 .asset-editor label.asset-editor-check { display: flex; align-items: center; }
 .asset-editor-check input { width: 1.1rem; min-height: 1.1rem; }
-.asset-editor-wide { grid-column: 1 / -1; }
-.asset-editor-wide .asset-editor-heading label { flex: 1; }
-.asset-editor-note { color: #51637a; font-size: .88rem; }
-.asset-editor-delete { border: 1px solid #d3a0a0; border-radius: .6rem; padding: 1rem; margin-top: 1rem; }
+.asset-editor-delete { border: 1px solid #e0b8b4; border-radius: .6rem; padding: 1rem; margin-top: 1rem; }
 .asset-editor-delete .asset-editor-heading { margin-top: 1rem; }
 .asset-editor-read { display: grid; grid-template-columns: 9rem 1fr; gap: .5rem; }
 .asset-editor-read > div { display: contents; }
 .asset-editor-read dd { margin: 0; overflow-wrap: anywhere; }
-.asset-detail-tabs { display: flex; flex-wrap: wrap; gap: .4rem; border-bottom: 1px solid #d9e1e8; margin: 1rem 0; }
-.asset-detail-tabs button { border: 0; border-bottom: 3px solid transparent; background: transparent; color: #51637a; padding: .55rem .7rem; cursor: pointer; }
-.asset-detail-tabs button.active { border-bottom-color: #236b8e; color: #153f57; font-weight: 700; }
-.asset-summary { display: grid; gap: .45rem; border: 1px solid #cbd9e4; border-radius: .5rem; padding: 1rem; background: #f6f9fb; }
-.asset-summary span { color: #51637a; }
+.asset-detail-tabs { display: flex; flex-wrap: wrap; gap: .4rem; border-bottom: 1px solid var(--line); margin: 1rem 0; }
+.asset-detail-tabs button { border: 0; border-bottom: 3px solid transparent; background: transparent; color: var(--muted); padding: .55rem .7rem; cursor: pointer; }
+.asset-detail-tabs button.active { border-bottom-color: var(--green); color: var(--green); font-weight: 700; }
+.asset-summary { display: grid; gap: .45rem; border: 1px solid var(--line); border-radius: .5rem; padding: 1rem; background: var(--bg); }
+.asset-summary span { color: var(--muted); }
 .asset-summary .action-row { margin-top: .4rem; }
-.asset-qr { display: grid; justify-items: center; gap: .4rem; margin-top: .8rem; padding: .8rem; background: #fff; border: 1px solid #d9e1e8; }
-.asset-qr small { text-align: center; overflow-wrap: anywhere; }
 .asset-related { padding: .4rem 0 1rem; }
 .asset-related h4 { margin: .4rem 0 .8rem; }
 .asset-related ul { display: grid; gap: .55rem; list-style: none; margin: 0; padding: 0; }
-.asset-related li { display: flex; flex-wrap: wrap; gap: .35rem .8rem; border-bottom: 1px solid #e2e8ee; padding: .55rem 0; }
-.asset-related li small, .asset-related li span { flex-basis: 100%; color: #51637a; }
-.asset-related-note { color: #51637a; }
-.asset-relation-map { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; border: 1px solid #d9e1e8; padding: .7rem; margin-bottom: .8rem; background: #f6f9fb; }
-.asset-relation-map > div { display: flex; flex-wrap: wrap; gap: .35rem; }
-.asset-relation-map b { background: #fff; border: 1px solid #c7d1dc; padding: .25rem .45rem; font-size: .85rem; }
-.asset-risk-history { margin-top: 1rem; border-top: 1px solid #d9e1e8; padding-top: .8rem; }
-.asset-risk-history h4 { margin: 0 0 .5rem; }
-.asset-risk-history ul { display: flex; flex-wrap: wrap; gap: .5rem; list-style: none; padding: 0; margin: 0; }
-.asset-risk-history li { display: grid; gap: .15rem; border: 1px solid #d9e1e8; padding: .45rem .6rem; }
-.asset-risk-history small { color: #51637a; }
-.asset-priority { display: grid; gap: .8rem; border: 1px solid #d8c99e; border-radius: .5rem; padding: 1rem; margin: 1rem 0; background: #fffaf0; }
-.asset-priority h3, .asset-priority p { margin: 0; }
-.asset-priority p { color: #6b6149; font-size: .9rem; }
-.asset-priority ol { display: grid; gap: .5rem; margin: 0; padding-left: 1.5rem; }
-.asset-priority li { display: grid; grid-template-columns: minmax(10rem, 1.3fr) 1fr 1.3fr auto; gap: .6rem; align-items: center; border-top: 1px solid #eadfbe; padding: .55rem 0; }
-.asset-priority li span, .asset-priority li small { color: #6b6149; }
-.asset-alerts { border: 1px solid #e7c5a1; background: #fff8f1; padding: 1rem; margin: 1rem 0; border-radius: .5rem; }
-.asset-alerts h3 { margin: 0 0 .6rem; }
-.asset-alerts ul { display: grid; gap: .45rem; margin: 0; padding: 0; list-style: none; }
-.asset-alerts li { display: grid; grid-template-columns: 1fr 1fr auto; gap: .6rem; align-items: center; border-top: 1px solid #f0dcc8; padding-top: .45rem; }
-.asset-alerts li span, .asset-alerts li small { color: #765c48; }
-@media (max-width: 680px) { .asset-alerts li { grid-template-columns: 1fr; } }
-@media (max-width: 780px) { .asset-priority li { grid-template-columns: 1fr 1fr; } }
-.asset-timeline { margin-top: 1.4rem; border-top: 1px solid #d9e1e8; padding-top: 1rem; }
+.asset-related li { display: flex; flex-wrap: wrap; gap: .35rem .8rem; border-bottom: 1px solid var(--line); padding: .55rem 0; }
+.asset-related li small, .asset-related li span { flex-basis: 100%; color: var(--muted); }
+.asset-related-note { color: var(--muted); }
+.asset-timeline { margin-top: 1.4rem; border-top: 1px solid var(--line); padding-top: 1rem; }
 .asset-timeline h4 { margin: 0 0 .8rem; }
 .asset-timeline ol { display: grid; gap: .7rem; list-style: none; margin: 0; padding: 0; }
-.asset-timeline li { display: grid; gap: .2rem; border-left: 3px solid #7397b8; padding: .55rem .8rem; background: #f6f9fb; }
-.asset-timeline li small { color: #51637a; }
-.asset-timeline li span { color: #253b52; font-size: .9rem; }
+.asset-timeline li { display: grid; gap: .2rem; border-left: 3px solid var(--green); padding: .55rem .8rem; background: var(--bg); }
+.asset-timeline li small { color: var(--muted); }
+.asset-timeline li span { color: var(--ink); font-size: .9rem; }
 @media (max-width: 680px) { .asset-editor-grid { grid-template-columns: 1fr; } }

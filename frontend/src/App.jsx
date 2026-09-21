@@ -705,11 +705,11 @@ export default function App() {
       <aside>
         <div className="brand"><span className="brand-mark">E</span><div><strong>EOLWatch</strong><small>Dev &amp; Infra Vulnerability Scan</small></div></div>
         <nav>
-          <button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}><span>⌁</span> 개요</button>
-          <button className={tab === 'dev' ? 'active' : ''} onClick={() => setTab('dev')}><span>▷</span> 개발 검사</button>
-          <button className={tab === 'infra' ? 'active' : ''} onClick={() => setTab('infra')}><span>□</span> 인프라 검사</button>
-          <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}><span>▤</span> 검사 기록</button>
-          <button className={tab === 'admin' ? 'active' : ''} onClick={() => setTab('admin')}><span>≡</span> 관리</button>
+          <button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>개요</button>
+          <button className={tab === 'dev' ? 'active' : ''} onClick={() => setTab('dev')}>개발 검사</button>
+          <button className={tab === 'infra' ? 'active' : ''} onClick={() => setTab('infra')}>인프라 검사</button>
+          <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}>검사 기록</button>
+          <button className={tab === 'admin' ? 'active' : ''} onClick={() => setTab('admin')}>관리</button>
         </nav>
         <div className="standard-note"><b>{user.username}</b><p>{canEdit ? '관리자' : '조회자'} 권한으로 접속했습니다.</p><button className="logout" onClick={logout}>로그아웃</button></div>
       </aside>
