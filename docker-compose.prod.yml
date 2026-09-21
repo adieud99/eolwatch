@@ -30,15 +30,24 @@ services:
       SSH_PRIVATE_KEY_PATH: /run/secrets/eolwatch_ssh_key
       SSH_KNOWN_HOSTS_PATH: /run/secrets/known_hosts
       SSH_STRICT_HOST_KEY: "true"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3); assert r.status == 200 and json.load(r)['status'] == 'ok'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
     depends_on:
       db:
         condition: service_healthy
     volumes:
       - ./secrets:/run/secrets:ro
+      - analysis_uploads:/var/lib/eolwatch/uploads
     restart: unless-stopped
 
   worker:
-    build: ./backend
+    build:
+      context: ./backend
+      target: analysis-worker
     command: ["python", "-m", "app.worker"]
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-eolwatch}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-eolwatch}
@@ -49,11 +58,18 @@ services:
       COLLECTION_HOUR: ${COLLECTION_HOUR:-8}
       COLLECTION_MINUTE: ${COLLECTION_MINUTE:-30}
       SCHEDULER_TIMEZONE: Asia/Seoul
+      ANALYSIS_SYFT_PATH: /opt/analysis-tools/syft
+      ANALYSIS_GRYPE_PATH: /opt/analysis-tools/grype
+      ANALYSIS_ARTIFACTS_DIR: /var/lib/eolwatch/analysis
+      ANALYSIS_CACHE_DIR: /var/cache/eolwatch
     volumes:
       - ./secrets:/run/secrets:ro
+      - analysis_uploads:/var/lib/eolwatch/uploads
+      - analysis_artifacts:/var/lib/eolwatch/analysis
+      - analysis_cache:/var/cache/eolwatch
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
 
   web:
@@ -80,5 +96,8 @@ services:
 
 volumes:
   postgres_data:
+  analysis_artifacts:
+  analysis_cache:
   caddy_data:
   caddy_config:
+  analysis_uploads:

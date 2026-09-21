@@ -31,15 +31,24 @@ services:
       SSH_STRICT_HOST_KEY: "true"
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3); assert r.status == 200 and json.load(r)['status'] == 'ok'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
     depends_on:
       db:
         condition: service_healthy
     volumes:
       - ./secrets:/run/secrets:ro
+      - analysis_uploads:/var/lib/eolwatch/uploads
     restart: unless-stopped
 
   worker:
-    build: ./backend
+    build:
+      context: ./backend
+      target: analysis-worker
     command: ["python", "-m", "app.worker"]
     environment:
       DATABASE_URL: postgresql+psycopg://eolwatch:eolwatch@db:5432/eolwatch
@@ -51,13 +60,20 @@ services:
       COLLECTION_MINUTE: "30"
       SCHEDULER_TIMEZONE: Asia/Seoul
       TEAMS_WEBHOOK_URL: ${TEAMS_WEBHOOK_URL:-}
+      ANALYSIS_SYFT_PATH: /opt/analysis-tools/syft
+      ANALYSIS_GRYPE_PATH: /opt/analysis-tools/grype
+      ANALYSIS_ARTIFACTS_DIR: /var/lib/eolwatch/analysis
+      ANALYSIS_CACHE_DIR: /var/cache/eolwatch
     depends_on:
       db:
         condition: service_healthy
       api:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - ./secrets:/run/secrets:ro
+      - analysis_uploads:/var/lib/eolwatch/uploads
+      - analysis_artifacts:/var/lib/eolwatch/analysis
+      - analysis_cache:/var/cache/eolwatch
     restart: unless-stopped
 
   web:
@@ -70,3 +86,6 @@ services:
 
 volumes:
   postgres_data:
+  analysis_artifacts:
+  analysis_cache:
+  analysis_uploads:

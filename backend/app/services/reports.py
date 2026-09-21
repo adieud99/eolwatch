@@ -12,7 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from .. import models
-from .risk import RISK_ORDER, lifecycle_risk
+from .lifecycle_overview import build_lifecycle_overview
+from .risk import lifecycle_risk
 
 
 FONT_NAME = "HYSMyeongJo-Medium"
@@ -34,12 +35,12 @@ def _new_document(title: str) -> tuple[BytesIO, canvas.Canvas, float]:
 
 def _line(document: canvas.Canvas, y: float, text: str, size: int = 9) -> float:
     _, height = A4
-    if y < 52:
-        document.showPage()
-        document.setFont(FONT_NAME, 9)
-        y = height - 48
     document.setFont(FONT_NAME, size)
     for part in wrap(text, width=78, break_long_words=True, replace_whitespace=False) or [""]:
+        if y < 52:
+            document.showPage()
+            document.setFont(FONT_NAME, size)
+            y = height - 48
         document.drawString(44, y, part)
         y -= size + 5
     return y
@@ -53,24 +54,14 @@ def _finish(buffer: BytesIO, document: canvas.Canvas) -> bytes:
 
 def lifecycle_report(db: Session) -> bytes:
     buffer, document, y = _new_document("EOLWatch 지원종료 위험 보고서")
-    rows: list[tuple[int, str]] = []
-    for asset in db.scalars(select(models.Asset).order_by(models.Asset.asset_tag)).all():
-        end_date = asset.support_end_date
-        if asset.model_release:
-            end_date = asset.model_release.security_end_date or asset.model_release.support_end_date or asset.model_release.eol_date or end_date
-        risk, days = lifecycle_risk(end_date)
-        rows.append((RISK_ORDER[risk], f"[{risk}] 자산 {asset.asset_tag} | {asset.name} | 종료일 {end_date or '미입력'} | {days if days is not None else '-'}일"))
-    for item in db.scalars(
-        select(models.ProductRelease)
-        .where(models.ProductRelease.product_type != "HARDWARE_MODEL")
-        .order_by(models.ProductRelease.name)
-    ).all():
-        end_date = item.security_end_date or item.support_end_date or item.eol_date
-        risk, days = lifecycle_risk(end_date)
-        rows.append((RISK_ORDER[risk], f"[{risk}] 소프트웨어 {item.name} {item.version} | 종료일 {end_date or '미입력'} | {days if days is not None else '-'}일"))
-    for _, text in sorted(rows, key=lambda value: (value[0], value[1])):
-        y = _line(document, y, text)
-    if not rows:
+    overview = build_lifecycle_overview(db)
+    y = _line(document, y, '집계: ' + overview['aggregation_basis']['lifecycle'])
+    y = _line(document, y, '기준일: ' + overview['aggregation_basis']['as_of_date'] + ' · ' + overview['aggregation_basis']['timezone'])
+    for item in overview['items']:
+        location = (' | ' + item['asset_tag']) if item.get('asset_tag') else ''
+        source = (' | SBOM #' + str(item['sbom_id'])) if item.get('sbom_id') else ''
+        y = _line(document, y, f"[{item['risk_level']}] {item['kind']} {item['name']} {item['version'] or ''}{location}{source} | 종료일 {item['end_date'] or '미입력'} | {item['days_left'] if item['days_left'] is not None else '-'}일")
+    if not overview['items']:
         _line(document, y, "등록된 자산과 소프트웨어가 없습니다.")
     return _finish(buffer, document)
 
@@ -93,4 +84,51 @@ def daily_check_report(db: Session) -> bytes:
         y = _line(document, y, f"{when} | {job.asset.asset_tag} {job.asset.name} | {job.status} | {detail}")
     if not jobs:
         _line(document, y, "저장된 점검 이력이 없습니다.")
+    return _finish(buffer, document)
+
+
+def asset_report(db: Session, asset_id: int) -> bytes | None:
+    asset = db.scalar(select(models.Asset).where(models.Asset.id == asset_id))
+    if not asset:
+        return None
+    buffer, document, y = _new_document(f"EOLWatch 자산 보고서 · {asset.name}")
+    model_end = None
+    if asset.model_release:
+        model_end = asset.model_release.security_end_date or asset.model_release.support_end_date or asset.model_release.eol_date
+    risk_level, days_left = lifecycle_risk(model_end or asset.support_end_date)
+    y = _line(document, y, f"자산번호: {asset.asset_tag} | 자산명: {asset.name} | 유형: {asset.asset_type}")
+    y = _line(document, y, f"제조사/모델: {asset.manufacturer or '-'} / {asset.model or '-'} | 시리얼: {asset.serial_number or '-'}")
+    y = _line(document, y, f"위치: {asset.site or '-'} {asset.building or ''} {asset.floor or ''}층 {asset.room or ''} {asset.rack or ''} {asset.rack_position or ''}")
+    y = _line(document, y, f"운영 상태: {asset.operational_status} | 서비스 중요도: {asset.service_criticality} | 담당자: {asset.owner_name or '-'}")
+    y = _line(document, y, f"구매일: {asset.purchase_date or '-'} | 구매가격: {asset.purchase_price or '-'}원 | 전력: {asset.power_watts or '-'}W")
+    y = _line(document, y, f"지원 상태: {risk_level} | 지원 종료까지: {days_left if days_left is not None else '-'}일 | 보증 종료: {asset.warranty_end_date or '-'}")
+    y = _line(document, y, f"내부 위험도: {getattr(asset, 'service_criticality', 'STANDARD')} 기준으로 산정된 자산 우선순위 요약")
+    y = _line(document, y, "설치 소프트웨어", 11)
+    deployments = db.scalars(select(models.Deployment).where(models.Deployment.asset_id == asset_id).options(joinedload(models.Deployment.software_product))).all()
+    for deployment in deployments:
+        product = deployment.software_product
+        y = _line(document, y, f"- {product.name} {product.version} | {product.vendor or '-'} | {deployment.environment}")
+    if not deployments:
+        y = _line(document, y, "- 등록된 설치 소프트웨어 없음")
+    y = _line(document, y, "SBOM", 11)
+    sboms = db.scalars(select(models.SbomDocument).where(models.SbomDocument.asset_id == asset_id).order_by(models.SbomDocument.imported_at.desc())).all()
+    for sbom in sboms[:10]:
+        y = _line(document, y, f"- SBOM #{sbom.id} {sbom.bom_format} {sbom.spec_version} | 구성요소 {sbom.component_count}개 | 의존관계 {sbom.dependency_count}개")
+    if not sboms:
+        y = _line(document, y, "- 연결된 SBOM 없음")
+    y = _line(document, y, "유지보수 계약", 11)
+    contract_links = db.scalars(select(models.ContractAsset).where(models.ContractAsset.asset_id == asset_id)).all()
+    for link in contract_links:
+        contract = db.get(models.Contract, link.contract_id)
+        if contract:
+            y = _line(document, y, f"- {contract.contract_no} | {contract.provider} | {contract.start_date} ~ {contract.end_date} | {contract.annual_cost or '-'}원")
+    if not contract_links:
+        y = _line(document, y, "- 연결된 유지보수 계약 없음")
+    y = _line(document, y, "최근 자산 이력", 11)
+    jobs = db.scalars(select(models.AnalysisJob).where(models.AnalysisJob.asset_id == asset_id).order_by(models.AnalysisJob.requested_at.desc()).limit(10)).all()
+    for job in jobs:
+        y = _line(document, y, f"- 분석 작업 #{job.id} | {job.status} | {job.requested_at}")
+    if not jobs:
+        y = _line(document, y, "- 분석 이력 없음")
+    y = _line(document, y, "본 보고서의 취약점·지원 종료 결과는 저장된 분석과 등록된 일정 기준이며, 자동 패치나 실제 공격 가능성의 판정이 아닙니다.", 8)
     return _finish(buffer, document)

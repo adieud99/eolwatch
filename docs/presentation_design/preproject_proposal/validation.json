@@ -1,0 +1,26 @@
+{
+  "source": "/Users/adieu/Desktop/학교/폴리텍/최종과제/과제관련/EOLWatch_요약서_김연동_베이스반영.pptx",
+  "base": "/Users/adieu/Desktop/학교/폴리텍/최종과제/과제관련/ppt베이스4.pptx",
+  "output": "/Users/adieu/Desktop/학교/폴리텍/최종과제/eolwatch/docs/presentation_design/preproject_proposal/EOLWatch_프로젝트제안요약서_김연동.pptx",
+  "slides_including_cover": 4,
+  "purpose": "pre-project proposal to SysOne",
+  "base_slide_mapping": {
+    "2": 3,
+    "3": 7,
+    "4": 4
+  },
+  "original_hashes": {
+    "/Users/adieu/Desktop/학교/폴리텍/최종과제/과제관련/EOLWatch_요약서_김연동_베이스반영.pptx": "b448cac9e86b2eb1d8e5d58caad0a76a9f69b052adba76d18ea055f014f2b04f",
+    "/Users/adieu/Desktop/학교/폴리텍/최종과제/과제관련/ppt베이스4.pptx": "c0b64bf243ae37143d77b2485762905deb3293d7bff6ef80aaa582298d33afbd"
+  },
+  "sources_unchanged": true,
+  "all_speaker_notes_rewritten": true,
+  "completed_results_removed": true,
+  "relationships_valid": true,
+  "text_widths_checked": true,
+  "unused_media_removed": [
+    "ppt/media/image1.png",
+    "ppt/media/image2.png"
+  ],
+  "preview": "Separate layout rendering with original title font via CoreText"
+}

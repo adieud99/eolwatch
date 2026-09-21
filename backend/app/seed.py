@@ -5,8 +5,8 @@ from sqlalchemy import select
 from . import models
 from .config import get_settings
 from .db import Base, SessionLocal, engine
-from .services.collector import packages_to_cyclonedx
-from .services.sbom import import_cyclonedx
+from .services.collector import packages_to_spdx
+from .services.sbom import import_spdx
 
 
 def get_or_create(db, model, defaults=None, **lookup):
@@ -21,17 +21,28 @@ def get_or_create(db, model, defaults=None, **lookup):
 
 def seed() -> None:
     Base.metadata.create_all(bind=engine)
-    target_ips = get_settings().demo_target_ip_list or ["10.0.1.11", "10.0.1.12", "10.0.1.13"]
+    target_ips = get_settings().demo_target_ip_list or ["10.77.0.21", "10.77.0.22"]
     with SessionLocal() as db:
         customer = get_or_create(db, models.Customer, customer_code="DEMO", defaults={"name": "시스원 인프라 시연 고객사"})
-        site = get_or_create(db, models.Site, customer_id=customer.id, site_code="AWS-SEOUL", defaults={"name": "AWS 서울 리전"})
+        site = get_or_create(db, models.Site, customer_id=customer.id, site_code="LOCAL-LAB", defaults={"name": "VirtualBox 시연망"})
 
         models_and_assets = [
-            ("AWS", "EC2 t4g.micro", None, None, "AWS-TARGET-001", "점검 대상 서버 1", target_ips[0] if len(target_ips) > 0 else None, "cloud", True),
-            ("AWS", "EC2 t4g.micro", None, None, "AWS-TARGET-002", "점검 대상 서버 2", target_ips[1] if len(target_ips) > 1 else None, "cloud", True),
-            ("AWS", "EC2 t4g.micro", None, None, "AWS-TARGET-003", "점검 대상 서버 3", target_ips[2] if len(target_ips) > 2 else None, "cloud", True),
-            ("Cisco", "Catalyst 2960X-24TS-L", date(2027, 10, 31), "https://www.cisco.com/c/en/us/products/collateral/switches/catalyst-2960-x-series-switches/eos-eol-notice-c51-744432.html", "DEMO-NET-001", "시연 코어 스위치", None, "network", False),
+            (
+                "VirtualBox",
+                "Ubuntu 24.04 VM",
+                None,
+                None,
+                f"LAB-VM-{index:02d}",
+                f"시연 대상 VM {index}",
+                address,
+                "vm",
+                True,
+            )
+            for index, address in enumerate(target_ips, 1)
         ]
+        models_and_assets.append(
+            ("Cisco", "Catalyst 2960X-24TS-L", date(2027, 10, 31), "https://www.cisco.com/c/en/us/products/collateral/switches/catalyst-2960-x-series-switches/eos-eol-notice-c51-744432.html", "DEMO-NET-001", "시연 코어 스위치", None, "network", False)
+        )
         assets = []
         for vendor, model_name, end_date, source_url, asset_tag, asset_name, ip_address, asset_type, monitored in models_and_assets:
             release = None
@@ -71,12 +82,12 @@ def seed() -> None:
             db,
             models.ProductRelease,
             product_type="OS",
-            vendor="Amazon Web Services",
-            name="Amazon Linux",
-            version="2023",
+            vendor="Canonical",
+            name="Ubuntu Server",
+            version="24.04 LTS",
             defaults={
-                "support_end_date": date(2029, 6, 30),
-                "lifecycle_source_url": "https://docs.aws.amazon.com/linux/al2023/release-notes/support-information.html",
+                "support_end_date": date(2029, 5, 31),
+                "lifecycle_source_url": "https://ubuntu.com/about/release-cycle",
                 "verified_at": datetime.now(timezone.utc),
             },
         )
@@ -95,12 +106,12 @@ def seed() -> None:
         postgres_release.support_end_date = date(2028, 11, 9)
         postgres_release.lifecycle_source_url = "https://www.postgresql.org/support/versioning/"
         postgres_release.verified_at = datetime.now(timezone.utc)
-        for asset in assets[:3]:
+        for asset in assets[: len(target_ips)]:
             get_or_create(db, models.Deployment, asset_id=asset.id, software_product_id=os_release.id)
         db.commit()
 
         if not db.scalar(select(models.SbomDocument).where(models.SbomDocument.asset_id == assets[0].id)):
-            document = packages_to_cyclonedx(
+            document = packages_to_spdx(
                 assets[0],
                 [
                     {"name": "openssl", "version": "3.0.2"},
@@ -109,8 +120,8 @@ def seed() -> None:
                 ],
                 datetime.now(timezone.utc),
             )
-            import_cyclonedx(db, document, asset_id=assets[0].id)
-    print("시연 데이터 생성 완료: 고객사 1, 사이트 1, 자산 4, SBOM 1")
+            import_spdx(db, document, asset_id=assets[0].id)
+    print(f"시연 데이터 생성 완료: 고객사 1, 사이트 1, 자산 {len(assets)}, SBOM 1")
 
 
 if __name__ == "__main__":

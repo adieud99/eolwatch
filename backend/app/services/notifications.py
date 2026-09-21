@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import httpx
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import models
 from ..config import get_settings
-from .risk import RISK_ORDER, lifecycle_risk
+from .lifecycle_overview import build_lifecycle_overview
 
 
 def _card(title: str, lines: list[str]) -> dict:
@@ -61,23 +60,15 @@ def send_teams(db: Session, event_type: str, title: str, lines: list[str]) -> mo
 
 
 def send_risk_summary(db: Session) -> models.NotificationDelivery:
-    counts = {level: 0 for level in RISK_ORDER}
-    for asset in db.scalars(select(models.Asset)).all():
-        end_date = asset.support_end_date
-        if asset.model_release:
-            end_date = asset.model_release.security_end_date or asset.model_release.support_end_date or asset.model_release.eol_date or end_date
-        risk, _ = lifecycle_risk(end_date)
-        counts[risk] += 1
-    for product in db.scalars(
-        select(models.ProductRelease).where(models.ProductRelease.product_type != "HARDWARE_MODEL")
-    ).all():
-        risk, _ = lifecycle_risk(product.security_end_date or product.support_end_date or product.eol_date)
-        counts[risk] += 1
+    overview = build_lifecycle_overview(db)
+    counts = overview['risk_counts']
     lines = [
         f"지원종료: {counts['EXPIRED']}건",
         f"긴급: {counts['CRITICAL']}건",
         f"주의: {counts['WARN']}건",
         f"안전: {counts['SAFE']}건",
         f"미확인: {counts['UNKNOWN']}건",
+        '집계: ' + overview['aggregation_basis']['lifecycle'],
+        '기준일: ' + overview['aggregation_basis']['as_of_date'] + ' · ' + overview['aggregation_basis']['timezone'],
     ]
     return send_teams(db, "RISK_SUMMARY", "EOLWatch 위험 건수 요약", lines)

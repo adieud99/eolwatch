@@ -1,127 +1,69 @@
-# EOLWatch 기술 스택 선정
+# EOLWatch 기술 스택과 선정 이유
 
-## 1. 최종 선정안
+기준일: 2026-09-15. **실행 가능한 웹 분석 MVP의 현재 코드**를 기준으로 한다. 프로젝트 전체의 개발 완료나 실무 배포 준비 완료를 뜻하지 않는다.
 
-### 애플리케이션
+## 1. 현재 사용하는 기술
 
-| 영역 | 기술 | 상태 | 선정 이유 |
-|---|---|---|---|
-| 백엔드 언어 | Python 3.12 | 사용 | SSH 수집, 데이터 처리, PDF 생성까지 한 언어로 구현 가능 |
-| API | FastAPI 0.116 | 사용 | 타입 기반 검증과 OpenAPI 문서 자동 생성, 비동기 외부 API 연동 |
-| 데이터 검증 | Pydantic 2 | 사용 | 자산 입력과 CycloneDX 문서 경계 검증 |
-| ORM | SQLAlchemy 2 | 사용 | PostgreSQL 관계와 트랜잭션을 명시적으로 관리 |
-| DB 마이그레이션 | Alembic 1.16 | 사용 | ERD 변경을 SQL 이력으로 남기고 운영 DB를 안전하게 변경 |
-| 프런트엔드 | React 19 | 사용 | 자산·위험도·SBOM 관계를 컴포넌트 단위로 표현 |
-| 빌드 도구 | Vite 8 | 사용 | 빠른 개발 서버와 작은 설정 범위 |
-| 차트 | Recharts | 도입 예정 | 위험도 분포와 점검 추이를 React 안에서 구현 |
-| 데이터베이스 | PostgreSQL 16 | 사용 | 관계형 무결성, JSONB 원문 보존, 날짜·집계 질의 지원 |
-
-### 인프라 수집과 SBOM
-
-| 영역 | 기술 | 상태 | 선정 이유 |
-|---|---|---|---|
-| SBOM 표준 | CycloneDX JSON 1.7 | 사용 | 소프트웨어·하드웨어·서비스와 의존관계를 같은 BOM 모델로 확장 가능 |
-| 호환 가져오기 | CycloneDX JSON 1.4~1.7 | 사용 | 기존 생성 도구가 만든 문서를 수용 |
-| SBOM 생성 | cyclonedx-python-lib | 도입 예정 | SSH에서 얻은 패키지 목록을 CycloneDX 객체로 안전하게 직렬화 |
-| 원격 수집 | Paramiko SSH | 사용 | 고객 대상 서버에 EOLWatch 전용 에이전트를 설치하지 않고 조회 명령 실행 |
-| AWS 대상 수집 | AWS Systems Manager Run Command | 선택 | 공개 SSH와 개인키 관리 없이 EC2 명령 실행 |
-| 스케줄 | APScheduler | 사용 | 단일 서비스 EC2에서 일일 작업을 실행하기에 충분하며 Redis가 필요 없음 |
-| 취약점 | OSV API | 선택 | purl 기반 오픈소스 취약점 조회, MVP 이후 추가 |
-| 영향 상태 | CycloneDX VEX | 선택 | 탐지된 취약점이 실제 환경에 영향을 주는지 상태 기록 |
-
-### 배포와 운영
-
-| 영역 | 기술 | 상태 | 선정 이유 |
-|---|---|---|---|
-| 컨테이너 | Docker Compose | 사용 | API·웹·DB·수집기를 한 서버에서 재현 가능하게 구성 |
-| 리버스 프록시 | Caddy 2 | 구성 완료 | HTTPS 인증서 발급·갱신과 HTTP→HTTPS 전환 자동화 |
-| 클라우드 | AWS EC2 | 배포 예정 | 외부 시연 환경과 점검 대상 EC2를 같은 계정에서 구성 |
-| IaC | Terraform | 구성·검증 완료 | VPC·보안그룹·EC2·S3 구성을 코드로 재생성 |
-| 비밀정보 | SSM Parameter Store | 배포 시 추가 | SSH 키, DB 비밀번호, Teams URL을 코드와 분리 |
-| 백업 | pg_dump + S3 | 스크립트 완료 | PostgreSQL 논리 백업과 인스턴스 외부 보관 |
-| 로그 | Python logging + Docker logs + CloudWatch | 배포 시 추가 | 앱·수집 실패 로그를 분리하고 외부에서 확인 |
-| PDF | WeasyPrint | 도입 예정 | HTML/CSS 양식을 일일 점검·교체 계획 PDF로 재사용 |
-| 알림 | Microsoft Teams Workflows Webhook | 도입 예정 | Adaptive Card로 EOL과 점검 실패 알림 전송 |
-| CI/CD | GitHub Actions | CI 구성 완료 | 테스트와 빌드가 성공한 커밋만 EC2에 배포 |
-
-### 품질과 보안
-
-| 영역 | 기술 | 적용 내용 |
+| 역할 | 실제 기술·버전 | 맡는 일 |
 |---|---|---|
-| 백엔드 테스트 | pytest + FastAPI TestClient | 위험도 경계값, 자산·SBOM API, DB 관계 검증 |
-| 프런트 테스트 | Vitest | 주요 계산·화면 상태 테스트 |
-| E2E | Playwright | 로그인→자산 등록→SBOM 업로드→대시보드 흐름 1개 |
-| 코드 품질 | Ruff | Python 포맷·린트·import 정리 |
-| 인증 | JWT + Argon2 | 짧은 access token, 관리자·조회자 RBAC |
-| SBOM 검증 | CycloneDX JSON Schema | 지원 버전과 구조 검증, 파일 크기 제한 |
-| 감사 | 애플리케이션 audit log | 로그인과 자산·EOL·SBOM 변경 전후 기록 |
+| 언어·런타임 | Python 3.12 / Node 22 | API·worker·문서 처리 / 프런트 빌드 |
+| API | FastAPI 0.116.1, Uvicorn 0.35.0 | HTTP 요청·응답, OpenAPI |
+| 입력 검증 | Pydantic 2.13.5, jsonschema 4.25.1 | 자산·분석 범위·보고서 입력과 공식 SBOM 구조 검사 |
+| ORM·마이그레이션 | SQLAlchemy 2.0.43, Alembic 1.16.5 | 관계·트랜잭션·DB 변경 이력 |
+| DB | PostgreSQL 16 / 테스트용 SQLite | 자산·작업·SBOM·CVE·원본 JSON 보관 |
+| 웹 | React 19.3.0, Vite 8.3.0 | 대상 선택·진행 상태·CVE·전후 비교·보고서 다운로드 |
+| 수집 | Paramiko 5.0.0, Syft 1.51.1 | 키 기반 SSH 접속과 설치 구성요소 식별 |
+| SBOM | SPDX 2.3 JSON | 분석 경로의 기준 교환 형식. CycloneDX 1.4~1.7 반입도 유지 |
+| 취약점 대조 | Grype 0.118.0 | SPDX 구성요소와 취약점 DB 대조, CVE 보고서 생성 |
+| 작업 실행 | APScheduler 3.11.0 + DB 작업 큐 | 기본 3초 큐 확인, 별도 일일 SSH 상태 점검 |
+| PDF | ReportLab 4.4.4, 번들 Nanum Gothic 글꼴 | 한글 비교 PDF·기존 점검/지원종료 보고서 |
+| 웹 제공 | Nginx 1.27 계열, Docker Compose | 정적 웹·API 프록시, API·worker·DB 배치 |
+| 시연 VM | VirtualBox, Ubuntu 24.04 ARM64 | 노트북 안의 관리 VM 1대와 대상 VM 2대 |
+| 테스트 | pytest, FastAPI TestClient, Vitest, Testing Library | 서비스·API·실패 처리·화면 상호작용 검증 |
 
-## 2. 선택 이유
+정확한 운영 Python 패키지는 [requirements.txt](../backend/requirements.txt), 테스트 패키지는 [requirements-dev.txt](../backend/requirements-dev.txt), Node 패키지는 [package.json](../frontend/package.json)과 lockfile을 기준으로 한다. 업로드 파서는 python-multipart 0.0.31이며 Python 3.12 컨테이너에서 검증한다. [의존성 변경 근거](DEPENDENCY_REMEDIATION.md)를 참고한다. DB 원본 컬럼은 SQLAlchemy `JSON`이며 JSONB라고 가정하지 않는다. Docker 기본 이미지는 일부 계열 태그를 사용하므로 모든 이미지가 digest로 고정됐다고 설명하지 않는다.
 
-### FastAPI + SQLAlchemy
+## 2. 이 구성을 선택한 이유
 
-수집기와 API가 모두 Python이므로 언어를 나누지 않는다. FastAPI는 요청 스키마와 API 문서를 같이 관리할 수 있고, SQLAlchemy는 고객·사이트·자산·제품·SBOM의 여러 관계를 명시적으로 표현한다. 현재 구현처럼 시작 시 `create_all()`을 호출하는 방식은 개발 초기까지만 사용하고, 목표 ERD로 전환하기 전에 Alembic 마이그레이션으로 바꾼다.
+### 웹과 별도 worker
 
-### PostgreSQL
+여러 서버의 결과·조치 정보를 한곳에서 확인하기 위해 브라우저를 관리 화면으로 사용한다. 스캔은 API 요청보다 오래 걸리므로 API가 DB에 작업을 넣고 별도 worker가 처리한다. 화면 이동·새로고침과 분석 실행을 분리하고 진행·실패·재시도 이력을 남길 수 있다.
 
-핵심 데이터는 관계형이다. 고객→사이트→자산, 자산→설치 제품, SBOM→구성요소→의존관계에 FK와 유일성 제약이 필요하다. 동시에 CycloneDX 원본, 가변적인 디스크·프로세스 결과는 JSONB가 적합하다. MongoDB를 함께 두지 않고 PostgreSQL 한 개로 처리해 운영 부담을 줄인다.
+### 기존 분석 도구와 자체 관리 기능
 
-### React
+Syft의 구성요소 식별과 Grype의 취약점 대조를 활용한다. 직접 만든 부분은 대상 자산 연결, 범위 제한, 실행 제어·실패 복구, 원본 검증·저장, CVE 조회, 전후 비교와 보고서다. Black Duck은 기능 영역의 비교·선택적 SPDX 반입 대상으로 두며 계정·서버를 요구하지 않는다.
 
-대시보드는 자산 표, 위험도 카드, SBOM 품질, 구성요소 영향 관계를 반복해서 갱신해야 한다. React로 화면 상태를 관리하고 Recharts로 위험도와 점검 추이를 표시한다. Next.js의 서버 렌더링은 내부 업무용 대시보드에 필요하지 않아 사용하지 않는다.
+### PostgreSQL과 원본 보관
 
-### APScheduler
+자산→SBOM→구성요소→CVE 관계에는 FK·고유 제약·트랜잭션을 적용한다. 작업 성공과 분석 결과 저장을 하나의 트랜잭션으로 처리해 부분 저장을 막는다. 조회용 연결 값과 각 분석의 원본 JSON을 함께 보관하므로 수동 VEX 변경 후에도 원본 전후 비교가 가능하다.
 
-최종 배포는 서비스 인스턴스 한 대이므로 분산 작업 큐가 필요하지 않다. APScheduler가 매일 점검, EOL 재계산, 백업, 리포트를 실행한다. 향후 수집 대상이 수백 대로 늘고 워커 수평 확장이 필요할 때 Celery·Redis 또는 AWS EventBridge/SQS로 교체한다.
+### DB 작업 큐와 APScheduler
 
-### SSH와 Systems Manager
+현재 규모는 관리 VM 한 대와 대상 두 대다. 별도 Redis·Celery를 추가하지 않고 `analysis_jobs`와 worker의 주기 실행을 사용한다. 고유 활성 자산 값, 작업 확보, 소유권 토큰과 heartbeat를 사용한다. 이는 대규모 분산 큐의 성능을 검증했다는 뜻이 아니다. APScheduler가 현재 예약하는 것은 분석 큐 확인과 일일 인프라 점검이다.
 
-일반 고객사·실습 서버는 Paramiko로 읽기 전용 SSH 수집을 수행한다. AWS 시연용 EC2는 Systems Manager Run Command를 선택할 수 있다. AWS는 Systems Manager를 사용하면 공개 SSH/RDP와 직접 자격증명 관리를 줄일 수 있다고 안내한다.
+### 제한된 SSH 수집 범위
 
-### Teams Workflows
+Ubuntu dpkg와 고정 Python 가상환경을 먼저 지원해 수집 범위를 검증할 수 있게 했다. 상주하는 자체 에이전트 대신 요청 때 Syft를 실행하지만, 대상 사용자 디렉터리에 도구·임시 파일을 배치한다. 실행 도구 체크섬, known_hosts 검증, 시간·출력 크기 제한을 적용한다. 임의 프로그램 업로드나 임의 경로 실행은 제공하지 않는다.
 
-기존 Microsoft 365 Connector 방식의 Incoming Webhook은 폐기 단계이므로 새 구현에 사용하지 않는다. Teams Workflows의 `When a Teams webhook request is received` 트리거로 HTTP 요청을 받고 Adaptive Card를 채널에 게시한다. Workflow 소유자가 퇴사하거나 계정이 비활성화되면 중단될 수 있어 공동 소유자를 지정한다.
+### ReportLab
 
-## 3. 사용하지 않는 기술
+저장된 비교 자료를 API에서 PDF로 만든다. 번들 한글 글꼴을 사용하고 원격 URL을 가져오지 않으며 분석 범위·원본 식별·제한 사항을 함께 담는다. 같은 자료의 JSON도 내려받아 구조화된 결과를 확인할 수 있다. 비교·보고서 요청은 VEX를 자동 변경하지 않는다.
 
-| 기술 | 제외 이유 |
-|---|---|
-| Kubernetes | 단일 EC2와 1인 프로젝트에 운영 복잡도가 지나치게 큼 |
-| Prometheus + Grafana | EOL·계약·SBOM이 핵심이며 초 단위 모니터링은 범위 밖 |
-| Elasticsearch | 자산 500건, 점검 대상 20대 목표에서는 PostgreSQL 검색으로 충분 |
-| MongoDB | 관계 무결성이 중요한 구조이며 DB를 두 종류 운영할 이유가 없음 |
-| Celery + Redis | 단일 스케줄러로 처리 가능한 규모이며 장애 지점이 늘어남 |
-| 상시 설치형 자체 에이전트 | 고객 서버 설치·업데이트·권한 승인 부담이 생김 |
-| SPDX 동시 지원 | 6주 안에 두 표준의 파서와 검증을 모두 안정화하기 어려움 |
+## 3. 인증과 운영의 실제 수준
 
-## 4. 버전 및 재현 정책
+- 비밀번호는 Python 표준 라이브러리의 **PBKDF2-HMAC-SHA256**과 개별 salt를 사용한다. 기존 문서의 Argon2 표기는 현재 코드와 다르다.
+- 액세스 토큰은 HS256 JWT이며 ADMIN/VIEWER와 활성 계정 여부를 검사한다. 사용자·감사 로그 조회는 ADMIN 전용이다.
+- SSH 개인키·known_hosts는 파일 마운트로 전달한다. 현재 VM이 SSM Parameter Store로 비밀정보를 주입하는 구성은 아니다.
+- 성공한 로그인·변경 요청을 감사 로그에 남긴다. 변경 전후 전체 데이터가 모두 저장된다고 보장하지 않는다.
+- GitHub Actions는 백엔드 검사·마이그레이션, 프런트 검사·빌드, 컨테이너 빌드를 구성한다. 현재 워크플로에는 EC2 자동 배포 단계가 없다.
+- 실제 Chrome 조작 검증과 자동 테스트를 함께 사용했다. 저장소에 모든 흐름의 Playwright E2E나 Ruff 검사가 이미 구성됐다고 설명하지 않는다.
 
-- Python 패키지는 `requirements.txt`에 정확한 버전을 고정한다.
-- Node 패키지는 `package-lock.json`을 배포 기준으로 사용한다.
-- Docker 이미지는 발표 버전 확정 시 major 태그 대신 patch 또는 digest로 고정한다.
-- CycloneDX 신규 생성 문서는 1.7 JSON을 기준으로 한다.
-- CycloneDX 2.0은 안정 버전과 사용 도구 지원이 확인된 뒤 검토한다.
-- 매주 Dependabot 또는 수동 점검으로 의존성 변경을 확인하되 발표 직전 대규모 업그레이드는 피한다.
+조치 책임·기한·메모·근거 스냅샷은 새 조치 이력 API와 버전 기반 동시 수정 제어로 구현하고 검증을 진행한다. 실무를 위한 고객사별 권한 격리, 로그인 실패 제한, 최소 SSH 권한과 복구 운영은 별도 보완 영역이다. 최신 진행 상태는 [구현 현황](IMPLEMENTATION_STATUS.md)을 따른다.
 
-## 5. 구현 순서
+## 4. 보조 기능과 과거 선택
 
-```mermaid
-flowchart LR
-    A[Alembic 도입] --> B[고객·사이트·제품 릴리스]
-    B --> C[자산·배포 관계]
-    C --> D[CycloneDX 1.7 스키마 검증]
-    D --> E[SSH 수집·점검 이력]
-    E --> F[SBOM 자동 생성]
-    F --> G[영향도 대시보드]
-    G --> H[PDF·Teams Workflows]
-    H --> I[Terraform·백업·복구]
-```
+OSV 직접 조회, 기존 EOL/EOSL·계약·상태 점검·Teams 전송 코드는 유지한다. 현재 핵심 시연은 Syft → SPDX → Grype → 웹 비교·보고서다. Recharts·WeasyPrint·cyclonedx-python-lib·SSM 수집을 이미 사용 중인 기술로 표시하지 않는다.
 
-취약점 자동 연동은 핵심 인프라 수명주기 흐름이 완성된 뒤 추가한다. 시간이 부족하면 OSV·VEX를 제외해도 자산→인프라 소프트웨어→SBOM→EOL 영향도라는 프로젝트 핵심은 유지된다.
+AWS Terraform·Caddy·S3 스크립트와 [과거 배포 기록](AWS_DEPLOYMENT_RECORD.md)은 이전 환경 자료다. 현재 실행 상태를 새로 확인한 것이 아니며 로컬 시연에 AWS를 요구하지 않는다.
 
-## 6. 참고 문서
-
-- [CycloneDX Specification](https://cyclonedx.org/specification/overview/)
-- [AWS Systems Manager Run Command](https://docs.aws.amazon.com/systems-manager/latest/userguide/run-command.html)
-- [AWS: SSH 대신 Systems Manager 사용](https://docs.aws.amazon.com/prescriptive-guidance/latest/aws-startup-security-baseline/wkld-06.html)
-- [Microsoft Teams Workflows Webhook](https://learn.microsoft.com/microsoftteams/platform/webhooks-and-connectors/how-to/add-incoming-webhook)
+구조는 [ARCHITECTURE.md](ARCHITECTURE.md), 데이터 관계는 [DATA_MODEL.md](DATA_MODEL.md), API는 [API.md](API.md), 실제 분석 설정은 [WEB_ANALYSIS.md](WEB_ANALYSIS.md)를 참고한다.

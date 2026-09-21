@@ -1,0 +1,58 @@
+[
+  {
+    "slide": 1,
+    "text": [
+      "EOLWatch",
+      "프로젝트",
+      "SBOM · 취약점 · 조치 통합 관리",
+      "2026.09.17",
+      "한국폴리텍대학 광명융합기술교육원  ·  데이터분석과 김연동"
+    ],
+    "notes": ""
+  },
+  {
+    "slide": 2,
+    "text": [
+      "StockCast 운영",
+      "02",
+      "재고관리 시스템을 직접 배포하고 \n운영한 개인 프로젝트",
+      "두 과제는 서버를 멈추지 않게 지키는 일이었다.\nLog4j 사례를 보며 그것만으로는 부족하고,\n안의 취약점을 미리 대비해야 한다고 느꼈다.",
+      "프로젝트 배경",
+      "NginX 방어",
+      "01",
+      "외부 공격 상황에서 서비스를 \n계속 살려 두는 AWS 팀 과제",
+      "Log4j 사례",
+      "03",
+      "취약점이 공개됐을 때 현장에서 \n무엇이 문제였는지 찾아본 사례",
+      "프로젝트를 시작한 계기"
+    ],
+    "notes": "- 2026년 5월 AWS 팀 과제 「NginX를 살려라」: 외부 공격을 받는 상황에서 nginx가 계속 동작하도록 NLB 뒤 EC2 3대에 systemd·watchdog·cron으로 자동 복구를 구성했고, 프로세스를 강제 종료해도 약 1초 안에 복귀하는 것을 확인했다.\n- 2026년 7~9월 StockCast: 재고관리 시스템을 개발해 AWS에 배포·운영했다. 인프라는 Terraform으로 관리하고 장애 시 자동 복구되도록 워치독과 알람을 설정했다. CI에 pip-audit을 적용해 starlette 취약점 9건을 찾아 수정했다.\n- 2021년 12월 Log4j: 패치보다 Log4j가 어느 서버에 설치되어 있는지 파악하는 데 먼저 시간이 걸렸다는 기록이 많았다. 분석 도구는 이미 있지만 결과를 서버·담당자·조치로 이어 주는 관리 기능이 없었다.\n- EOLWatch: 새로운 CVE를 찾거나 발급하는 것이 아니라 알려진 취약점을 확인하고 관리한다.\n\n누가 쓰나\n- 보안 담당자 / CVE 발표 시 해당 구성요소가 설치된 서버, 고객사, 수정 버전\n- 유지보수 엔지니어 / 패치·업그레이드 작업의 처리 상태와 재점검 결과\n- 운영 관리자 / 장비 교체·업그레이드 계획에서 CVE와 지원종료 일정을 함께 본 우선순위"
+  },
+  {
+    "slide": 3,
+    "text": [
+      "주요 기능",
+      "설치된 구성요소와 버전을 식별해 SPDX 2.3 형식으로 남김",
+      "알려진 취약점 데이터와 대조해 CVE와 수정 버전을 찾음",
+      "결과를 고객사·사이트·자산에\n연결해 영향받는 서버를 표시",
+      "담당자·기한·상태와 이력을 \n남기고 재분석으로 비교",
+      "SBOM 생성",
+      "취약점 분석",
+      "자산 연결",
+      "조치 관리"
+    ],
+    "notes": "분석 엔진을 새로 만들기보다 운영자가 실제로 조치할 수 있게 결과를 정리하는 데 집중한다.\nSBOM은 SPDX 2.3 표준 형식으로 만들고, 다른 도구가 만든 SPDX나 CycloneDX 문서도 가져올 수 있게 했다.\n취약점은 OSV API로 직접 조회한다. 공개 DB라 별도 계정 없이 CVE와 수정 버전을 확인할 수 있다. Syft·Grype 연동은 검토 중이다.\n\n처리 흐름 8단계\n대상 서버 등록 → 수집·SBOM 생성 → 취약점 분석 → 결과 저장·자산 연결 → 영향 서버와 버전 표시 → 업데이트 등 조치 → 재수집·재분석 → 조치 전후 비교·이력 관리\n\nSBOM 품질 점수\n9개 항목을 확인해 100점 기준으로 계산하며 항목은 CISA 최소 요소를 참고했다.\n- 문서: 문서 네임스페이스, 생성 시각, 작성자와 생성 도구\n- 구성요소: 이름, 버전, 공급자, purl 또는 CPE 식별자\n- 관계·기타: 의존관계, 라이선스"
+  },
+  {
+    "slide": 4,
+    "text": [
+      "기술 구성",
+      "구성도",
+      "기술 스택",
+      "웹  :  API   React 19 · FastAPI",
+      "저장  :  PostgreSQL 16 · SPDX 2.3",
+      "분석  :  OSV API · Syft · Grype"
+    ],
+    "notes": "구성도\n사용자 브라우저 → React 화면·Nginx → FastAPI API 서버 → worker(SSH 수집·SBOM 생성·취약점 분석) → PostgreSQL 16\nworker가 SSH 22·키 인증으로 점검 대상 서버 2대에 접속한다. 시연은 로컬 VM에서 하며 과거 AWS 배포 구성은 참고 기록으로만 남겨 둔다.\nSBOM 원본은 그대로 보관하고, 검색에 필요한 항목만 17개 테이블로 나눠 저장한다.\n\n기술 스택 선택 이유\n- SPDX 2.3 · CycloneDX 가져오기: 표준 형식을 쓰면 다른 도구 결과도 같은 방식으로 받는다.\n- OSV API: 공개 DB라 별도 계정 없이 CVE와 수정 버전을 조회할 수 있다.\n- Paramiko · APScheduler: 대상이 많지 않아 작업 큐 없이 스케줄러로 처리한다.\n- Python · FastAPI · SQLAlchemy: 수집 기능도 Python으로 작성해 언어를 하나로 맞췄다.\n- PostgreSQL 16 · React 19: 관계 데이터와 SBOM 원본을 한 DB에서 관리한다.\n- Docker Compose · 로컬 VM: 스크립트로 만들어 두어 다시 구축하기 쉽다.\n\n데이터 설계 — 전체 17개 테이블\n- SBOM: sbom_documents, components, dependency_edges\n- 취약점: vulnerabilities, component_vulnerabilities\n- 제품·배포: product_releases, deployments\n- 자산·계약: customers, sites, assets, contracts, contract_assets\n- 점검·알림: collection_jobs, check_results, notification_deliveries\n- 사용자·감사: users, audit_logs\n\n구현 단계 8단계\n기획·설계 → 자산 관리 기반 → 수집과 SBOM → CVE 조회와 조치 → 실행 환경 구성 → 분석 기능 통합 → 정확성 보완·재점검 → 시연과 제출 자료"
+  }
+]

@@ -1,0 +1,24 @@
+{
+  "source": "/Users/adieu/Desktop/학교/폴리텍/최종과제/과제관련/EOLWatch_요약서_김연동_시스원활용제안.pptx",
+  "base": "/Users/adieu/Desktop/학교/폴리텍/최종과제/과제관련/ppt베이스4.pptx",
+  "output": "/Users/adieu/Desktop/학교/폴리텍/최종과제/eolwatch/docs/presentation_design/base_revision/EOLWatch_요약서_김연동_베이스반영.pptx",
+  "original_hashes": {
+    "/Users/adieu/Desktop/학교/폴리텍/최종과제/과제관련/EOLWatch_요약서_김연동_시스원활용제안.pptx": "40f461f41150c274adccd02ebe2ce85060bbd3d351d04b5aea3df568bd7943d1",
+    "/Users/adieu/Desktop/학교/폴리텍/최종과제/과제관련/ppt베이스4.pptx": "c0b64bf243ae37143d77b2485762905deb3293d7bff6ef80aaa582298d33afbd"
+  },
+  "sources_unchanged": true,
+  "preserved_slide_xml_and_relationships": [
+    1,
+    3
+  ],
+  "copied_base_slides": {
+    "2": 3,
+    "4": 4
+  },
+  "scale_ratio": 0.6666666119860017,
+  "template_fonts_colors_geometry_preserved": true,
+  "relationship_check": "all internal targets exist",
+  "text_width_check": "no overflow on changed pages",
+  "preview": "separate geometry renderer; original title font rendered with CoreText",
+  "native_pdf_export": "PowerPoint AppleEvent timeout; no PDF supplied"
+}

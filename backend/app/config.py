@@ -24,6 +24,20 @@ class Settings(BaseSettings):
     osv_api_url: str = "https://api.osv.dev/v1/querybatch"
     public_base_url: str = "http://localhost:8080"
     demo_target_ips: str = ""
+    analysis_syft_path: str = "/opt/analysis-tools/syft"
+    analysis_grype_path: str = "/opt/analysis-tools/grype"
+    analysis_artifacts_dir: str = "/var/lib/eolwatch/analysis"
+    analysis_cache_dir: str = "/var/cache/eolwatch"
+    analysis_collect_timeout_seconds: int = 300
+    analysis_scan_timeout_seconds: int = 900
+    analysis_job_lease_seconds: int = 180
+    analysis_poll_seconds: int = 3
+    analysis_uploads_dir: str = "/var/lib/eolwatch/uploads"
+    analysis_upload_max_bytes: int = 50 * 1024 * 1024
+    analysis_zip_max_unpacked_bytes: int = 250 * 1024 * 1024
+    analysis_zip_max_file_bytes: int = 32 * 1024 * 1024
+    analysis_zip_max_entries: int = 20000
+    analysis_zip_max_ratio: int = 100
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

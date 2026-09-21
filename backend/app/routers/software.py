@@ -14,7 +14,8 @@ router = APIRouter(prefix="/software", tags=["software"])
 
 
 def _read(item: models.SoftwareProduct) -> schemas.SoftwareRead:
-    risk_level, days_left = lifecycle_risk(item.support_end_date)
+    end_date = item.security_end_date or item.support_end_date or item.eol_date
+    risk_level, days_left = lifecycle_risk(end_date)
     return schemas.SoftwareRead(
         id=item.id,
         product_type=item.product_type,
@@ -23,7 +24,7 @@ def _read(item: models.SoftwareProduct) -> schemas.SoftwareRead:
         version=item.version,
         purl=item.purl,
         cpe=item.cpe,
-        support_end_date=item.support_end_date,
+        support_end_date=end_date,
         lifecycle_source_url=item.lifecycle_source_url,
         risk_level=risk_level,
         days_left=days_left,

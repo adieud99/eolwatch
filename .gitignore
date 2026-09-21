@@ -4,6 +4,7 @@
 AGENTS.md
 CODEX.md
 .venv/
+.venv312/
 __pycache__/
 .pytest_cache/
 *.py[cod]
@@ -11,6 +12,7 @@ __pycache__/
 node_modules/
 frontend/dist/
 reports/
+backups/
 secrets/*
 !secrets/README.md
 .terraform/
@@ -18,3 +20,6 @@ secrets/*
 *.tfstate.*
 *.tfplan
 crash.log
+infrastructure/local-vm/cache/
+infrastructure/local-vm/runtime/
+.DS_Store

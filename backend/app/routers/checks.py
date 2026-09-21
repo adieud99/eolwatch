@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session, joinedload
 
 from .. import models, schemas
 from ..db import get_db
-from ..services.collector import CollectionFailure, packages_to_cyclonedx, run_collection
-from ..services.sbom import import_cyclonedx
+from ..services.collector import CollectionFailure, packages_to_spdx, run_collection
+from ..services.sbom import import_spdx
 
 
 router = APIRouter(prefix="/checks", tags=["infrastructure checks"])
@@ -92,8 +92,13 @@ def generate_sbom_from_check(job_id: int, db: Session = Depends(get_db)):
     packages = job.result.raw_metrics.get("packages") or []
     if not packages:
         raise HTTPException(status_code=422, detail="수집된 패키지 목록이 없습니다")
-    document = packages_to_cyclonedx(job.asset, packages, job.finished_at or job.started_at)
-    sbom = import_cyclonedx(db, document, asset_id=job.asset_id)
+    document = packages_to_spdx(
+        job.asset,
+        packages,
+        job.finished_at or job.started_at,
+        job.result.raw_metrics.get("package_context") or {},
+    )
+    sbom = import_spdx(db, document, asset_id=job.asset_id)
     sbom.collection_job_id = job.id
     db.commit()
     db.refresh(sbom)

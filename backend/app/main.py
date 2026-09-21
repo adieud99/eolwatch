@@ -7,7 +7,8 @@ from . import models
 from .config import get_settings
 from .db import Base, SessionLocal, engine
 from .middleware import authenticate_and_audit
-from .routers import assets, auth, checks, contracts, dashboard, notifications, organization, products, reports, sboms, software, vulnerabilities
+from .routers import analyses, assets, auth, checks, contracts, dashboard, notifications, organization, products, reports, sboms, software, vulnerabilities, vulnerability_work
+from .routers import analysis_controls, analysis_history, lifecycle_catalog
 from .services.auth import ensure_admin
 
 
@@ -24,7 +25,7 @@ settings = get_settings()
 app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
-    description="하드웨어 수명주기와 CycloneDX SBOM을 연결하는 통합 EOL 관리 API",
+    description="SBOM·취약점 분석 도구의 결과를 인프라 자산에 연결하고 CVE 조치를 추적하는 운영 API",
     lifespan=lifespan,
 )
 app.add_middleware(
@@ -46,6 +47,11 @@ app.include_router(contracts.router, prefix="/api")
 app.include_router(sboms.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
 app.include_router(vulnerabilities.router, prefix="/api")
+app.include_router(vulnerability_work.router, prefix="/api")
+app.include_router(analysis_controls.router, prefix="/api")
+app.include_router(analysis_history.router, prefix="/api")
+app.include_router(lifecycle_catalog.router, prefix="/api")
+app.include_router(analyses.router, prefix="/api")
 app.include_router(notifications.router, prefix="/api")
 app.include_router(reports.router, prefix="/api")
 

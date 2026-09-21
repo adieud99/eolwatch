@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date
 from typing import Optional
 
+from .business_date import business_today
+
 
 RISK_ORDER = {"EXPIRED": 0, "CRITICAL": 1, "WARN": 2, "SAFE": 3, "UNKNOWN": 4}
 
@@ -10,7 +12,7 @@ RISK_ORDER = {"EXPIRED": 0, "CRITICAL": 1, "WARN": 2, "SAFE": 3, "UNKNOWN": 4}
 def lifecycle_risk(end_date: Optional[date], today: Optional[date] = None) -> tuple[str, Optional[int]]:
     if end_date is None:
         return "UNKNOWN", None
-    remaining = (end_date - (today or date.today())).days
+    remaining = (end_date - (business_today() if today is None else today)).days
     if remaining < 0:
         return "EXPIRED", remaining
     if remaining <= 180:

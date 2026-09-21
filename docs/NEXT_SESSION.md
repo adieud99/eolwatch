@@ -1,73 +1,62 @@
-# EOLWatch 다음 작업 재개 가이드
+# EOLWatch 작업 재개 안내
 
-기준일: 2026-09-12
+기준일: 2026-09-16 (KST). 전체 구성도와 단계별 진행 기준은 [프로젝트 구성도·단계별 계획](PROJECT_CONFIGURATION_AND_ROADMAP.md), 구현 범위는 [구현 현황](IMPLEMENTATION_STATUS.md)을 따른다.
 
-## 현재 상태
+## 접속 주소
 
-- 핵심 기능은 로컬 Docker 환경에서 실행과 검증을 마쳤다.
-- API, PostgreSQL, React 웹, 일일 점검 worker를 컨테이너로 구성했다.
-- 자산·소프트웨어·SBOM·통합 위험도·SSH 점검 이력을 구현했다.
-- CycloneDX JSON 1.4~1.7 공식 스키마 검증과 SBOM 구성요소 추출을 구현했다.
-- AWS 배포용 Terraform과 운영 Compose는 검증했지만 실제 AWS 리소스는 생성하지 않았다.
-- 실제 서버 SSH 수집과 인터넷 공개 배포는 아직 진행하지 않았다.
+| 환경 | 주소 | 설명 |
+|---|---|---|
+| 실습(시연) 웹 | <http://127.0.0.1:18080> | 관리 VM. 실제 분석·조치 이력이 있는 DB |
+| 맥 개발 웹 | <http://127.0.0.1:8080> | 시연과 **별도 DB** |
+| 맥 개발 API | <http://127.0.0.1:8000/docs> | FastAPI 문서 |
 
-세부 완료 범위와 검증 결과는 `IMPLEMENTATION_STATUS.md`를 기준으로 확인한다.
+## 직전 세션에서 반영한 내용
 
-## 다음에 시작하는 방법
+- 프로젝트별 전체 분석 이력·검색·페이지 이동·과거 비교
+- 저장 ZIP 원본 다운로드·재분석·저장소 현황
+- 분석 취소와 프로세스 종료 확인, 예약 처리 보완
+- 공개 EOL 일정 조회·미리보기·적용·원본과 변경 근거 보관
+- 제품 버전·식별자 연결 정확성, 현재 위험과 누적 이력 구분
+- 웹·PDF 지원 종료 계산 통일, 동시 ZIP 업로드 문제 수정
 
-프로젝트 루트에서 다음 명령을 실행한다.
+검사·배포 결과: 백엔드 394개 + 프런트엔드 120개 = **514개 통과**, 프런트엔드 빌드 성공, 실습 서버와 맥 개발 환경 반영 완료. PostgreSQL 마이그레이션 `a16c902bf743`, 모델 비교 이상 없음. 종료 시 활성 분석 0건, 예약 #1 일시 중지 상태.
+
+종료 시점 백업·임시 복원 검증 성공: `/opt/eolwatch/backups/eolwatch-runtime-20260915T160237Z-0a1d01323c71`.
+
+**전체 코드 검사와 배포는 완료했지만, 아래 브라우저 시나리오 전체 통과를 확인한 상태는 아니다.**
+
+## 다음 작업: 실제 브라우저 검증 마무리
+
+1. 프로젝트 목록 화면 정상 표시 확인. 자동화 스크립트가 label 선택에서 멈췄으므로 **ZIP 원본 다운로드·재분석·과거 비교·SBOM 이동**을 이어서 검증한다.
+2. **실행 중 분석 취소의 실제 VM 검증은 미시작.** 기능 설명은 [분석 취소와 정리 확인](ANALYSIS_CANCELLATION.md)에 있다.
+3. EOL 공개 목록 갱신은 성공했으나 **개별 제품 조회·미리보기·적용은 미시작.** 숨겨진 `<option>`을 기다리는 검증 스크립트를 먼저 고친다. 중단 지점·스크립트 경로·재사용할 ID는 [EOL 카탈로그 검증 인계](LIFECYCLE_CATALOG_HANDOFF.md)를 따른다.
+4. EOL 검증용 **제품 #1381 / SBOM #23 / 구성요소 #5537 / 비활성 VERIFY 자산 #4**를 재사용한다. 스크립트를 그대로 다시 돌리면 검증용 제품이 중복 생성되므로 준비 단계를 먼저 조정한다.
+
+## 코드 작업 후 검증·배포
+
+맥에서 검사한다.
 
 ```bash
-docker compose up -d
+sh scripts/test-backend.sh                  # 격리 컨테이너에서 백엔드 전체 테스트
+cd frontend && npm test && npm run build    # 프런트엔드 테스트와 빌드
+```
+
+맥 개발 환경에 반영한다.
+
+```bash
+docker compose up --build -d
 docker compose ps
+curl -s http://127.0.0.1:8000/health
 ```
 
-데모 데이터가 필요하면 다음 명령을 한 번 실행한다.
+`docker compose down -v`는 PostgreSQL 볼륨까지 지우므로 데이터 초기화가 필요할 때만 쓴다. 데모 데이터는 `docker compose exec api python -m app.seed`로 한 번만 넣는다.
 
-```bash
-docker compose exec api python -m app.seed
-```
+관리 VM에 코드만 갱신할 때는 **초기 배포용 `deploy-to-lab.sh`를 쓰지 않는다.** 변경한 소스·의존성·마이그레이션만 SSH/SCP로 전달하고 `/opt/eolwatch`에서 `sudo docker compose up --build -d`를 실행한 뒤, `status.sh`와 브라우저로 기동·기존 분석 이력을 확인한다. 기존 `.env`, SSH 키·known_hosts, PostgreSQL·분석 원본 볼륨은 유지한다. 절차 전문은 [로컬 VM 환경](../infrastructure/local-vm/README.md)에 있다.
 
-접속 주소는 다음과 같다.
-
-- 웹 화면: <http://localhost:8080>
-- API 문서: <http://localhost:8000/docs>
-- 상태 확인: <http://localhost:8000/health>
-
-작업을 끝낼 때는 다음 명령으로 컨테이너를 종료한다.
-
-```bash
-docker compose down
-```
-
-`docker compose down -v`는 PostgreSQL 볼륨의 데이터까지 삭제하므로 데이터 초기화가 필요한 경우에만 사용한다.
-
-## 다음 구현 우선순위
-
-1. 관리자·조회자 로그인과 API 권한 검사
-2. 자산 CSV 일괄 등록과 행별 오류 결과
-3. SBOM 버전 비교
-4. OSV 취약점 조회와 VEX 상태 관리
-5. Teams Workflows 알림과 전송 이력
-6. 일일 점검 및 지원종료 PDF 보고서
-7. 감사 로그
-8. 프런트엔드 자동 테스트와 로그인 화면
-
-외부 환경을 사용할 수 있으면 실제 SSH 수집 실증, AWS `terraform plan`, 도메인 연결, S3 백업·복구 훈련 순서로 진행한다. AWS `terraform apply`는 실제 비용과 외부 리소스 생성을 수반한다.
+DB·원본 ZIP 백업과 복구 검증은 [운영 백업](BACKUP_OPERATIONS.md)의 명령을 그대로 쓴다.
 
 ## 제출 자료 작업
 
-- 기존 PPTX와 DOCX를 2차 기획 및 현재 구현 결과에 맞게 갱신한다.
-- 웹 대시보드, API 문서, ERD, 아키텍처, 실제 배포 화면을 캡처한다.
-- 기능 시연 순서와 발표 대본을 작성한다.
+- 요약서 정본은 [EOLWatch_프로젝트요약서_김연동_수정본.pdf](EOLWatch_프로젝트요약서_김연동_수정본.pdf)이며, 원본 소스는 같은 폴더의 `EOLWatch_프로젝트요약서.html`이다. 내용을 고칠 때는 HTML을 수정하고 다시 인쇄한다.
+- 발표 자료는 현재 분석 흐름(Syft → SPDX 2.3 → Grype)과 검증된 화면을 기준으로 구성한다. 교수님 설명 순서는 [교수님 설명 안내](PROFESSOR_PROJECT_GUIDE.md)를 따른다.
 - 외부 환경에서 검증하지 않은 기능은 계획 또는 미검증 상태로 표시한다.
-
-## 종료 시점 검증 기록
-
-- 백엔드 테스트 6개 통과
-- React 프로덕션 빌드 통과
-- 개발·운영 Compose 설정 검사 통과
-- Docker 이미지 빌드와 네 서비스 기동 통과
-- Alembic 마이그레이션 통과
-- CycloneDX 1.7 생성 문서 공식 스키마 검증 통과
-- Terraform 초기화와 구성 검증 통과

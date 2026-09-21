@@ -1,0 +1,36 @@
+{
+  "input": "/Users/adieu/Desktop/학교/폴리텍/최종과제/eolwatch/docs/presentation_design/proposal_refined/EOLWatch_프로젝트제안요약서_김연동_개요수정.pptx",
+  "slides": [
+    2,
+    3,
+    4
+  ],
+  "width": 1800,
+  "warnings": [
+    "210 옴니고딕 → JASO Sans Bold (installed font FreeType error)"
+  ],
+  "potential_text_overflow": [
+    {
+      "slide": 2,
+      "kind": "height",
+      "text": "프로젝트 개요",
+      "content_px": 67.0,
+      "box_px": 70.1
+    },
+    {
+      "slide": 3,
+      "kind": "height",
+      "text": "주요 기능",
+      "content_px": 67.0,
+      "box_px": 70.1
+    },
+    {
+      "slide": 4,
+      "kind": "height",
+      "text": "검증 계획과 산출물",
+      "content_px": 67.0,
+      "box_px": 70.1
+    }
+  ],
+  "note": "Offline review only; not a pixel-equivalent PowerPoint render."
+}

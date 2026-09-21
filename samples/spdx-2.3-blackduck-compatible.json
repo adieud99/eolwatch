@@ -1,0 +1,44 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "eolwatch-infrastructure-demo",
+  "documentNamespace": "https://eolwatch.local/spdx/demo/2026-09-15",
+  "creationInfo": {
+    "created": "2026-09-15T00:00:00Z",
+    "creators": [
+      "Tool: Black Duck compatible SPDX export demo-1.0"
+    ]
+  },
+  "documentDescribes": [
+    "SPDXRef-Package-Jinja2"
+  ],
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-Jinja2",
+      "name": "Jinja2",
+      "versionInfo": "2.4.1",
+      "supplier": "Organization: Pallets Projects",
+      "downloadLocation": "https://pypi.org/project/Jinja2/2.4.1/",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "copyrightText": "NOASSERTION",
+      "primaryPackagePurpose": "LIBRARY",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:pypi/jinja2@2.4.1"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-Package-Jinja2"
+    }
+  ]
+}

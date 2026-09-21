@@ -7,7 +7,7 @@
 - EXPIRED·CRITICAL 자산과 제품 릴리스
 - SBOM 품질 70점 미만 문서
 - 실패한 알림과 백업 작업
-- 서비스 EC2 디스크 사용률
+- 서비스 서버 디스크 사용률
 
 ## 2. 수집 실패 코드
 
@@ -22,40 +22,13 @@
 
 실패한 수집은 정상 점검으로 처리하지 않는다. 원인을 수정한 뒤 자산 화면에서 수동 점검을 실행하고, 성공 여부를 점검 이력에서 확인한다.
 
-## 3. 백업
+## 3. 백업과 복구
 
-운영 EC2에서 다음 환경변수를 지정한 뒤 매일 한 번 실행한다.
+현재 기준 절차는 [운영 백업](BACKUP_OPERATIONS.md)이다. 관리 VM에서 `scripts/backup-runtime.py --verify-restore`로 PostgreSQL과 업로드 ZIP을 함께 보관하고, 임시 DB 복원·내용 해시 대조까지 확인한다. 보관 개수 관리와 정기 실행도 같은 문서를 따른다.
 
-```bash
-export POSTGRES_USER=eolwatch
-export POSTGRES_DB=eolwatch
-export BACKUP_BUCKET=eolwatch-backup-example
-./scripts/backup.sh
-```
+`scripts/backup.sh`·`scripts/restore.sh`의 S3 업로드 방식은 AWS 운영을 전제한 이전 절차다. 현재 로컬 시연 구성에서는 사용하지 않는다.
 
-스크립트는 PostgreSQL 논리 백업을 gzip으로 압축하고 S3의 `postgres/` 경로에 AES256 서버 측 암호화로 업로드한다. Terraform 수명주기 정책이 7일이 지난 백업을 삭제한다.
-
-## 4. 복구 훈련
-
-운영 DB에 바로 덮어쓰지 않고 별도의 검증 환경에서 수행한다.
-
-```bash
-export POSTGRES_USER=eolwatch
-export POSTGRES_DB=eolwatch_restore_test
-./scripts/restore.sh s3://버킷/postgres/eolwatch-YYYYMMDDTHHMMSSZ.sql.gz
-```
-
-복구 후 다음을 확인한다.
-
-1. 고객사·사이트·자산 수
-2. 자산과 제품 릴리스 연결 수
-3. SBOM 문서와 구성요소·의존관계 수
-4. 최근 점검 결과
-5. 대시보드 위험도 집계
-
-복구 일시, 백업 파일, 소요 시간, 검증 결과를 운영 기록에 남긴다.
-
-## 5. 컨테이너 장애
+## 4. 컨테이너 장애
 
 ```bash
 docker compose -f docker-compose.prod.yml ps
@@ -64,16 +37,3 @@ docker compose -f docker-compose.prod.yml restart api
 ```
 
 API 재기동 전에 DB가 `healthy`인지 확인한다. 마이그레이션 실패가 보이면 애플리케이션을 계속 재기동하지 말고 `alembic current`와 실패한 revision을 확인한다.
-
-## 6. 발표 전 복구 실증 기록
-
-| 항목 | 기록 값 |
-|---|---|
-| 훈련 일시 | 미실시 |
-| 사용 백업 | 미정 |
-| 복구 소요 시간 | 미측정 |
-| 데이터 검증 | 미실시 |
-| 발견한 문제 | 미작성 |
-| 개선 결과 | 미작성 |
-
-이 표는 실제 복구 훈련 후 사실대로 갱신한다. 수행하지 않은 상태에서 복구 성공으로 발표하지 않는다.

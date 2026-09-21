@@ -8,6 +8,9 @@ from fastapi.testclient import TestClient
 
 from app.db import Base, engine
 from app.main import app
+from app.services.collector import packages_to_spdx, parse_os_release
+from app.services.sbom import validate_spdx_schema
+from app.services.vulnerabilities import _cve_ids, _fixed_version
 
 
 def setup_module():
@@ -131,11 +134,53 @@ def test_asset_sbom_and_dashboard_flow():
         assert impact.json()["asset_count"] == 1
 
 
-def test_reject_non_cyclonedx_document():
+def test_import_spdx_23_document():
+    with TestClient(app) as client:
+        client.headers.update(login_headers(client))
+        sample_path = Path(__file__).parents[2] / "samples" / "spdx-2.3-blackduck-compatible.json"
+        response = client.post("/api/sboms/import", json=json.loads(sample_path.read_text(encoding="utf-8")))
+        assert response.status_code == 201, response.text
+        assert response.json()["bom_format"] == "SPDX"
+        assert response.json()["spec_version"] == "2.3"
+        assert response.json()["component_count"] == 1
+        components = client.get(f"/api/sboms/{response.json()['id']}/components")
+        assert components.status_code == 200
+        assert components.json()[0]["purl"] == "pkg:pypi/jinja2@2.4.1"
+
+
+def test_reject_invalid_spdx_document():
     with TestClient(app) as client:
         client.headers.update(login_headers(client))
         response = client.post("/api/sboms/import", json={"spdxVersion": "SPDX-2.3"})
         assert response.status_code == 422
+        assert response.json()["detail"]["message"].startswith("SPDX")
+
+
+def test_ubuntu_packages_use_spdx_deb_purl():
+    context = parse_os_release('ID=ubuntu\nVERSION_ID="24.04"\n', "aarch64\n")
+    asset = type("Asset", (), {"asset_tag": "LAB-WEB-01", "name": "웹 VM", "manufacturer": "VirtualBox"})()
+    document = packages_to_spdx(
+        asset,
+        [{"name": "openssl", "version": "3.0.13-0ubuntu3.5"}],
+        __import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+        context,
+    )
+    validate_spdx_schema(document)
+    purl = document["packages"][1]["externalRefs"][0]["referenceLocator"]
+    assert purl.startswith("pkg:deb/ubuntu/openssl@3.0.13-0ubuntu3.5")
+    assert "arch=aarch64" in purl and "distro=ubuntu-24.04" in purl
+
+
+def test_osv_results_are_filtered_to_cve_and_keep_fixed_version():
+    finding = {
+        "id": "GHSA-xxxx-yyyy-zzzz",
+        "aliases": ["CVE-2024-12345", "PYSEC-2024-1"],
+        "affected": [{"ranges": [{"events": [{"introduced": "0"}, {"fixed": "2.0.1"}]}]}],
+    }
+    assert _cve_ids(finding) == ["CVE-2024-12345"]
+    # An advisory alone cannot establish which package/installed branch to fix.
+    assert _fixed_version(finding) is None
+    assert _cve_ids({"id": "GHSA-only"}) == []
 
 
 def test_reject_invalid_cyclonedx_schema():
@@ -166,7 +211,7 @@ def test_csv_import_sbom_diff_reports_and_audit():
         assert imported.json()["failed"] == 1
 
         sboms = client.get("/api/sboms").json()
-        base = sboms[0]
+        base = next(item for item in sboms if item["bom_format"] == "CycloneDX")
         sample_path = Path(__file__).parents[2] / "samples" / "cyclonedx-example.json"
         changed_document = json.loads(sample_path.read_text(encoding="utf-8"))
         changed_document["serialNumber"] = "urn:uuid:9a824d13-4436-4cb8-9893-0e5772ad76c7"

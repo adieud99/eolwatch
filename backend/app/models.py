@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -80,10 +80,24 @@ class Asset(Base):
     model: Mapped[Optional[str]] = mapped_column(String(160))
     serial_number: Mapped[Optional[str]] = mapped_column(String(160))
     site: Mapped[Optional[str]] = mapped_column(String(160))
+    building: Mapped[Optional[str]] = mapped_column(String(120))
+    floor: Mapped[Optional[str]] = mapped_column(String(40))
+    room: Mapped[Optional[str]] = mapped_column(String(120))
+    rack: Mapped[Optional[str]] = mapped_column(String(80))
+    rack_position: Mapped[Optional[str]] = mapped_column(String(40))
     ip_address: Mapped[Optional[str]] = mapped_column(String(64), index=True)
     ssh_port: Mapped[int] = mapped_column(Integer, default=22)
     ssh_username: Mapped[Optional[str]] = mapped_column(String(80))
     introduced_on: Mapped[Optional[date]] = mapped_column(Date)
+    purchase_date: Mapped[Optional[date]] = mapped_column(Date)
+    purchase_price: Mapped[Optional[float]] = mapped_column(Numeric(14, 2))
+    power_watts: Mapped[Optional[float]] = mapped_column(Float)
+    power_source: Mapped[Optional[str]] = mapped_column(String(40))
+    warranty_end_date: Mapped[Optional[date]] = mapped_column(Date)
+    owner_name: Mapped[Optional[str]] = mapped_column(String(120))
+    owner_department: Mapped[Optional[str]] = mapped_column(String(120))
+    operational_status: Mapped[str] = mapped_column(String(30), default="ACTIVE", server_default="ACTIVE", index=True)
+    service_criticality: Mapped[str] = mapped_column(String(20), default="STANDARD", server_default="STANDARD", index=True)
     support_end_date: Mapped[Optional[date]] = mapped_column(Date, index=True)
     lifecycle_source_url: Mapped[Optional[str]] = mapped_column(Text)
     monitored: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -95,6 +109,19 @@ class Asset(Base):
     deployments: Mapped[list[Deployment]] = relationship(back_populates="asset", cascade="all, delete-orphan")
     sboms: Mapped[list[SbomDocument]] = relationship(back_populates="asset")
     collection_jobs: Mapped[list[CollectionJob]] = relationship(back_populates="asset", cascade="all, delete-orphan")
+
+
+class AssetRiskSnapshot(Base):
+    __tablename__ = "asset_risk_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), index=True)
+    score: Mapped[int] = mapped_column(Integer)
+    priority_level: Mapped[str] = mapped_column(String(20), index=True)
+    factors: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    calculated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+    asset: Mapped[Asset] = relationship()
 
 
 class Deployment(Base):
@@ -292,12 +319,44 @@ class ComponentVulnerability(Base):
     justification: Mapped[Optional[str]] = mapped_column(String(80))
     response: Mapped[Optional[str]] = mapped_column(String(80))
     detail: Mapped[Optional[str]] = mapped_column(Text)
+    review_revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    assignee_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL", name="fk_component_vulnerabilities_assignee_id_users"), index=True)
+    due_date: Mapped[Optional[date]] = mapped_column(Date, index=True)
+    fixed_version: Mapped[Optional[str]] = mapped_column(String(160))
+    analysis_run_id: Mapped[Optional[int]] = mapped_column(ForeignKey("analysis_runs.id", ondelete="SET NULL"), index=True)
+    finding_source: Mapped[Optional[str]] = mapped_column(String(40))
+    finding_severity: Mapped[Optional[str]] = mapped_column(String(20))
+    fixed_versions: Mapped[list[Any]] = mapped_column(JSON, default=list)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     component: Mapped[Component] = relationship()
     vulnerability: Mapped[Vulnerability] = relationship(back_populates="component_links")
+    assignee: Mapped[Optional[User]] = relationship(foreign_keys=[assignee_id])
+    actions: Mapped[list[VulnerabilityAction]] = relationship(back_populates="link", passive_deletes="all")
 
     __table_args__ = (UniqueConstraint("component_id", "vulnerability_id", name="uq_component_vulnerability"),)
+
+
+class VulnerabilityAction(Base):
+    """Append-only application history; snapshots remain if users/evidence are removed."""
+    __tablename__ = "vulnerability_actions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    link_id: Mapped[int] = mapped_column(ForeignKey("component_vulnerabilities.id", ondelete="CASCADE"), index=True)
+    actor_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    actor_username: Mapped[str] = mapped_column(String(80))
+    from_status: Mapped[str] = mapped_column(String(30))
+    to_status: Mapped[str] = mapped_column(String(30))
+    detail: Mapped[Optional[str]] = mapped_column(Text)
+    before_state: Mapped[dict[str, Any]] = mapped_column(JSON)
+    after_state: Mapped[dict[str, Any]] = mapped_column(JSON)
+    evidence_analysis_run_id: Mapped[Optional[int]] = mapped_column(ForeignKey("analysis_runs.id", ondelete="SET NULL"), index=True)
+    evidence_snapshot: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+    link: Mapped[ComponentVulnerability] = relationship(back_populates="actions")
+
+    __table_args__ = (Index("ix_vulnerability_actions_link_id_id", "link_id", "id"),)
 
 
 class NotificationDelivery(Base):
@@ -316,3 +375,116 @@ class NotificationDelivery(Base):
 
 # 기존 API 이름을 유지하면서 목표 ERD의 PRODUCT_RELEASE를 사용한다.
 SoftwareProduct = ProductRelease
+
+
+class AnalysisRun(Base):
+    __tablename__ = "analysis_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sbom_id: Mapped[int] = mapped_column(ForeignKey("sbom_documents.id", ondelete="CASCADE"), index=True)
+    report_sha256: Mapped[str] = mapped_column(String(64), unique=True)
+    sbom_sha256: Mapped[str] = mapped_column(String(64))
+    scanner: Mapped[str] = mapped_column(String(40))
+    scanner_version: Mapped[str] = mapped_column(String(80))
+    generator: Mapped[str] = mapped_column(String(160))
+    scan_scope: Mapped[str] = mapped_column(String(300))
+    match_count: Mapped[int] = mapped_column(Integer)
+    cve_count: Mapped[int] = mapped_column(Integer)
+    link_count: Mapped[int] = mapped_column(Integer)
+    ignored_non_cve: Mapped[int] = mapped_column(Integer)
+    database_info: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    raw_report: Mapped[dict[str, Any]] = mapped_column(JSON)
+    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    sbom: Mapped[SbomDocument] = relationship()
+
+
+class AnalysisJob(Base):
+    __tablename__ = "analysis_jobs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), index=True)
+    # Non-null only while queued/running: the unique constraint also prevents racing API requests.
+    active_asset_id: Mapped[Optional[int]] = mapped_column(Integer, unique=True)
+    asset_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(20), default="QUEUED", index=True)
+    worker_token: Mapped[Optional[str]] = mapped_column(String(36))
+    heartbeat_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    error_code: Mapped[Optional[str]] = mapped_column(String(80))
+    error_message: Mapped[Optional[str]] = mapped_column(Text)
+    analysis_run_id: Mapped[Optional[int]] = mapped_column(ForeignKey("analysis_runs.id", ondelete="SET NULL"), index=True)
+    retry_of_id: Mapped[Optional[int]] = mapped_column(ForeignKey("analysis_jobs.id", ondelete="SET NULL"))
+
+    asset: Mapped[Asset] = relationship()
+    analysis_run: Mapped[Optional[AnalysisRun]] = relationship()
+
+
+class AnalysisUpload(Base):
+    __tablename__ = "analysis_uploads"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), index=True)
+    sha256: Mapped[str] = mapped_column(String(64), index=True)
+    filename: Mapped[str] = mapped_column(String(255))
+    project_name: Mapped[str] = mapped_column(String(80))
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AnalysisSchedule(Base):
+    __tablename__ = "analysis_schedules"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), index=True)
+    input_spec: Mapped[dict[str, Any]] = mapped_column(JSON)
+    scan_scope: Mapped[str] = mapped_column(String(300))
+    interval_minutes: Mapped[int] = mapped_column(Integer)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    last_requested_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_job_id: Mapped[Optional[int]] = mapped_column(ForeignKey("analysis_jobs.id", ondelete="SET NULL"))
+    last_error: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    asset: Mapped[Asset] = relationship()
+    __table_args__ = (UniqueConstraint("asset_id", "scan_scope", name="uq_analysis_schedule_target"),)
+
+
+class LifecycleCatalogCache(Base):
+    __tablename__ = "lifecycle_catalog_cache"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cache_key: Mapped[str] = mapped_column(String(160), unique=True)
+    source_url: Mapped[str] = mapped_column(Text)
+    raw_document: Mapped[Optional[str]] = mapped_column(Text)
+    content_sha256: Mapped[Optional[str]] = mapped_column(String(64))
+    fetched_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    provider_generated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    provider_last_modified: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_error_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[Optional[str]] = mapped_column(String(500))
+    etag: Mapped[Optional[str]] = mapped_column(Text)
+
+
+class LifecycleCatalogApplication(Base):
+    __tablename__ = "lifecycle_catalog_applications"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_release_id: Mapped[int] = mapped_column(ForeignKey("product_releases.id", ondelete="CASCADE"), index=True)
+    applied_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    product_slug: Mapped[str] = mapped_column(String(120))
+    release_cycle: Mapped[str] = mapped_column(String(100))
+    source_url: Mapped[str] = mapped_column(Text)
+    policy_url: Mapped[Optional[str]] = mapped_column(Text)
+    source_sha256: Mapped[str] = mapped_column(String(64))
+    source_document: Mapped[str] = mapped_column(Text)
+    provider_generated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    provider_last_modified: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    previous_values: Mapped[dict[str, Any]] = mapped_column(JSON)
+    applied_values: Mapped[dict[str, Any]] = mapped_column(JSON)

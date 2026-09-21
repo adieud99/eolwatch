@@ -22,6 +22,8 @@ COMMANDS = {
     "disk": "df -P -x tmpfs -x devtmpfs | awk 'NR>1 {print $6 \"|\" $5}'",
     "process": "ps -eo comm= | sort | uniq -c | sort -nr | head -20",
     "packages": "if command -v dpkg-query >/dev/null 2>&1; then dpkg-query -W -f='${Package}|${Version}\\n'; elif command -v rpm >/dev/null 2>&1; then rpm -qa --qf '%{NAME}|%{VERSION}-%{RELEASE}\\n'; fi",
+    "os_release": "cat /etc/os-release",
+    "architecture": "uname -m",
 }
 
 
@@ -118,6 +120,113 @@ def packages_to_cyclonedx(asset: models.Asset, packages: list[dict[str, str]], g
     }
 
 
+def packages_to_spdx(
+    asset: models.Asset,
+    packages: list[dict[str, str]],
+    generated_at: datetime,
+    package_context: Optional[dict[str, str]] = None,
+) -> dict[str, Any]:
+    """SSH로 발견한 운영 패키지를 SPDX 2.3 시스템 SBOM으로 변환한다."""
+    timestamp = generated_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    serial = uuid5(NAMESPACE_URL, f"spdx:{asset.asset_tag}:{timestamp}")
+    root_ref = f"SPDXRef-Asset-{uuid5(NAMESPACE_URL, asset.asset_tag).hex}"
+    root_purl = f"pkg:generic/eolwatch-host@{quote(asset.asset_tag, safe='.-_')}"
+    spdx_packages = [
+        {
+            "SPDXID": root_ref,
+            "name": asset.name,
+            "versionInfo": asset.asset_tag,
+            "supplier": f"Organization: {asset.manufacturer or '운영 조직'}",
+            "downloadLocation": "NOASSERTION",
+            "filesAnalyzed": False,
+            "licenseConcluded": "NOASSERTION",
+            "licenseDeclared": "NOASSERTION",
+            "copyrightText": "NOASSERTION",
+            "primaryPackagePurpose": "OPERATING_SYSTEM",
+            "externalRefs": [
+                {
+                    "referenceCategory": "PACKAGE-MANAGER",
+                    "referenceType": "purl",
+                    "referenceLocator": root_purl,
+                }
+            ],
+        }
+    ]
+    relationships = [
+        {"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": root_ref}
+    ]
+    package_context = package_context or {}
+    distro_id = package_context.get("id", "generic").lower()
+    distro_version = package_context.get("version_id", "unknown")
+    architecture = package_context.get("architecture", "unknown")
+    debian_family = distro_id in {"ubuntu", "debian", "linuxmint", "pop"}
+    purl_type = "deb" if debian_family else "rpm" if distro_id != "generic" else "generic"
+    supplier_name = {
+        "ubuntu": "Canonical",
+        "debian": "Debian Project",
+        "amzn": "Amazon Linux",
+        "rhel": "Red Hat",
+        "rocky": "Rocky Enterprise Software Foundation",
+        "almalinux": "AlmaLinux OS Foundation",
+    }.get(distro_id, distro_id if distro_id != "generic" else "NOASSERTION")
+    for package in sorted(packages, key=lambda item: (item["name"], item["version"])):
+        name = quote(package["name"], safe=".+-_")
+        version = quote(package["version"], safe=".+-_:~")
+        namespace = f"/{distro_id}" if distro_id != "generic" else ""
+        qualifier = f"?arch={quote(architecture, safe='._-')}&distro={quote(distro_id + '-' + distro_version, safe='._-')}"
+        purl = f"pkg:{purl_type}{namespace}/{name}@{version}{qualifier}"
+        package_ref = f"SPDXRef-Package-{uuid5(NAMESPACE_URL, purl).hex}"
+        spdx_packages.append(
+            {
+                "SPDXID": package_ref,
+                "name": package["name"],
+                "versionInfo": package["version"],
+                "supplier": "NOASSERTION" if supplier_name == "NOASSERTION" else f"Organization: {supplier_name}",
+                "downloadLocation": "NOASSERTION",
+                "filesAnalyzed": False,
+                "licenseConcluded": "NOASSERTION",
+                "licenseDeclared": "NOASSERTION",
+                "copyrightText": "NOASSERTION",
+                "primaryPackagePurpose": "LIBRARY",
+                "externalRefs": [
+                    {
+                        "referenceCategory": "PACKAGE-MANAGER",
+                        "referenceType": "purl",
+                        "referenceLocator": purl,
+                    }
+                ],
+            }
+        )
+        relationships.append(
+            {"spdxElementId": root_ref, "relationshipType": "CONTAINS", "relatedSpdxElement": package_ref}
+        )
+    return {
+        "spdxVersion": "SPDX-2.3",
+        "dataLicense": "CC0-1.0",
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "name": f"{asset.asset_tag}-system-sbom",
+        "documentNamespace": f"https://eolwatch.local/spdx/{quote(asset.asset_tag, safe='.-_')}/{serial}",
+        "creationInfo": {
+            "created": timestamp,
+            "creators": ["Tool: EOLWatch SSH Collector-0.3.0"],
+        },
+        "documentDescribes": [root_ref],
+        "packages": spdx_packages,
+        "relationships": relationships,
+    }
+
+
+def parse_os_release(output: str, architecture: str) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for line in output.splitlines():
+        if "=" not in line or line.startswith("#"):
+            continue
+        key, value = line.split("=", 1)
+        values[key.lower()] = value.strip().strip('"')
+    values["architecture"] = architecture.strip() or "unknown"
+    return values
+
+
 def _run_command(client: paramiko.SSHClient, name: str, command: str) -> str:
     _, stdout, stderr = client.exec_command(command, timeout=20)
     exit_code = stdout.channel.recv_exit_status()
@@ -176,6 +285,7 @@ def collect_over_ssh(asset: models.Asset) -> dict[str, Any]:
         "disk_details": disks,
         "process_details": parse_processes(raw["process"]),
         "packages": parse_packages(raw["packages"]),
+        "package_context": parse_os_release(raw["os_release"], raw["architecture"]),
     }
 
 
@@ -195,7 +305,14 @@ def run_collection(db: Session, asset_id: int, trigger_type: str = "MANUAL") -> 
     try:
         metrics = collect_over_ssh(asset)
         packages = metrics.pop("packages")
-        db.add(models.CheckResult(collection_job_id=job.id, raw_metrics={"package_count": len(packages), "packages": packages}, **metrics))
+        package_context = metrics.pop("package_context")
+        db.add(
+            models.CheckResult(
+                collection_job_id=job.id,
+                raw_metrics={"package_count": len(packages), "packages": packages, "package_context": package_context},
+                **metrics,
+            )
+        )
         job.status = "SUCCESS"
     except CollectionFailure as failure:
         job.status = "FAILED"
