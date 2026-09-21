@@ -515,6 +515,8 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
         packages = raw.get("artifacts")
         catalogers = raw.get("descriptor", {}).get("configuration", {}).get("catalogers", {}).get("used", [])
         if not isinstance(packages, list) or not packages:
+            if run.profile in SOURCE_SCAN_SCOPES:
+                raise AnalysisExecutionError("EMPTY_COLLECTION", "버전이 고정된 의존성 파일(package-lock.json·yarn.lock, requirements.txt, pom.xml, go.sum, Gemfile.lock 등)을 찾지 못했습니다. package.json·build.gradle만으로는 구성요소를 확정할 수 없어 결과를 저장하지 않습니다. 취약점이 없다는 뜻이 아닙니다.")
             raise AnalysisExecutionError("EMPTY_COLLECTION", "설치 패키지가 수집되지 않았습니다. 빈 결과는 정상 분석으로 저장하지 않습니다.")
         if (any(not isinstance(package, dict) for package in packages)
                 or profile.cataloger and (catalogers != [profile.cataloger]
