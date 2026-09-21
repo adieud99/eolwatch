@@ -24,20 +24,23 @@ IS_KERNEL = or_(component.purl.like("%upstream=linux%"), component.name.like("li
                 component.name.like("linux-headers%"), component.name == "bpftool")
 
 
-def breakdown(db: Session, sbom_ids: list[int]) -> dict[int, dict[str, int]]:
-    """Per SBOM: distinct CVEs with a fix, on kernel packages, and both."""
-    result = {sbom_id: {"fixable_cve_count": 0, "kernel_cve_count": 0, "kernel_fixable_cve_count": 0} for sbom_id in sbom_ids}
-    if not sbom_ids:
+def breakdown(db: Session, run_ids: list[int]) -> dict[int, dict[str, int]]:
+    """Per analysis run: distinct CVEs with a fix, on kernel packages, and both.
+
+    Grouped by the run's own links (not the SBOM) so OSV cross-check findings on the same SBOM do not leak in.
+    """
+    result = {run_id: {"fixable_cve_count": 0, "kernel_cve_count": 0, "kernel_fixable_cve_count": 0} for run_id in run_ids}
+    if not run_ids:
         return result
     rows = db.execute(
         # max() over 1/0 rather than booleans: PostgreSQL has no max(boolean).
-        select(component.sbom_id, link.vulnerability_id, func.max(case((HAS_FIX, 1), else_=0)), func.max(case((IS_KERNEL, 1), else_=0)))
+        select(link.analysis_run_id, link.vulnerability_id, func.max(case((HAS_FIX, 1), else_=0)), func.max(case((IS_KERNEL, 1), else_=0)))
         .join(component, link.component_id == component.id)
-        .where(component.sbom_id.in_(sbom_ids))
-        .group_by(component.sbom_id, link.vulnerability_id)
+        .where(link.analysis_run_id.in_(run_ids))
+        .group_by(link.analysis_run_id, link.vulnerability_id)
     ).all()
-    for sbom_id, _vulnerability_id, fixed, kernel in rows:
-        counts = result.setdefault(sbom_id, {"fixable_cve_count": 0, "kernel_cve_count": 0, "kernel_fixable_cve_count": 0})
+    for run_id, _vulnerability_id, fixed, kernel in rows:
+        counts = result.setdefault(run_id, {"fixable_cve_count": 0, "kernel_cve_count": 0, "kernel_fixable_cve_count": 0})
         if fixed:
             counts["fixable_cve_count"] += 1
         if kernel:

@@ -135,15 +135,15 @@ def list_analyses(db: Session = Depends(get_db)):
         defer(models.AnalysisRun.raw_report),
         joinedload(models.AnalysisRun.sbom).defer(models.SbomDocument.raw_document).joinedload(models.SbomDocument.asset)
     ).order_by(models.AnalysisRun.id.desc()).limit(100)).all()
-    counts = breakdown(db, sorted({run.sbom_id for run in runs}))
-    return [read(run, counts.get(run.sbom_id)) for run in runs]
+    counts = breakdown(db, [run.id for run in runs])
+    return [read(run, counts.get(run.id)) for run in runs]
 
 
 @router.post('/import', response_model=schemas.AnalysisRead)
 def import_bundle(payload: schemas.AnalysisImport, db: Session = Depends(get_db)):
     try:
         run = import_analysis(db, payload)
-        return read(run, breakdown(db, [run.sbom_id])[run.sbom_id])
+        return read(run, breakdown(db, [run.id])[run.id])
     except HTTPException:
         db.rollback()
         raise
