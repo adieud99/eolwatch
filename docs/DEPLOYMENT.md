@@ -66,8 +66,9 @@ JWT_SECRET=32바이트_이상의_무작위_비밀값
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=충분히_긴_관리자_비밀번호
 PUBLIC_BASE_URL=https://eolwatch.example.com
-TEAMS_WEBHOOK_URL=
 ```
+
+Teams 알림 기능은 제거했으므로 `TEAMS_WEBHOOK_URL`·`TEAMS_RECIPIENT_LABEL`은 더 이상 쓰지 않는다.
 
 실제 비밀번호와 SSH 개인키는 저장소에 커밋하지 않는다. 운영 단계에서는 SSM Parameter Store 값을 배포 시 환경 파일 또는 Docker Secret으로 주입한다.
 
@@ -87,13 +88,16 @@ curl -fsS https://eolwatch.example.com/health
 
 대상 Linux 서버마다 전용 계정을 만든 뒤 읽기 명령만 허용한다. 시연 환경에서도 root 로그인과 비밀번호 인증은 사용하지 않는다.
 
-수집 명령:
+SSH 점검 수집 명령(모두 읽기 전용):
 
 - `/proc/uptime` 읽기
-- `top`, `free`에 해당하는 CPU·메모리 정보
+- `top`, `/proc/meminfo`에 해당하는 CPU·메모리 정보
 - `df -P`
 - `ps -eo`
-- `dpkg-query -W` 또는 `rpm -qa`
+- `dpkg-query -W` 또는 `rpm -qa`, `/etc/os-release`, `uname -m`
+- 서버 정보: `hostname`, `uname -r`, `/proc/cpuinfo`, `nproc`, `systemd-detect-virt`, `/sys/class/dmi/id/*`, EC2 메타데이터(169.254.169.254, 2초 타임아웃), `ip -4 addr`, `ss -tln`, `systemctl list-units`
+
+취약점 검사는 여기에 더해 SSH 계정의 홈 디렉터리에 Syft 바이너리를 복사해 실행한다.
 
 운영자가 대상 서버의 호스트 키 지문을 확인한 후 `secrets/known_hosts`에 평문 호스트명 형식으로 넣는다. 현재 Paramiko 수집기는 해시 호스트명 항목을 조회하지 못하므로 `ssh-keyscan -H` 결과를 그대로 사용하지 않는다. 파일은 API와 worker 컨테이너에 읽기 전용으로 마운트하고 `SSH_STRICT_HOST_KEY=true`를 유지한다.
 
@@ -109,8 +113,8 @@ docker compose -f docker-compose.prod.yml logs --tail=100 api worker
 
 1. HTTPS 인증서가 정상 발급된다.
 2. `/health`가 `{"status":"ok"}`를 반환한다.
-3. 고객사·사이트·자산 등록이 가능하다.
-4. CycloneDX 샘플 파일이 공식 스키마 검증을 통과한다.
-5. SSH 정보가 없는 자산의 점검은 실패 원인을 기록한다.
-6. 시연용 대상 서버 점검에서 CPU·메모리·디스크가 저장된다.
+3. 서버 등록이 가능하다.
+4. `POST /api/sboms/import`로 SPDX·CycloneDX 샘플 파일이 공식 스키마 검증을 통과한다.
+5. SSH 정보가 없는 서버의 점검은 실패 원인을 기록한다.
+6. 시연용 대상 서버 점검에서 CPU·메모리·디스크와 `server_info`가 저장된다.
 7. API와 DB 포트가 외부에서 열려 있지 않다.

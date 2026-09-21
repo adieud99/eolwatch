@@ -1,67 +1,74 @@
-# EOLWatch
+# EOLWatch — 개발 및 인프라 취약점 검사 솔루션
 
-웹에서 **프로젝트 소스 ZIP·서버 앱 폴더·설치 패키지를 분석**하고, SBOM 상세·CVE 조치·지원 종료·계약을 자산별로 관리합니다. 현재 코드와 실제 실행 근거는 [구현 현황](docs/IMPLEMENTATION_STATUS.md)과 [프로젝트 확장 검증](docs/PROJECT_EXPANSION_VERIFICATION.md)을 기준으로 확인합니다.
+EOLWatch는 **개발 소스와 운영 서버의 취약점을 검사하고, 결과를 한곳의 기록에서 다시 보는 웹 서비스**다. 사용자는 소스 ZIP을 올리거나 서버의 IP·SSH 계정을 등록해 검사를 시작한다. Syft가 의존성 목록(SBOM)을 만들고 Grype가 취약점 DB와 대조한다. EOLWatch는 서버 등록, 검사 작업, 원본 보관, CVE 조회, 조치 기록, 전후 비교와 보고서를 담당한다.
 
-EOLWatch는 **웹에서 서버의 SBOM·취약점 분석을 실행하고, 영향받는 자산과 업데이트 전후 결과를 확인하는 인프라 유지관리 서비스**입니다. Syft가 설치 구성요소를 식별하고 Grype가 알려진 취약점과 대조합니다. EOLWatch는 자산 연결, 분석 작업, 원본 보관, CVE 조회와 조치 이력을 담당합니다.
+2026-09-18에 [재시작 계획](docs/RESTART_PLAN.md)에 따라 범위를 다시 정했다. 이전의 EOL 일정·자산 재고·고객·계약·소프트웨어 원장·Teams 알림 기능은 코드와 DB에서 제거했다(마이그레이션 `d2f8c4a71e9b`). 학교 파이널 프로젝트이며 특정 회사의 제품이나 내부 시스템을 재현한 것은 아니다.
 
-Black Duck은 비교·선택적 연동 대상으로 두며, 현재 기능과 시연에는 Black Duck 계정이나 서버가 필요하지 않습니다. 기존 EOL/EOSL·계약·SSH 상태 점검 기능은 자산 관리의 보조 기능으로 유지합니다. 학교 파이널 프로젝트이며 시스원의 공식 제품이나 내부 시스템을 재현한 것은 아닙니다.
+## 세 가지 축
 
-## 전체 구조와 분석 범위
+| 축 | 사용자가 하는 일 | 솔루션이 하는 일 | 결과 |
+|---|---|---|---|
+| 개발 검사 | 소스 ZIP을 올리고 검사를 시작한다 | Syft로 의존성 목록을 뽑고(SPDX 2.3) Grype로 취약점 DB와 대조한다. OSV로 교차 검증할 수 있다 | 라이브러리별 CVE, 수정 버전, 심각도 |
+| 인프라 검사 | 서버 IP·SSH 포트·SSH 계정을 등록하고 검사를 시작한다 | Syft를 SSH로 서버에 복사해 실행하고 설치 패키지와 서버 정보(CPU·메모리·디스크 사용률, OS)를 수집한다 | 서버 정보, OS 패키지 CVE |
+| 검사 기록 | 과거 검사를 찾아본다 | 검사 이력, CVE 결과와 조치, 조치 작업목록, 의존성 목록, 전후 비교와 PDF·JSON 보고서를 보여준다 | 이력, 비교, 보고서, 조치 기록 |
+
+관리자·조회자 권한과 감사 로그가 있다. 정기 검사 예약은 추가 서비스로, 현재 API로 제공한다.
+
+## 전체 구조
 
 ```text
-운영자 브라우저
-  → 관리 VM: React 웹 · FastAPI · PostgreSQL · 분석 worker
-  → 소스 ZIP: 관리 worker에서 Syft 실행 / 대상 VM: SSH로 Syft 실행
-  → 관리 VM: SPDX 2.3 변환 · Grype 분석 → 자산별 CVE 저장 → 웹 전후 비교
+사용자 브라우저
+  → 관리 VM: React 웹 · FastAPI · PostgreSQL · 검사 worker
+  → 개발 검사: 업로드한 ZIP을 관리 worker에서 Syft로 분석
+  → 인프라 검사: SSH로 대상 서버에 Syft 복사·실행, 설치 패키지·서버 정보 수집
+  → 관리 VM: SPDX 2.3 변환 · Grype 검사 → CVE 저장 → 검사 기록 · 전후 비교 · 보고서
 ```
 
-관리 VM 1대와 대상 VM 2대로 시연합니다. 도구는 **Syft 1.51.1 / Grype 0.118.0**으로 고정했습니다.
+관리 VM 1대와 대상 VM 2대로 시연한다. 도구는 **Syft 1.51.1 / Grype 0.118.0**으로 고정했다. 기준 SBOM 형식은 **SPDX 2.3 JSON**이다.
 
-| 웹에서 선택하는 범위 | 실제 분석 대상 |
+| 검사 범위 | 실제 검사 대상 |
 |---|---|
-| 소스 ZIP 업로드 | 잠금 파일·패키지 명세·설치 메타데이터가 포함된 프로젝트, 압축 50 MiB 이하 |
-| 서버 프로젝트 폴더 | 등록된 SSH 서버에서 지정한 절대 경로의 프로젝트 |
-| 서버 Python 가상환경 | 지정한 절대 경로에 설치된 Python 패키지 메타데이터 |
-| Ubuntu 설치 패키지 | 대상 서버의 dpkg 설치 패키지 |
-| 데모 앱 · Python | SSH 사용자의 고정 `~/eolwatch-demo/.venv`에 설치된 라이브러리 |
+| 개발 검사 · 소스 ZIP | 잠금 파일·패키지 명세·설치 메타데이터가 든 프로젝트, 압축 50 MiB 이하 |
+| 인프라 검사 · OS 설치 패키지 | 등록 서버의 dpkg 설치 패키지 |
+| 인프라 검사 · 데모 앱 Python | SSH 계정의 고정 `~/eolwatch-demo/.venv` |
+| API 전용 · 서버 경로 | 등록 서버의 절대 경로 프로젝트 폴더(`ssh-project-directory`) 또는 Python 가상환경(`ssh-python-environment`) |
 
-기준 SBOM 형식은 **SPDX 2.3 JSON**입니다. CycloneDX 1.4~1.7 가져오기도 지원합니다. 소스 분석은 포함된 메타데이터를 읽으며 의존성을 설치하거나 업로드한 프로그램을 실행하지 않습니다. 같은 자산·프로젝트 이름의 ZIP 또는 같은 서버 경로는 전후 비교할 수 있습니다. Git URL·컨테이너 이미지 직접 입력은 지원하지 않습니다.
+ZIP·폴더 검사는 포함된 메타데이터를 읽으며 의존성을 설치하거나 프로그램을 실행하지 않는다. 같은 서버·같은 범위의 검사는 전후 비교할 수 있다. Git URL·컨테이너 이미지 입력은 지원하지 않는다.
 
-`프로젝트 분석`에서 서버 분석을 예약하고, `SBOM 원장`에서 패키지·라이선스·의존관계·원본을 탐색합니다. `조치 작업목록`은 담당자·기한 초과·상태·심각도·자산별 검색과 CVE 이력을 제공합니다. `작업 대상`에서 자산을 수정하고 `제품·계약`에서 공통 수명주기·영향 자산·유지보수 계약을 관리합니다.
+## 화면 구성
 
-이 저장소를 분석할 소스 ZIP은 다음 명령으로 만들 수 있습니다. 지정된 소스와 패키지 명세만 포함하며 `.env`·SSH 키·DB·의존성 설치 폴더는 포함하지 않습니다.
+| 메뉴 | 내용 |
+|---|---|
+| 개요 | 등록 서버 수, SBOM·구성요소 수, 미조치 CVE(전체 이력·현재 기준), 서버·범위별 최근 검사 |
+| 개발 검사 | 소스 ZIP 업로드 → 검사 실행 → 진행 상태 → 결과 보기 |
+| 인프라 검사 | 서버 등록·수정, SSH 점검(서버 정보 수집), 취약점 검사, 서버 정보 수집 이력 |
+| 검사 기록 | 검사 이력 · CVE 결과·조치 · 조치 작업목록 · 의존성 목록 · 검사 전후 비교 |
+| 관리 | 사용자 관리, 변경 감사 로그 |
+
+이 저장소를 검사할 소스 ZIP은 다음 명령으로 만든다. 지정된 소스와 패키지 명세만 포함하며 `.env`·SSH 키·DB·의존성 설치 폴더는 넣지 않는다.
 
 ```bash
 python3 scripts/package-project-source.py
 ```
 
-생성 파일: `reports/eolwatch-project-source.zip`. 운영 백업은 [DB·업로드 ZIP 백업과 복구](docs/BACKUP_OPERATIONS.md)를 참고합니다.
-
-## 프로젝트 이력과 EOL 일정
-
-`프로젝트·분석 이력`에서 과거 분석을 페이지로 찾아 비교하고, 저장된 ZIP을 내려받거나 같은 입력으로 재분석합니다. 실행 중 작업은 프로세스 종료를 확인한 뒤 취소됩니다. `EOL 일정 조회`는 공개 제품·지원 주기를 선택해 현재 날짜와 비교하고 명시적으로 적용하며, 원본·출처·변경 이력을 보존합니다.
-
-자세한 사용법과 API는 [프로젝트 이력·공개 EOL 일정](docs/PROJECT_HISTORY_AND_EOL.md), 취소 시 중단 복구는 [분석 취소 운영](docs/ANALYSIS_CANCELLATION.md)을 참고합니다.
+생성 파일: `reports/eolwatch-project-source.zip`. 운영 백업은 [DB·업로드 ZIP 백업과 복구](docs/BACKUP_OPERATIONS.md)를 참고한다.
 
 ## 현재 확인한 결과
 
-- 실제 프로젝트 ZIP·서버 폴더·Python 경로 분석, 정기 예약, 실패 후 재시도와 관리 화면 검증
-- EOLWatch 자체 직접 의존성 보완 후 같은 소스 범위 CVE **9건 → 0건**: 미검출 8건, pytest 운영 의존성 제거 1건 — [분석 #5 → #10 PDF](reports/eolwatch-source-analysis-5-10.pdf)
-- Python 3.12 백엔드 **394개**, 프런트엔드 **120개** 테스트 통과 및 DB·원본 ZIP의 실제 백업 복구 확인
-- 웹에서 분석 요청 → 대기·수집·분석·저장 → 결과 자동 선택, 실패 이력과 재시도
-- 실제 Ubuntu 패키지 669개 수집·분석 및 자산별 CVE 조회
-- `LAB-VM-01`의 데모 앱을 Jinja2 **3.1.4 → 3.1.6**으로 업데이트하고 재분석
-- 분석 **#3 → #4**, SBOM **#12 → #13**에서 데모 앱 CVE **3건 → 0건** 확인
-- 같은 자산·범위의 원본으로 계속 검출·새로 검출·재분석 미검출·구성요소 제거 비교
-- 실제 시연 웹에서 분석 #3 → #4의 비교 PDF·JSON 다운로드 확인
+- 재범위화 후 테스트: 백엔드 **348 passed / 2 skipped**, 프런트엔드 **100 passed** (2026-09-21)
+- 개발 검사: EOLWatch 자체 소스 ZIP의 직접 의존성 보완 후 같은 범위 CVE **9건 → 0건** (미검출 8건, pytest 운영 의존성 제거 1건) — [검사 #5 → #10 PDF](reports/eolwatch-source-analysis-5-10.pdf)
+- 인프라 검사: `LAB-VM-01` 데모 앱의 Jinja2 **3.1.4 → 3.1.6** 업데이트 후 재검사, 검사 **#3 → #4**에서 CVE **3건 → 0건** — [비교 PDF](reports/eolwatch-analysis-3-4.pdf)
+- 실제 Ubuntu 설치 패키지 669개 수집·검사, 서버별 CVE 조회
+- 웹에서 검사 요청 → 대기·수집·분석·저장 → 결과 자동 선택, 실패 이력·재시도·취소
+- DB·원본 ZIP 백업과 임시 DB 복원 검증
 
-**3건 → 0건은 지정한 데모 앱 가상환경의 결과입니다.** 전체 OS의 취약점 해소나 실제 공격 성공·차단을 입증하는 수치는 아닙니다. 비교는 과거 VEX 상태를 바꾸지 않으며 조치 상태는 운영자가 판단해 기록합니다.
+검사 수치는 2026-09-15~16 검증 시점의 기록이다. **3건 → 0건은 데모 앱 가상환경, 9건 → 0건은 소스 ZIP 범위의 결과다.** 전체 OS의 취약점 해소나 실제 공격 성공·차단을 뜻하지 않는다. 비교는 과거 조치 상태를 바꾸지 않으며 조치 완료는 운영자가 판단해 기록한다.
 
 ## 시연 접속과 개발 실행
 
 | 주소 | 용도 |
 |---|---|
-| <http://127.0.0.1:18080> | 관리 VM의 실제 시연 서비스 — 위 분석 이력이 저장된 곳 |
+| <http://127.0.0.1:18080> | 관리 VM의 실제 시연 서비스 — 위 검사 이력이 저장된 곳 |
 | <http://127.0.0.1:8080> | 맥 Docker의 개발 서비스 — 별도 DB |
 | <http://127.0.0.1:8000/docs> | 맥 개발 API 문서 |
 
@@ -77,7 +84,7 @@ python3 scripts/package-project-source.py
 docker compose up --build -d
 ```
 
-백엔드는 Python **3.12**를 기준으로 개발·검증합니다. 운영 의존성은 `backend/requirements.txt`, 테스트 의존성은 `backend/requirements-dev.txt`로 분리했습니다. 기존 Python 3.9 가상환경을 덮어쓰지 않고 같은 실행 환경에서 검사하려면 다음을 사용합니다.
+백엔드는 Python **3.12**를 기준으로 개발·검증한다. 운영 의존성은 `backend/requirements.txt`, 테스트 의존성은 `backend/requirements-dev.txt`로 분리했다. 기존 Python 3.9 가상환경을 덮어쓰지 않고 같은 실행 환경에서 검사하려면 다음을 사용한다.
 
 ```bash
 sh scripts/test-backend.sh
@@ -85,33 +92,28 @@ npm --prefix frontend test
 npm --prefix frontend run build
 ```
 
-테스트 컨테이너는 소스·테스트 자료만 읽기 전용으로 연결하고 네트워크 없이 실행합니다. 의존성 변경 근거는 [의존성 보완 기록](docs/DEPENDENCY_REMEDIATION.md)에 있습니다.
+테스트 컨테이너는 소스·테스트 자료만 읽기 전용으로 연결하고 네트워크 없이 실행한다. 의존성 변경 근거는 [의존성 보완 기록](docs/DEPENDENCY_REMEDIATION.md)에 있다.
 
-기본 실습 로그인은 `admin` / `Eolwatch!2026`입니다. 개발용 합성 데이터가 필요한 경우에만 `docker compose exec api python -m app.seed`를 실행합니다. API 시작 시 Alembic 마이그레이션을 적용하며, 분석 실행에는 대상 서버와 SSH 키·known_hosts 설정이 필요합니다. 세부 설정은 [웹 분석 실행 안내](docs/WEB_ANALYSIS.md)를 따릅니다.
+기본 실습 로그인은 `admin` / `Eolwatch!2026`이다. 개발용 합성 데이터가 필요한 경우에만 `docker compose exec api python -m app.seed`를 실행한다. API 시작 시 Alembic 마이그레이션을 적용하며, 인프라 검사에는 대상 서버와 SSH 키·known_hosts 설정이 필요하다. 세부 설정은 [웹 검사 실행 안내](docs/WEB_ANALYSIS.md)를 따른다.
 
-## 교수님께 보여줄 순서
+## 시연 순서
 
-[교수님용 전체 구조·화면·시나리오 안내](docs/PROFESSOR_PROJECT_GUIDE.md)에 구조도와 화면별 설명을 정리했습니다.
+교수님 발표 순서는 8단계(개요 → 솔루션 전체 구성도 → 시스템 구성도 → 서비스 구성도 → 서비스 설명 → 인프라 설명 → 추가 서비스 → 마무리)이며 발표 자료는 맨 마지막에 만든다. 화면 시연은 다음 순서를 따른다.
 
-1. 관리 VM과 대상 VM, Syft·Grype·EOLWatch의 역할을 구조도로 설명합니다.
-2. `프로젝트 분석`에서 실제 소스 ZIP을 업로드하거나 서버 폴더를 지정하고, 진행 상태와 자산 연결을 보여줍니다.
-3. SBOM 상세의 구성요소·버전·라이선스·의존관계를 열고 CVE·수정 버전·지원 종료 정보를 확인합니다.
-4. 대상 앱을 업데이트한 뒤 같은 범위로 재분석합니다.
-5. 이전·이후 버전과 세 CVE의 미검출, 보존된 분석 원본을 보여줍니다.
-6. `검증 보고서 PDF`와 `검증 데이터 JSON`을 내려받아 분석 범위·버전 변화·비교 근거를 제시합니다.
-7. 조치 작업목록의 담당자·기한·이력과 제품 영향 자산·계약·정기 분석 예약을 보여줍니다.
+1. 개발 검사: 소스 ZIP 업로드 → 진행 상태 → CVE 결과.
+2. 인프라 검사: 서버 등록 → SSH 점검(서버 정보) → 취약점 검사 → CVE 결과.
+3. 검사 기록: 검사 이력에서 이전·이후 검사를 골라 전후 비교 → PDF·JSON 다운로드 → 조치 기록.
+4. 관리: 사용자 권한과 감사 로그. 추가 서비스로 정기 검사 예약을 소개한다.
 
-앱 설치·업데이트는 현재 실습 스크립트로 수행합니다. 상세 명령과 화면 순서는 [조치 시연 안내](docs/REMEDIATION_DEMO.md), 실제 근거는 [조치 전후 검증 기록](docs/archive/REMEDIATION_VERIFICATION_2026-09-15.md)에 있습니다.
-
-보고서 사용법은 [비교 보고서 안내](docs/COMPARISON_REPORTS.md), 다운로드 검증은 [비교 보고서 검증 기록](docs/archive/COMPARISON_REPORT_VERIFICATION_2026-09-15.md)을 확인합니다. 로컬 결과 파일은 `reports/eolwatch-analysis-3-4.pdf`와 `reports/eolwatch-analysis-3-4.json`입니다.
+세부 시나리오는 [교수님용 전체 구조·화면·시나리오 안내](docs/PROFESSOR_PROJECT_GUIDE.md), 데모 앱 업데이트 명령은 [조치 시연 안내](docs/REMEDIATION_DEMO.md), 보고서 사용법은 [비교 보고서 안내](docs/COMPARISON_REPORTS.md)를 따른다.
 
 ## 문서
 
-- [프로젝트 구성도와 단계별 진행 계획](docs/PROJECT_CONFIGURATION_AND_ROADMAP.md)
+- [재시작 계획 — 기준 문서](docs/RESTART_PLAN.md)
 - [현재 프로젝트 범위](docs/SCOPE_V3.md)
 - [현재 구현 현황과 남은 작업](docs/IMPLEMENTATION_STATUS.md)
+- [프로젝트 구성도와 단계별 진행 계획](docs/PROJECT_CONFIGURATION_AND_ROADMAP.md)
 - [다음 작업 재개](docs/NEXT_SESSION.md)
 - [전체 문서 안내](docs/README.md)
-- [프로젝트 요약서 PDF](docs/EOLWatch_프로젝트요약서_김연동_수정본.pdf) — 제출 정본
 
-제출 자료와 과거 기획 자료는 모두 `docs/`에 있습니다. [1차 기획안 DOCX](docs/EOLWatch_기획안_김연동.docx)·[1차 기획요약 PPTX](docs/EOLWatch_기획요약_김연동.pptx), [2차 기획](docs/archive/PROJECT_PLAN_V2.md), [AWS 배포 기록](docs/AWS_DEPLOYMENT_RECORD.md)은 이전 기획·실증 이력으로 보존하며 현재 시연 구성을 뜻하지 않습니다. 최신 기준은 위 범위·구현·검증 문서입니다.
+[2차 기획](docs/archive/PROJECT_PLAN_V2.md)과 [AWS 배포 기록](docs/AWS_DEPLOYMENT_RECORD.md)은 이전 기획·실증 이력으로 보존하며 현재 시연 구성을 뜻하지 않는다. 과거 검증 기록(`docs/archive/`, [프로젝트 확장 검증](docs/PROJECT_EXPANSION_VERIFICATION.md))에는 지금은 제거한 제품·계약·EOL 화면의 검증 내용이 그 시점의 기록으로 남아 있다.

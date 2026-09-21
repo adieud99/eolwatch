@@ -2,25 +2,25 @@
 
 ## 1. 매일 확인할 항목
 
-- 실패한 수집 작업과 `failure_stage`
-- 3회 이상 연속 실패한 자산
-- EXPIRED·CRITICAL 자산과 제품 릴리스
+- 실패한 SSH 점검·검사 작업과 `failure_stage`·오류 코드 (개요의 최근 24시간 실패 점검 수)
+- 3회 이상 연속 실패한 서버
+- 서버 정보 수집에서 건강도 CRITICAL로 판정된 서버
 - SBOM 품질 70점 미만 문서
-- 실패한 알림과 백업 작업
+- 실패한 백업 작업
 - 서비스 서버 디스크 사용률
 
 ## 2. 수집 실패 코드
 
 | 단계 | 대표 코드 | 확인할 것 |
 |---|---|---|
-| CONNECT | TARGET_NOT_CONFIGURED | 자산 IP와 SSH 계정 입력 여부 |
+| CONNECT | TARGET_NOT_CONFIGURED | 서버 IP와 SSH 계정 입력 여부 |
 | CONNECT | TIMEOUTERROR, SSHException | 라우팅, 보안그룹, sshd 상태 |
 | AUTH | KEY_NOT_FOUND | 키 파일 마운트와 파일 권한 |
 | AUTH | AUTHENTICATION_FAILED | 공개키 등록, 계정 잠금 여부 |
 | COMMAND | `*_EXIT_n` | 명령 설치 여부와 점검 계정 권한 |
 | PARSE | INVALID_CPU 등 | OS별 명령 출력 차이 |
 
-실패한 수집은 정상 점검으로 처리하지 않는다. 원인을 수정한 뒤 자산 화면에서 수동 점검을 실행하고, 성공 여부를 점검 이력에서 확인한다.
+실패한 수집은 정상 점검으로 처리하지 않는다. 원인을 수정한 뒤 `인프라 검사`에서 `SSH 점검`을 다시 실행하고, 성공 여부를 서버 정보 수집 이력에서 확인한다. 취약점 검사 작업의 실패는 `재시도`로 새 작업을 만든다.
 
 ## 3. 백업과 복구
 
