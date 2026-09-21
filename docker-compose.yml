@@ -22,6 +22,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-before-deployment}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Eolwatch!2026}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-claude-opus-5}
       PUBLIC_BASE_URL: http://localhost:8080
       DEMO_TARGET_IPS: ${DEMO_TARGET_IPS:-}
       SSH_PRIVATE_KEY_PATH: /run/secrets/eolwatch_ssh_key

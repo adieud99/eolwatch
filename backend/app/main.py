@@ -7,7 +7,7 @@ from . import models
 from .config import get_settings
 from .db import Base, SessionLocal, engine
 from .middleware import authenticate_and_audit
-from .routers import analyses, analysis_controls, analysis_history, assets, auth, checks, dashboard, sboms, vulnerabilities, vulnerability_work
+from .routers import ai, analyses, analysis_controls, analysis_history, assets, auth, checks, dashboard, sboms, vulnerabilities, vulnerability_work
 from .services.auth import ensure_admin
 
 
@@ -47,6 +47,7 @@ app.include_router(analysis_controls.router, prefix="/api")
 app.include_router(analysis_history.router, prefix="/api")
 app.include_router(analysis_history.reports_router, prefix="/api")
 app.include_router(analyses.router, prefix="/api")
+app.include_router(ai.router, prefix="/api")
 
 
 @app.get("/health", tags=["system"])

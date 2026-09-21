@@ -404,3 +404,18 @@ class AnalysisScheduleRead(BaseModel):
     last_requested_at: Optional[datetime]
     last_job_id: Optional[int]
     last_error: Optional[str]
+
+
+class AiStatus(BaseModel):
+    enabled: bool
+    model: str
+
+
+class AiSummaryRead(BaseModel):
+    id: int
+    kind: Literal["analysis", "check"]
+    target_id: int
+    model: str
+    summary: str
+    generated_at: datetime
+    generated_by: Optional[str] = None

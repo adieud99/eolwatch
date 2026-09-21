@@ -202,3 +202,7 @@ input[type="file"] { padding: 7px 10px; }
   .login-page { padding: 16px; }
   .login-card { padding: 28px 22px; }
 }
+
+.ai-panel { margin-top: 14px; border-left: 4px solid var(--green); }
+.ai-summary pre { margin: 0; white-space: pre-wrap; font: inherit; line-height: 1.8; color: var(--ink); }
+.ai-summary small { display: block; margin-top: 12px; color: var(--muted); font-size: 12px; }

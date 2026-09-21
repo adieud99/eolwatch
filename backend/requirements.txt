@@ -15,3 +15,4 @@ cvss==3.6
 packaging==25.0
 semantic-version==2.10.0
 packageurl-python==0.17.6
+anthropic>=0.60

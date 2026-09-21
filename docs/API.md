@@ -12,6 +12,18 @@
 
 인증은 미들웨어에서 검사하므로 OpenAPI 응답 목록에 없는 401·403도 반환할 수 있다. 비교·보고서 GET은 VEX를 변경하지 않는다. 로그인은 마지막 로그인 시각과 감사 로그를 기록한다. 아래 "로그인"은 ADMIN 또는 VIEWER를 뜻한다. 페이지 응답은 `items`, `total`, `limit`, `offset`을 포함한다.
 
+## 0. AI 요약 (선택 기능)
+
+| 방식 | 경로 | 권한 | 용도 |
+|---|---|---|---|
+| GET | `/api/ai/status` | 로그인 | AI 요약 사용 가능 여부와 모델 (`ANTHROPIC_API_KEY`가 설정돼야 `enabled: true`) |
+| GET | `/api/ai/analyses/{run_id}` | 로그인 | 검사 결과의 마지막 AI 요약 (없으면 `null`) |
+| POST | `/api/ai/analyses/{run_id}` | ADMIN | 검사 결과의 CVE 목록을 Claude에 보내 위험 수준·우선 조치·확인 사항을 한국어로 생성해 저장 |
+| GET | `/api/ai/checks/{job_id}` | 로그인 | SSH 점검의 마지막 AI 요약 |
+| POST | `/api/ai/checks/{job_id}` | ADMIN | 서버 정보·자원 사용률·포트·서비스를 Claude에 보내 서버 진단을 생성해 저장 |
+
+AI에는 EOLWatch가 이미 저장한 데이터(CVE 번호·구성요소·버전·서버 정보)만 보낸다. 토큰·소스 코드·비밀번호는 보내지 않는다. 결과는 담당자 참고용이며 검사 결과나 조치 상태를 바꾸지 않는다. 모델은 `AI_MODEL`(기본 `claude-opus-5`)로 바꾼다.
+
 ## 1. 개발 검사 — 소스 ZIP · 의존성 파일 · Git 저장소
 
 | 방식 | 경로 | 권한 | 용도·query |

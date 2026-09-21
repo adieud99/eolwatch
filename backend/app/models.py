@@ -326,4 +326,16 @@ class AnalysisSchedule(Base):
     __table_args__ = (UniqueConstraint("asset_id", "scan_scope", name="uq_analysis_schedule_target"),)
 
 
+class AiSummary(Base):
+    """A Claude-written assessment of one scan result (kind='analysis') or one SSH check (kind='check')."""
+    __tablename__ = "ai_summaries"
+    __table_args__ = (Index("ix_ai_summaries_kind_target", "kind", "target_id"),)
 
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    target_id: Mapped[int] = mapped_column(Integer)
+    model: Mapped[str] = mapped_column(String(80))
+    prompt_sha256: Mapped[str] = mapped_column(String(64))
+    summary: Mapped[str] = mapped_column(Text)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    generated_by: Mapped[Optional[str]] = mapped_column(String(80))

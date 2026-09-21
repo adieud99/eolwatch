@@ -243,7 +243,7 @@ function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendin
   )
 }
 
-function Checks({ checks }) {
+function Checks({ checks, canEdit }) {
   const [openId, setOpenId] = useState(null)
   return (
     <section className="panel full-panel">
@@ -256,7 +256,7 @@ function Checks({ checks }) {
           <td><span className={`job job-${job.status.toLowerCase()}`}>{job.status}</span></td>
           <td>{job.cpu_percent === null ? '-' : `${job.cpu_percent}%`}</td><td>{job.memory_percent === null ? '-' : `${job.memory_percent}%`}</td><td>{job.max_disk_percent === null ? '-' : `${job.max_disk_percent}%`}</td>
           <td>{job.health_level || job.failure_stage || '-'}<small>{job.failure_message}</small>{job.server_info && <button className="table-button" aria-label={`점검 ${job.id} 서버 정보`} onClick={() => setOpenId(openId === job.id ? null : job.id)}>{openId === job.id ? '서버 정보 닫기' : '서버 정보'}</button>}</td>
-        </tr>).flatMap((row, index) => { const job = checks[index]; return openId === job.id && job.server_info ? [row, <tr key={`${job.id}-info`}><td colSpan="7"><ServerInfoCard info={job.server_info} /></td></tr>] : [row] })}{checks.length === 0 && <tr><td colSpan="7" className="empty">수집 이력이 없습니다. 서버 목록에서 SSH 점검을 누르세요.</td></tr>}</tbody>
+        </tr>).flatMap((row, index) => { const job = checks[index]; return openId === job.id && job.server_info ? [row, <tr key={`${job.id}-info`}><td colSpan="7"><ServerInfoCard info={job.server_info} /><AiSummaryPanel kind="check" targetId={job.id} canEdit={canEdit} title="AI 요약 · 서버 진단" /></td></tr>] : [row] })}{checks.length === 0 && <tr><td colSpan="7" className="empty">수집 이력이 없습니다. 서버 목록에서 SSH 점검을 누르세요.</td></tr>}</tbody>
       </table></div>
     </section>
   )
@@ -361,6 +361,34 @@ function AnalysisComparison({ analyses, initialBaseId = '', initialTargetId = ''
   </section>
 }
 
+function AiSummaryPanel({ kind, targetId, canEdit, title = 'AI 요약' }) {
+  const [status, setStatus] = useState(null)
+  const [record, setRecord] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    const controller = new AbortController()
+    setRecord(null); setError('')
+    api('/ai/status', { signal: controller.signal }).then((value) => { if (!controller.signal.aborted) setStatus(value) }).catch(() => {})
+    if (targetId) api(`/ai/${kind === 'check' ? 'checks' : 'analyses'}/${targetId}`, { signal: controller.signal }).then((value) => { if (!controller.signal.aborted) setRecord(value) }).catch(() => {})
+    return () => controller.abort()
+  }, [kind, targetId])
+  async function generate() {
+    if (!targetId || busy) return
+    setBusy(true); setError('')
+    try { setRecord(await api(`/ai/${kind === 'check' ? 'checks' : 'analyses'}/${targetId}`, { method: 'POST' })) }
+    catch (reason) { setError(reason.message) }
+    finally { setBusy(false) }
+  }
+  if (!targetId) return null
+  return <section className="panel ai-panel" aria-label={title}>
+    <div className="panel-heading"><div><span className="eyebrow">AI ADVISOR</span><h2>{title}</h2><small>저장된 검사 데이터만 AI에 보내 한국어로 정리합니다. 조치 판단은 담당자가 합니다.</small></div><div className="action-row">{canEdit && <button className="primary" disabled={busy || status?.enabled === false} title={status?.enabled === false ? 'ANTHROPIC_API_KEY를 설정하면 사용할 수 있습니다.' : ''} onClick={generate}>{busy ? 'AI가 정리하는 중…' : record ? '다시 생성' : 'AI 요약 생성'}</button>}</div></div>
+    {status?.enabled === false && <p className="subtle">AI 요약이 꺼져 있습니다. 서버에 ANTHROPIC_API_KEY를 설정하면 켜집니다.</p>}
+    {error && <p className="form-error" role="alert">{error}</p>}
+    {record ? <div className="ai-summary"><pre>{record.summary}</pre><small>{record.model} · {new Date(record.generated_at).toLocaleString('ko-KR')}{record.generated_by ? ` · ${record.generated_by}` : ''}</small></div> : !error && <p className="subtle">아직 생성한 요약이 없습니다.</p>}
+  </section>
+}
+
 function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelectSbom, onViewSbom, onViewHistory }) {
   const [busy, setBusy] = useState(false)
   const [page, setPage] = useState({ sbomId, number: 0 })
@@ -439,6 +467,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
       </table></div>
     </section>
     <AnalysisComparison analyses={analyses} />
+    {sbomId && <AiSummaryPanel kind="analysis" targetId={analyses.find((run) => String(run.sbom_id) === String(sbomId))?.id} canEdit={canEdit} title="AI 요약 · 검사 결과" />}
     <section className="panel full-panel compare-panel">
     <div className="panel-heading">
       <div><span className="eyebrow">CVE · VEX</span><h2>CVE 조치 현황</h2><small>선택한 검사 결과의 CVE 목록입니다. 조치 상태는 담당자가 확인한 뒤 직접 기록합니다.</small></div>
@@ -724,7 +753,7 @@ export default function App() {
         {loading ? <div className="loading">데이터를 불러오는 중입니다…</div>
           : tab === 'overview' ? <Overview summary={summary} onViewResult={viewAnalysisResult} analysisJobs={analysisJobs} />
           : tab === 'dev' ? <><AnalysisTargets mode="zip" assets={assets} canEdit={canEdit} request={api} onJobQueued={acceptedAnalysisJob} initialAssetId={analysisInput.assetId} initialProjectName={analysisInput.projectName} initialScope={analysisInput.scanScope} initialTargetPath={analysisInput.targetPath} initialGitUrl={analysisInput.gitUrl} initialGitRef={analysisInput.gitRef} /><AnalysisJobs jobs={zipJobs} title="소스 검사 작업" hint="올린 파일이나 Git 저장소에서 의존성 목록을 뽑아 취약점을 대조합니다. 완료되면 결과 보기가 열립니다." {...jobsProps} /></>
-          : tab === 'infra' ? <><Servers assets={assets} checks={checks} onChanged={load} canEdit={canEdit} analysisJobs={analysisJobs} pendingAssets={pendingAssets} onStartAnalysis={requestAnalysis} focusedAssetId={focusedAssetId} onViewProjects={viewProjects} onViewCve={viewAssetWork} onViewSbom={viewSbom} /><AnalysisJobs jobs={serverJobs} title="서버 검사 작업" hint="검사 도구를 서버에 복사해 실행하고 설치 패키지를 수집해 취약점을 검사합니다." {...jobsProps} /><AnalysisTargets mode="ssh" assets={assets.filter((asset) => asset.ip_address || asset.ssh_username || asset.monitored)} canEdit={canEdit} request={api} onJobQueued={acceptedAnalysisJob} initialAssetId={analysisInput.assetId} initialProjectName={analysisInput.projectName} initialScope={analysisInput.scanScope} initialTargetPath={analysisInput.targetPath} /><Checks checks={checks} /></>
+          : tab === 'infra' ? <><Servers assets={assets} checks={checks} onChanged={load} canEdit={canEdit} analysisJobs={analysisJobs} pendingAssets={pendingAssets} onStartAnalysis={requestAnalysis} focusedAssetId={focusedAssetId} onViewProjects={viewProjects} onViewCve={viewAssetWork} onViewSbom={viewSbom} /><AnalysisJobs jobs={serverJobs} title="서버 검사 작업" hint="검사 도구를 서버에 복사해 실행하고 설치 패키지를 수집해 취약점을 검사합니다." {...jobsProps} /><AnalysisTargets mode="ssh" assets={assets.filter((asset) => asset.ip_address || asset.ssh_username || asset.monitored)} canEdit={canEdit} request={api} onJobQueued={acceptedAnalysisJob} initialAssetId={analysisInput.assetId} initialProjectName={analysisInput.projectName} initialScope={analysisInput.scanScope} initialTargetPath={analysisInput.targetPath} /><Checks checks={checks} canEdit={canEdit} /></>
           : tab === 'history' ? (
             historyView === 'projects' ? <ProjectHub assets={assets} canEdit={canEdit} request={api} download={download} onChanged={load} onJobQueued={acceptedAnalysisJob} onViewResult={viewAnalysisResult} onViewSbom={viewSbom} onCompare={viewComparison} onNewAnalysis={(input) => { setAnalysisInput(input); setTab(input.scanScope && !isZipScope(input.scanScope) ? 'infra' : 'dev') }} initialAssetId={projectContext.assetId} initialScope={projectContext.scanScope} onSelectionChange={setProjectContext} onViewWork={viewAssetWork} />
             : historyView === 'cve' ? <Security analyses={analyses} sboms={sboms} users={users} onChanged={load} canEdit={canEdit} sbomId={selectedSbomId} onSelectSbom={setSelectedSbomId} onViewSbom={viewSbom} onViewHistory={() => viewProjects()} />
