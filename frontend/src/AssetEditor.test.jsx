@@ -111,3 +111,23 @@ describe('비밀번호 인증', () => {
     expect(JSON.parse(options.body)).toEqual({ ssh_auth: 'password', ssh_password: 'hunter2' })
   })
 })
+
+describe('키 파일 첨부', () => {
+  it('키 파일을 첨부하면 파일 내용을 읽어 개인키로 보낸다', async () => {
+    const request = vi.fn(async (path, options) => options?.method === 'PATCH' ? { ...asset, ssh_auth: 'private_key', has_private_key: true } : path === '/sboms' || path.endsWith('/timeline') ? [] : asset)
+    const { props } = open({ request })
+    await ready()
+    fireEvent.change(screen.getByLabelText('인증 방식'), { target: { value: 'private_key' } })
+    fireEvent.click(screen.getByRole('button', { name: '서버 변경 저장' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('키 파일을 첨부하세요')
+    const pem = '-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----\n'
+    const file = new File([pem], 'id_ed25519', { type: 'text/plain' })
+    fireEvent.change(screen.getByLabelText(/SSH 개인키 파일/), { target: { files: [file] } })
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    fireEvent.click(screen.getByRole('button', { name: '서버 변경 저장' }))
+    await waitFor(() => expect(props.onSaved).toHaveBeenCalled())
+    const [, options] = request.mock.calls.find(([, options]) => options?.method === 'PATCH')
+    expect(JSON.parse(options.body)).toEqual({ ssh_auth: 'private_key', ssh_private_key: pem.trim() })
+  })
+})

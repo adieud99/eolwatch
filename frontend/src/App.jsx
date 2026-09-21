@@ -72,6 +72,8 @@ export function splitAddress(value) {
   return { host, port }
 }
 
+export const readTextFile = (file) => new Promise((resolve, reject) => { if (!file) return resolve(''); const reader = new FileReader(); reader.onload = () => resolve(String(reader.result || '')); reader.onerror = () => reject(new Error('키 파일을 읽지 못했습니다.')); reader.readAsText(file) })
+
 async function api(path, options) {
   const headers = new Headers(options?.headers || {})
   const token = localStorage.getItem('eolwatch_token')
@@ -196,14 +198,18 @@ function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendin
     const form = event.currentTarget
     event.preventDefault()
     setError('')
-    const data = Object.fromEntries(new FormData(form))
+    const formData = new FormData(form)
+    const keyFile = formData.get('ssh_private_key_file')
+    formData.delete('ssh_private_key_file')
+    const data = Object.fromEntries(formData)
+    try { if (data.ssh_auth === 'private_key') data.ssh_private_key = (await readTextFile(keyFile && keyFile.size ? keyFile : null)).trim() } catch (reason) { setError(reason.message); return }
+    if (data.ssh_auth === 'private_key' && !data.ssh_private_key) { setError('개인키 파일을 첨부하세요.'); return }
     const address = splitAddress(data.ip_address)
     data.ip_address = address.host || null
     data.ssh_port = Number(data.ssh_port) || address.port || 22
     if (!data.ssh_username) data.ssh_username = null
     if (!data.ssh_password) delete data.ssh_password
-    if (data.ssh_auth !== 'private_key' || !data.ssh_private_key) delete data.ssh_private_key
-    if (data.ssh_auth === 'key') delete data.ssh_password
+    if (data.ssh_auth !== 'private_key') delete data.ssh_private_key
     data.monitored = Boolean(data.monitored)
     try {
       await api('/assets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
@@ -238,10 +244,10 @@ function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendin
           <label>SSH 포트<input name="ssh_port" type="number" min="1" max="65535" defaultValue="22" /></label>
           <label>SSH 계정<input name="ssh_username" placeholder="eolwatch" /></label>
           <label>{authMode === 'private_key' ? '키 암호 (있을 때만)' : 'SSH 비밀번호'}<input name="ssh_password" type="password" autoComplete="new-password" disabled={authMode === 'key'} required={authMode === 'password'} placeholder={authMode === 'key' ? '관리 서버 키 사용 시 불필요' : ''} /></label>
-          <label>인증 방식<select name="ssh_auth" value={authMode} onChange={(event) => setAuthMode(event.target.value)}><option value="password">비밀번호</option><option value="private_key">개인키 붙여넣기</option><option value="key">관리 서버 키</option></select></label>
+          <label>인증 방식<select name="ssh_auth" value={authMode} onChange={(event) => setAuthMode(event.target.value)}><option value="password">비밀번호로 접속 (키 없이)</option><option value="private_key">키 파일 첨부</option></select></label>
           <label className="checkbox"><input type="checkbox" name="monitored" defaultChecked /> 검사 대상으로 사용</label>
-          {authMode === 'private_key' && <label style={{ gridColumn: '1 / -1' }}>SSH 개인키 (파일 내용 전체)<textarea name="ssh_private_key" rows={6} required spellCheck={false} placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;...&#10;-----END OPENSSH PRIVATE KEY-----" /></label>}
-          <p className="subtle" style={{ gridColumn: '1 / -1', margin: 0 }}>비밀번호와 개인키는 암호화해 저장하고 접속에만 씁니다. 처음 접속할 때 서버의 호스트 키를 기억해 두고 이후 바뀌면 접속을 막습니다. 관리 서버 키는 관리 서버에 키 파일과 known_hosts가 있을 때만 쓸 수 있습니다.</p>
+          {authMode === 'private_key' && <label style={{ gridColumn: '1 / -1' }}>SSH 개인키 파일 (id_ed25519, id_rsa, .pem 등)<input type="file" name="ssh_private_key_file" required /></label>}
+          <p className="subtle" style={{ gridColumn: '1 / -1', margin: 0 }}>비밀번호와 키 파일은 암호화해 저장하고 접속에만 씁니다. 처음 접속할 때 서버의 호스트 키를 기억해 두고 이후 바뀌면 접속을 막습니다.</p>
           {error && <p className="form-error">{error}</p>}
           <button className="primary submit" type="submit">저장</button>
         </form>
@@ -261,7 +267,7 @@ function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendin
                 <td><code>{asset.asset_tag}</code></td>
                 <td><strong>{asset.name}</strong><div className="action-row cell-actions"><button className="table-button" aria-label={`${asset.asset_tag} 서버 ${canEdit ? '수정' : '상세'}`} onClick={() => setEditing(asset)}>{canEdit ? '수정' : '상세'}</button><button className="table-button" aria-label={`${asset.asset_tag} 검사 기록`} onClick={() => onViewProjects(asset.id)}>검사 기록</button></div></td>
                 <td>{typeText[asset.asset_type] || asset.asset_type}</td>
-                <td>{asset.ip_address ? <><strong>{asset.ip_address}:{asset.ssh_port}</strong><small>{asset.ssh_username || 'SSH 계정 미입력'} · {asset.ssh_auth === 'password' ? '비밀번호' : asset.ssh_auth === 'private_key' ? '개인키' : '관리 서버 키'}</small></> : <small>주소 미입력</small>}</td>
+                <td>{asset.ip_address ? <><strong>{asset.ip_address}:{asset.ssh_port}</strong><small>{asset.ssh_username || 'SSH 계정 미입력'} · {asset.ssh_auth === 'password' ? '비밀번호' : asset.ssh_auth === 'private_key' ? '키 파일' : '관리 서버 키 (구 방식)'}</small></> : <small>주소 미입력</small>}</td>
                 <td>{info ? <><strong>{info.os_name || 'OS 미확인'}</strong><small>{[info.cpu_cores ? `${info.cpu_cores}코어` : null, gigabytes(info.memory_total_mb), platformText[info.platform] || info.platform].filter(Boolean).join(' · ')}</small>{info.cloud && <small>{info.cloud.instance_id} · {info.cloud.instance_type}</small>}</> : <small>SSH 점검 후 표시</small>}</td>
                 <td>SBOM {asset.sbom_count ?? 0}<small>CVE {asset.vulnerability_count ?? 0}건</small></td>
                 <td><label>검사 범위<select aria-label={`${asset.asset_tag} 검사 범위`} value={scanScopes[asset.id] || 'ubuntu-dpkg-installed'} disabled={!canEdit || unavailable || pending || Boolean(activeJob)} onChange={(event) => setScanScopes((current) => ({ ...current, [asset.id]: event.target.value }))}>{Object.entries(analysisScopeText).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><div className="action-row"><button className="table-button" disabled={!canEdit || !asset.ip_address || !asset.ssh_username} onClick={async () => {
