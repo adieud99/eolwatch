@@ -119,7 +119,7 @@ def test_check_context_is_compact_but_keeps_the_facts_that_matter():
     job = models.CollectionJob(id=9, asset=asset, status="SUCCESS", result=result)
     context = ai_advisor.check_context(job)
     assert context["packages"] == 669 and "packages" not in ai_advisor.build_prompt(context).split("\n", 1)[1][:0] or True
-    assert len(context["disks"]) == 6 and len(context["top_proc"]) == 5 and len(context["ports"]) == 20 and len(context["services"]) == 15
+    assert len(context["disks"]) == ai_advisor.MAX_DISKS and len(context["top_proc"]) == ai_advisor.MAX_PROCESSES and len(context["ports"]) == ai_advisor.MAX_PORTS and len(context["services"]) == ai_advisor.MAX_SERVICES
     assert context["cloud"] == {"provider": "aws", "instance_type": "t3.small", "region": "ap-northeast-2"}
     assert context["os"] == "Ubuntu 24.04 LTS" and context["ips"] == ["10.0.0.6/24"]
     assert len(ai_advisor.build_prompt(context)) < 1500  # the 500-package inventory never reaches the model
