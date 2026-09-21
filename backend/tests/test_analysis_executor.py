@@ -337,3 +337,14 @@ def test_unknown_scope_fails_before_tools_or_ssh(tmp_path, mocked_pipeline):
     manifest = json.loads((tmp_path / "job" / "manifest.json").read_text())
     assert manifest["scan_scope"] == "arbitrary-path"
     assert manifest["status"] == "failed"
+
+
+def test_remote_failure_message_includes_what_the_server_printed(tmp_path):
+    out, err = tmp_path / "o.log", tmp_path / "e.log"
+    out.write_text('Please login as the user "ubuntu" rather than the user "root".\n\n')
+    err.write_text("")
+    assert executor._remote_hint(out, err) == 'Please login as the user "ubuntu" rather than the user "root".'
+    err.write_text("x" * 300)
+    assert executor._remote_hint(out, err).endswith("…") and len(executor._remote_hint(out, err)) == 201
+    (tmp_path / "missing").unlink(missing_ok=True)
+    assert executor._remote_hint(tmp_path / "missing", tmp_path / "missing2") == ""

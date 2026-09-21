@@ -213,7 +213,8 @@ class _Run:
                         time.sleep(0.1)
             if entry["returncode"]:
                 code = "COLLECTION_TIMEOUT" if entry["returncode"] in (124, 137) else "REMOTE_COMMAND_FAILED"
-                raise AnalysisExecutionError(code, f"{name} 원격 작업에 실패했습니다. 대상 권한과 작업 로그를 확인하세요.")
+                hint = _remote_hint(stdout, stderr)
+                raise AnalysisExecutionError(code, f"{name} 원격 작업에 실패했습니다." + (f" 서버 응답: {hint}" if hint else " 대상 권한과 작업 로그를 확인하세요."))
         finally:
             if not completed and requested:
                 stopped = bool(channel is not None and channel.exit_status_ready()
@@ -239,6 +240,19 @@ class _Run:
         # jobs may use this receipt, never heartbeat expiry, to release an asset.
         self.manifest["cleanup_confirmed"] = self.cleanup_confirmed
         self.save()
+
+
+def _remote_hint(stdout: Path, stderr: Path, limit: int = 200) -> str:
+    """First line of what the server printed, so the reason shows up in the job list (e.g. a forced-command banner)."""
+    for path in (stderr, stdout):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            continue
+        if text:
+            line = text.splitlines()[0].strip()
+            return line[:limit] + ("…" if len(line) > limit else "")
+    return ""
 
 
 def _cancel_remote(client, pid_file: str) -> bool:
