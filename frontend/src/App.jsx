@@ -454,12 +454,13 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
   const [cveRead, setCveRead] = useState(null)
   const [selectedFinding, setSelectedFinding] = useState(null)
   const [bundle, setBundle] = useState(null)
+  const [cveFilter, setCveFilter] = useState({ fix: 'ALL', kernel: false })
   const scanRequest = useRef(null)
   const bundleRequest = useRef(null)
   const cveSection = useRef(null)
   const pageSize = 100
   const currentPage = page.sbomId === sbomId ? page.number : 0
-  const cveKey = `${sbomId}:${currentPage}:${cveRevision}`
+  const cveKey = `${sbomId}:${currentPage}:${cveRevision}:${cveFilter.fix}:${cveFilter.kernel}`
   const currentRead = cveRead?.key === cveKey ? cveRead : null
   const cveLoading = Boolean(sbomId && (!currentRead || currentRead.status === 'loading'))
   const cveError = currentRead?.error || ''
@@ -472,7 +473,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
     if (!sbomId) return
     const controller = new AbortController()
     setCveRead({ key: cveKey, status: 'loading' })
-    const params = new URLSearchParams({ sbom_id: String(sbomId), status: 'ALL', limit: String(pageSize), offset: String(currentPage * pageSize) })
+    const params = new URLSearchParams({ sbom_id: String(sbomId), status: 'ALL', fix: cveFilter.fix, kernel: String(cveFilter.kernel), limit: String(pageSize), offset: String(currentPage * pageSize) })
     api(`/vulnerability-work?${params}`, { signal: controller.signal }).then((result) => {
       if (controller.signal.aborted) return
       if (currentPage && currentPage * pageSize >= result.total) {
@@ -535,7 +536,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
           <td>{new Date(run.imported_at).toLocaleString('ko-KR')}<small>검사 #{run.id} · SBOM #{run.sbom_id}</small></td>
           <td><strong>{run.asset_tag} · {run.asset_name}</strong><small>{analysisScopeText[run.scan_scope] || scopeLabel(run.scan_scope)}</small></td>
           <td><strong>{run.scanner} {run.scanner_version}</strong><small>SBOM 생성: {run.generator?.includes('AI-Library-Reference') ? <span className="chip chip-ai">AI 라이브러리 참조 · 버전 추정</span> : (run.generator || '미상')}</small>{(run.database_info?.built || run.database_info?.status?.built) && <small>DB 기준: {new Date(run.database_info.built || run.database_info.status.built).toLocaleString('ko-KR')}</small>}</td>
-          <td><strong>CVE {run.cve_count}개 · 구성요소 연결 {run.link_count}건</strong><small>구성요소 {run.component_count}개 · 전체 탐지 {run.match_count}건 · CVE 외 {run.ignored_non_cve}건</small></td>
+          <td><strong>CVE {run.cve_count}개 · 수정판 있음 {run.fixable_cve_count ?? 0}개</strong><small>{run.kernel_cve_count ? `커널(linux) ${run.kernel_cve_count}개(수정판 ${run.kernel_fixable_cve_count ?? 0}) · ` : ''}수정판 없음 {run.cve_count - (run.fixable_cve_count ?? 0)}개 · 구성요소 연결 {run.link_count}건</small><small>구성요소 {run.component_count}개 · 전체 탐지 {run.match_count}건 · CVE 외 {run.ignored_non_cve}건</small></td>
           <td><div className="action-row"><button className="table-button" aria-label={`검사 ${run.id} CVE 보기`} onClick={() => selectSbom(String(run.sbom_id), true)}>CVE 보기</button><button className="table-button" aria-label={`검사 ${run.id} 원본 보기`} aria-pressed={bundle?.run?.id === run.id} onClick={() => viewBundle(run)}>원본 보기</button></div></td>
         </tr>)}{!analyses.length && <tr><td colSpan="5" className="empty">저장된 검사 결과가 없습니다.</td></tr>}</tbody>
       </table></div>
@@ -555,6 +556,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
     {selectedFinding && <VulnerabilityActions key={selectedFinding.link_id} finding={selectedFinding} analyses={analyses} users={users} canEdit={canEdit} request={api} onSaved={() => { setSelectedFinding(null); refreshCves(); return onChanged('조치 내용과 이력을 저장했습니다.') }} onClose={() => setSelectedFinding(null)} />}
     {cveLoading && <p role="status">CVE 결과를 불러오는 중…</p>}
     {cveError && <div role="alert"><p className="form-error">CVE 결과 조회 실패: {cveError}</p><button className="secondary" type="button" onClick={refreshCves}>CVE 조회 다시 시도</button></div>}
+    {sbomId && <div className="cve-filters" role="group" aria-label="CVE 표시 조건"><label>표시<select aria-label="수정판 기준" value={cveFilter.fix} onChange={(event) => { setCveFilter({ ...cveFilter, fix: event.target.value }); setPage({ sbomId, number: 0 }) }}><option value="ALL">전체</option><option value="FIXED">수정판 있는 CVE만</option><option value="UNFIXED">수정판 없는 CVE만</option></select></label><label className="check"><input type="checkbox" checked={cveFilter.kernel} onChange={(event) => { setCveFilter({ ...cveFilter, kernel: event.target.checked }); setPage({ sbomId, number: 0 }) }} />커널(linux) CVE 포함</label><small>Ubuntu는 커널(linux) 한 패키지에 수천 개의 CVE를 묶어 두므로 기본은 커널을 제외합니다. 바로 조치할 것만 보려면 '수정판 있는 CVE만'을 고르세요.</small></div>}
     <div className="table-wrap"><table aria-label="선택한 SBOM의 CVE"><thead><tr><th>CVE·출처</th><th>영향 대상</th><th>구성요소</th><th>수정 버전</th><th>심각도</th><th>조치 상태</th></tr></thead>
       <tbody>{visibleVulnerabilities.map((item) => <tr key={item.link_id}><td><code>{item.cve_id}</code><small>{item.finding_source || item.source || '출처 미상'}{item.analysis_run_id ? ` · 검사 #${item.analysis_run_id}` : ''}</small><small>{item.summary || '설명 없음'}</small></td><td><strong>{item.asset_tag || '미연결'}</strong><small>{item.asset_name || '대상 없음'}</small></td><td><strong>{item.component_name}</strong><small>검사 당시 {item.component_version || '버전 미상'}</small></td><td><strong>{item.fixed_versions?.length ? item.fixed_versions.join(', ') : item.fixed_version || '확인 필요'}</strong></td><td><span className={`severity severity-${item.severity.toLowerCase()}`}>{item.severity}</span></td><td><span aria-label={`${item.cve_id} ${item.component_name} 조치 상태`}>{vexStatusText[item.vex_status] || item.vex_status}</span><small>담당 {item.assignee_username || '미지정'}</small>{item.due_date && <small>기한 {item.due_date}</small>}<button className="table-button" aria-label={`${item.cve_id} ${item.component_name} ${canEdit ? '조치 관리' : '조치 이력'}`} onClick={() => setSelectedFinding(item)}>{canEdit ? '조치 관리' : '조치 이력'}</button></td></tr>)}{!cveLoading && !cveError && !visibleVulnerabilities.length && <tr><td colSpan="6" className="empty">{sbomId ? '이 SBOM에 저장된 CVE 결과가 없습니다.' : '위 목록에서 CVE 보기를 누르거나 SBOM을 고르세요.'}</td></tr>}</tbody>
     </table></div>

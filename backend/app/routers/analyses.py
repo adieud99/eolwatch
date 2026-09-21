@@ -10,6 +10,7 @@ from .. import models, schemas
 from ..db import get_db
 from ..config import get_settings
 from ..services.analysis import import_analysis
+from ..services.cve_breakdown import breakdown
 from ..services.analysis_jobs import enqueue_analysis
 from ..services.analysis_comparison import compare_analyses
 from ..services.analysis_uploads import save_upload
@@ -115,9 +116,9 @@ def retry_job(job_id: int, payload: Optional[schemas.AnalysisJobRequest] = Body(
     return read_job(enqueue_analysis(db, previous.asset_id, retry_of_id=job_id))
 
 
-def read(run: models.AnalysisRun) -> schemas.AnalysisRead:
+def read(run: models.AnalysisRun, counts: Optional[dict[str, int]] = None) -> schemas.AnalysisRead:
     asset = run.sbom.asset
-    return schemas.AnalysisRead(
+    return schemas.AnalysisRead(**(counts or {}),
         id=run.id, sbom_id=run.sbom_id, asset_id=run.sbom.asset_id,
         asset_tag=asset.asset_tag if asset else None, asset_name=asset.name if asset else None,
         scanner=run.scanner, scanner_version=run.scanner_version,
@@ -134,13 +135,15 @@ def list_analyses(db: Session = Depends(get_db)):
         defer(models.AnalysisRun.raw_report),
         joinedload(models.AnalysisRun.sbom).defer(models.SbomDocument.raw_document).joinedload(models.SbomDocument.asset)
     ).order_by(models.AnalysisRun.id.desc()).limit(100)).all()
-    return [read(run) for run in runs]
+    counts = breakdown(db, sorted({run.sbom_id for run in runs}))
+    return [read(run, counts.get(run.sbom_id)) for run in runs]
 
 
 @router.post('/import', response_model=schemas.AnalysisRead)
 def import_bundle(payload: schemas.AnalysisImport, db: Session = Depends(get_db)):
     try:
-        return read(import_analysis(db, payload))
+        run = import_analysis(db, payload)
+        return read(run, breakdown(db, [run.sbom_id])[run.sbom_id])
     except HTTPException:
         db.rollback()
         raise

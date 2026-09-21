@@ -5,7 +5,10 @@ import App from './App'
 
 function workPage(findings, url) {
   const params = new URL(url, 'http://localhost').searchParams
-  const items = findings.filter((finding) => (!params.has('sbom_id') || String(finding.sbom_id) === params.get('sbom_id')) && (params.get('status') !== 'OPEN' || ['AFFECTED', 'UNDER_INVESTIGATION'].includes(finding.vex_status)))
+  const hasFix = (finding) => Boolean(finding.fixed_version || finding.fixed_versions?.length)
+  const isKernel = (finding) => /^linux|^bpftool$/.test(finding.component_name || '')
+  const items = findings.filter((finding) => (!params.has('sbom_id') || String(finding.sbom_id) === params.get('sbom_id')) && (params.get('status') !== 'OPEN' || ['AFFECTED', 'UNDER_INVESTIGATION'].includes(finding.vex_status))
+    && (!params.has('fix') || params.get('fix') === 'ALL' || (params.get('fix') === 'FIXED') === hasFix(finding)) && (params.get('kernel') !== 'false' || !isKernel(finding)))
   const limit = Number(params.get('limit') || 25)
   const offset = Number(params.get('offset') || 0)
   return { items: items.slice(offset, offset + limit), total: items.length, limit, offset, as_of: '2026-09-15' }
@@ -529,7 +532,7 @@ describe('SBOM 취약점 분석 흐름', () => {
     expect(findings.getByText('담당 owner')).toBeInTheDocument()
     expect(findings.getByText('기한 2026-09-30')).toBeInTheDocument()
     expect(screen.getByLabelText('확인할 SBOM')).toHaveValue('2')
-    expect(fetch.mock.calls.filter(([url]) => url === '/api/vulnerability-work?sbom_id=2&status=ALL&limit=100&offset=0')).toHaveLength(2)
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/vulnerability-work?sbom_id=2&status=ALL&fix=ALL&kernel=false&limit=100&offset=0')).toHaveLength(2)
   })
 
   it('조회자의 조치 이력 패널은 읽기 전용이며 닫을 수 있다', async () => {
@@ -619,7 +622,7 @@ describe('SBOM 취약점 분석 흐름', () => {
     expect(findings.queryByText('CVE-2025-30000')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '다음 페이지' })).toBeDisabled()
     expect(screen.getByText('총 101건 · 101–101건 표시')).toBeInTheDocument()
-    const pageRequest = fetch.mock.calls.find(([url]) => url === '/api/vulnerability-work?sbom_id=2&status=ALL&limit=100&offset=100')
+    const pageRequest = fetch.mock.calls.find(([url]) => url === '/api/vulnerability-work?sbom_id=2&status=ALL&fix=ALL&kernel=false&limit=100&offset=100')
     expect(pageRequest[1].headers.get('Authorization')).toBe('Bearer token')
     expect(fetch.mock.calls.some(([url]) => url === '/api/vulnerabilities')).toBe(false)
 
@@ -687,8 +690,8 @@ describe('SBOM 취약점 분석 흐름', () => {
     await act(async () => { finishScan(jsonResponse({ unique_vulnerabilities: 1, ignored_non_cve: 0 })) })
     expect(screen.getByText('1 / 1 페이지')).toBeInTheDocument()
     expect(within(screen.getByRole('table', { name: '선택한 SBOM의 CVE' })).getByText(newFinding.cve_id)).toBeInTheDocument()
-    expect(fetch.mock.calls.filter(([url]) => url === '/api/vulnerability-work?sbom_id=2&status=ALL&limit=100&offset=100')).toHaveLength(2)
-    expect(fetch.mock.calls.filter(([url]) => url === '/api/vulnerability-work?sbom_id=2&status=ALL&limit=100&offset=0')).toHaveLength(2)
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/vulnerability-work?sbom_id=2&status=ALL&fix=ALL&kernel=false&limit=100&offset=100')).toHaveLength(2)
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/vulnerability-work?sbom_id=2&status=ALL&fix=ALL&kernel=false&limit=100&offset=0')).toHaveLength(2)
     expect(fetch.mock.calls.some(([url]) => url === '/api/vulnerabilities')).toBe(false)
   })
 
@@ -740,7 +743,7 @@ describe('SBOM 취약점 분석 흐름', () => {
     expect(screen.getByLabelText('확인할 SBOM')).toHaveValue('2')
     expect(screen.getByText(newFinding.cve_id)).toBeInTheDocument()
     expect(screen.queryByText(oldFinding.cve_id)).not.toBeInTheDocument()
-    const pageRequest = fetch.mock.calls.find(([url]) => url === '/api/vulnerability-work?sbom_id=2&status=ALL&limit=100&offset=0')
+    const pageRequest = fetch.mock.calls.find(([url]) => url === '/api/vulnerability-work?sbom_id=2&status=ALL&fix=ALL&kernel=false&limit=100&offset=0')
     expect(pageRequest[1].headers.get('Authorization')).toBe('Bearer token')
     expect(fetch.mock.calls.some(([url]) => url === '/api/auth/users')).toBe(false)
     expect(fetch.mock.calls.every(([, options]) => !options.method)).toBe(true)
@@ -1097,7 +1100,7 @@ describe('파이프라인 AI 표시', () => {
       { id: 'firewall', purpose: '방화벽 활성 여부와 규칙 요약', reason: '외부 노출 서버', command: 'ufw status', ok: false, output: 'ufw: command not found' }] }
   const check = { id: 31, asset_id: 7, asset_tag: 'srv-han', asset_name: '성민 서버', status: 'SUCCESS', started_at: '2026-09-21T09:00:00Z', cpu_percent: 3, memory_percent: 40, max_disk_percent: 55, health_level: 'OK',
     server_info: { hostname: 'ip-10-0-1-5', os_name: 'Ubuntu 22.04.4 LTS', architecture: 'x86_64', platform: 'aws', services: ['ssh.service'], listening_ports: [{ port: 22 }], ai_collection: agent } }
-  const run = { id: 40, sbom_id: 9, asset_tag: 'GH-app', asset_name: 'GitHub app', scanner: 'grype', scanner_version: '0.118.0', generator: 'EOLWatch-AI-Library-Reference, gpt-5-mini', scan_scope: 'source-git:app', component_count: 6, match_count: 2, cve_count: 2, link_count: 2, ignored_non_cve: 0, imported_at: '2026-09-21T09:10:00Z', database_info: {} }
+  const run = { id: 40, sbom_id: 9, asset_tag: 'GH-app', asset_name: 'GitHub app', scanner: 'grype', scanner_version: '0.118.0', generator: 'EOLWatch-AI-Library-Reference, gpt-5-mini', scan_scope: 'source-git:app', component_count: 6, match_count: 2, cve_count: 2, link_count: 2, ignored_non_cve: 0, fixable_cve_count: 1, kernel_cve_count: 0, imported_at: '2026-09-21T09:10:00Z', database_info: {} }
   function setup(data) {
     localStorage.clear(); localStorage.setItem('eolwatch_token', 'token'); localStorage.setItem('eolwatch_user', JSON.stringify({ id: 1, username: 'operator', role: 'ADMIN' }))
     vi.stubGlobal('fetch', vi.fn(async (url) => ({ ok: true, status: 200, json: async () => (url in data ? data[url] : (url.startsWith('/api/ai/') ? null : [])) })))
@@ -1123,5 +1126,7 @@ describe('파이프라인 AI 표시', () => {
     openHistoryView('CVE 결과·조치')
     await screen.findByRole('heading', { name: '최근 검사 결과' })
     expect(screen.getByText('AI 라이브러리 참조 · 버전 추정')).toBeInTheDocument()
+    expect(screen.getByText('CVE 2개 · 수정판 있음 1개')).toBeInTheDocument()
+    expect(screen.getByText(/수정판 없음 1개 · 구성요소 연결 2건/)).toBeInTheDocument()
   })
 })

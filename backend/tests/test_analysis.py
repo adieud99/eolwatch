@@ -294,3 +294,33 @@ def test_viewer_can_read_analysis_but_cannot_import(client, bundle, analysis_db)
     assert row_count(analysis_db, models.AnalysisRun) == 1
     client.headers.pop("Authorization")
     assert client.get("/api/analyses").status_code == 401
+
+
+def test_runs_split_fixable_and_kernel_cves_and_work_list_filters_them(client, bundle):
+    """A kernel source package carries thousands of tracked CVEs; the actionable number is what has a fix outside it."""
+    kernel_package = dict(bundle["sbom"]["packages"][0], SPDXID="SPDXRef-Package-kernel", name="linux-image-6.8.0-1-aws", versionInfo="6.8.0-1",
+                          externalRefs=[{"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl",
+                                         "referenceLocator": "pkg:deb/ubuntu/linux-image-6.8.0-1-aws@6.8.0-1?arch=amd64&distro=ubuntu-24.04&upstream=linux%406.8.0-1"}])
+    bundle["sbom"]["packages"].append(kernel_package)
+    bundle["sbom"]["relationships"].append({"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": "SPDXRef-Package-kernel"})
+    kernel_artifact = {"name": "linux-image-6.8.0-1-aws", "version": "6.8.0-1", "purl": kernel_package["externalRefs"][0]["referenceLocator"]}
+    bundle["report"]["matches"] += [
+        {"artifact": kernel_artifact, "vulnerability": {"id": "CVE-2026-20001", "severity": "Medium", "fix": {"state": "fixed", "versions": ["6.8.0-2"]}}, "relatedVulnerabilities": []},
+        {"artifact": kernel_artifact, "vulnerability": {"id": "CVE-2026-20002", "severity": "Medium", "fix": {"state": "not-fixed", "versions": []}}, "relatedVulnerabilities": []},
+    ]
+    imported = client.post("/api/analyses/import", json=bundle)
+    assert imported.status_code == 200, imported.text
+    body = imported.json()
+    assert (body["cve_count"], body["fixable_cve_count"], body["kernel_cve_count"], body["kernel_fixable_cve_count"]) == (3, 2, 2, 1)
+    listed = next(run for run in client.get("/api/analyses").json() if run["id"] == body["id"])
+    assert (listed["fixable_cve_count"], listed["kernel_cve_count"], listed["kernel_fixable_cve_count"]) == (2, 2, 1)
+    sbom_id = body["sbom_id"]
+    def cves(**params):
+        page = client.get("/api/vulnerability-work", params={"sbom_id": sbom_id, "status": "ALL", **params})
+        assert page.status_code == 200, page.text
+        return sorted(item["cve_id"] for item in page.json()["items"])
+    assert cves() == ["CVE-2026-12345", "CVE-2026-20001", "CVE-2026-20002"]
+    assert cves(fix="FIXED") == ["CVE-2026-12345", "CVE-2026-20001"]
+    assert cves(fix="UNFIXED") == ["CVE-2026-20002"]
+    assert cves(kernel="false") == ["CVE-2026-12345"]
+    assert cves(fix="FIXED", kernel="false") == ["CVE-2026-12345"]

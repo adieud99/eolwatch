@@ -375,6 +375,9 @@ class AnalysisRead(BaseModel):
     cve_count: int
     link_count: int
     ignored_non_cve: int
+    fixable_cve_count: int = 0          # distinct CVEs with a fixed package version
+    kernel_cve_count: int = 0           # distinct CVEs on kernel (linux source) packages
+    kernel_fixable_cve_count: int = 0
     database_info: dict[str, Any]
     imported_at: datetime
 
