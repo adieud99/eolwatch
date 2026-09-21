@@ -68,6 +68,7 @@
 | GET | `/api/analyses/schedules` | 로그인 | 정기 검사 예약 목록 |
 | POST | `/api/analyses/schedules` | ADMIN | 정기 검사 예약 생성 |
 | PATCH | `/api/analyses/schedules/{schedule_id}` | ADMIN | 예약 주기·활성 상태 수정 |
+| DELETE | `/api/analyses/schedules/{schedule_id}` | ADMIN | 정기 검사 삭제 (204) |
 
 서버 필드는 `asset_tag`, `name`, `asset_type`(`server`, `storage`, `network`, `security`, `vm`, `cloud`, `other`), `ip_address`, `ssh_port`, `ssh_username`, `monitored`다. 응답에는 `sbom_count`, `vulnerability_counts`(심각도별), `vulnerability_count`가 붙는다. 건물·랙·구매가·담당자 같은 재고 필드는 없다.
 

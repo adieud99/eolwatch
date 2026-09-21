@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Response, UploadFile
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, defer, joinedload
@@ -105,6 +105,16 @@ def add_schedule(payload: schemas.AnalysisScheduleCreate, db: Session = Depends(
 @router.patch('/schedules/{schedule_id}', response_model=schemas.AnalysisScheduleRead)
 def change_schedule(schedule_id: int, payload: schemas.AnalysisScheduleUpdate, db: Session = Depends(get_db)):
     return read_schedule(update_schedule(db, schedule_id, payload))
+
+
+@router.delete('/schedules/{schedule_id}', status_code=204)
+def remove_schedule(schedule_id: int, db: Session = Depends(get_db)):
+    schedule = db.get(models.AnalysisSchedule, schedule_id)
+    if not schedule:
+        raise HTTPException(status_code=404, detail='정기 검사가 없습니다')
+    db.delete(schedule)
+    db.commit()
+    return Response(status_code=204)
 
 
 @router.post('/jobs/{job_id}/retry', response_model=schemas.AnalysisJobRead, status_code=202)

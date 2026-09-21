@@ -82,6 +82,15 @@ describe('실제 프로젝트 분석 입력', () => {
     expect(screen.queryByRole('button', { name: '일시 중지' })).not.toBeInTheDocument()
   })
 
+  it('예약을 삭제하면 목록에서 사라진다', async () => {
+    const request = vi.fn(async (path, options) => options?.method === 'DELETE' ? null : [schedule])
+    open({ request })
+    await screen.findByLabelText('예약 9 주기')
+    fireEvent.click(screen.getByRole('button', { name: '예약 9 삭제' }))
+    await screen.findByText('등록된 정기 검사가 없습니다.')
+    expect(request).toHaveBeenCalledWith('/analyses/schedules/9', expect.objectContaining({ method: 'DELETE' }))
+  })
+
   it('패널을 떠나면 업로드 요청을 취소하고 늦은 응답으로 화면을 이동하지 않는다', async () => {
     let resolve
     const request = vi.fn((path, options) => options?.method === 'POST' ? new Promise((done) => { resolve = done }) : Promise.resolve([]))

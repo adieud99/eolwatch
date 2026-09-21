@@ -212,6 +212,7 @@ def test_schedule_is_durable_coalesces_missed_runs_and_can_pause(client, factory
     with factory() as db:
         assert db.scalar(select(func.count()).select_from(models.AnalysisJob)) == 1
     paused = client.patch(f'/api/analyses/schedules/{schedule_id}', json={'enabled': False})
+
     assert paused.status_code == 200
     with factory() as db:
         db.get(models.AnalysisSchedule, schedule_id).next_run_at = models.utcnow() - timedelta(minutes=1)
@@ -219,6 +220,10 @@ def test_schedule_is_durable_coalesces_missed_runs_and_can_pause(client, factory
     assert schedules.enqueue_due_schedules() == 0
     assert client.patch(f'/api/analyses/schedules/{schedule_id}', json={'enabled': True, 'interval_minutes': 10}).json()['interval_minutes'] == 10
     assert client.patch(f'/api/analyses/schedules/{schedule_id}', json={'enabled': None}).status_code == 422
+    # deleting frees the (asset, scope, path) slot for a new schedule
+    assert client.delete(f'/api/analyses/schedules/{schedule_id}').status_code == 204
+    assert client.get('/api/analyses/schedules').json() == [] and client.delete(f'/api/analyses/schedules/{schedule_id}').status_code == 404
+    assert client.post('/api/analyses/schedules', json=request).status_code == 201
 
 
 def test_busy_other_scope_keeps_schedule_due_until_asset_is_free(client, factory, asset):

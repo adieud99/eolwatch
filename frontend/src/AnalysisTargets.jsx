@@ -102,6 +102,16 @@ export default function AnalysisTargets({ mode: fixedMode, assets, canEdit, requ
     finally { if (operation.current === controller) operation.current = null; if (!controller.signal.aborted) setBusy('') }
   }
 
+  async function removeSchedule(item) {
+    if (!canEdit || updateRequest.current) return
+    const controller = new AbortController(); updateRequest.current = controller; setPatching(item.id); setScheduleError('')
+    try {
+      await request(`/analyses/schedules/${item.id}`, { method: 'DELETE', signal: controller.signal })
+      if (!controller.signal.aborted) setSchedules((current) => current.filter((value) => value.id !== item.id))
+    } catch (reason) { if (!controller.signal.aborted) setScheduleError(reason.message) }
+    finally { if (updateRequest.current === controller) { updateRequest.current = null; setPatching(null) } }
+  }
+
   async function changeSchedule(item, enabled) {
     if (!canEdit || updateRequest.current) return
     const minutes = Number(scheduleEdits[item.id] ?? item.interval_minutes)
@@ -132,7 +142,7 @@ export default function AnalysisTargets({ mode: fixedMode, assets, canEdit, requ
     </section>
     {fixedMode !== 'zip' && <section className="panel workspace-panel"><div className="workspace-title"><div><span className="eyebrow">SCHEDULED ANALYSIS</span><h2>정기 검사</h2><p className="workspace-help">정한 주기마다 서버를 다시 검사합니다. 검사가 진행 중이면 겹치지 않게 건너뜁니다.</p></div><button className="secondary" disabled={scheduleBusy || patching !== null} onClick={loadSchedules}>새로고침</button></div>
       {scheduleError && <p className="form-error" role="alert">{scheduleError}</p>}
-      {scheduleBusy ? <p role="status">예약을 불러오는 중…</p> : <div className="table-wrap"><table aria-label="정기 검사 목록"><thead><tr><th>대상</th><th>상태·다음 실행</th><th>최근 요청</th><th>주기 (분)</th><th>관리</th></tr></thead><tbody>{schedules.map((item) => <tr key={item.id}><td><strong>{item.asset_tag} · {item.asset_name}</strong><small>{scopeLabel(item.scan_scope)}</small></td><td>{item.enabled ? '실행 중' : '일시 중지'}<small>{item.enabled ? dateTime(item.next_run_at) : '예약 중지됨'}</small></td><td>{dateTime(item.last_requested_at)}<small>{item.last_job_id ? `작업 #${item.last_job_id}` : '실행 이력 없음'}</small>{item.last_error && <small>{item.last_error}</small>}</td><td>{canEdit ? <input aria-label={`예약 ${item.id} 주기`} type="number" min={5} max={525600} step={1} disabled={patching !== null} value={scheduleEdits[item.id] ?? item.interval_minutes} onChange={(event) => setScheduleEdits((current) => ({ ...current, [item.id]: event.target.value }))} /> : item.interval_minutes}</td><td>{canEdit && <div className="action-row"><button className="table-button" disabled={patching !== null} onClick={() => changeSchedule(item, item.enabled)}>주기 저장</button><button className="table-button" disabled={patching !== null} onClick={() => changeSchedule(item, !item.enabled)}>{item.enabled ? '일시 중지' : '다시 실행'}</button></div>}</td></tr>)}{!schedules.length && !scheduleError && <tr><td colSpan={5} className="empty">등록된 정기 검사가 없습니다.</td></tr>}</tbody></table></div>}
+      {scheduleBusy ? <p role="status">예약을 불러오는 중…</p> : <div className="table-wrap"><table aria-label="정기 검사 목록"><thead><tr><th>대상</th><th>상태·다음 실행</th><th>최근 요청</th><th>주기 (분)</th><th>관리</th></tr></thead><tbody>{schedules.map((item) => <tr key={item.id}><td><strong>{item.asset_tag} · {item.asset_name}</strong><small>{scopeLabel(item.scan_scope)}</small></td><td>{item.enabled ? '실행 중' : '일시 중지'}<small>{item.enabled ? dateTime(item.next_run_at) : '예약 중지됨'}</small></td><td>{dateTime(item.last_requested_at)}<small>{item.last_job_id ? `작업 #${item.last_job_id}` : '실행 이력 없음'}</small>{item.last_error && <small>{item.last_error}</small>}</td><td>{canEdit ? <input aria-label={`예약 ${item.id} 주기`} type="number" min={5} max={525600} step={1} disabled={patching !== null} value={scheduleEdits[item.id] ?? item.interval_minutes} onChange={(event) => setScheduleEdits((current) => ({ ...current, [item.id]: event.target.value }))} /> : item.interval_minutes}</td><td>{canEdit && <div className="action-row"><button className="table-button" disabled={patching !== null} onClick={() => changeSchedule(item, item.enabled)}>주기 저장</button><button className="table-button" disabled={patching !== null} onClick={() => changeSchedule(item, !item.enabled)}>{item.enabled ? '일시 중지' : '다시 실행'}</button><button className="table-button" disabled={patching !== null} aria-label={`예약 ${item.id} 삭제`} onClick={() => removeSchedule(item)}>삭제</button></div>}</td></tr>)}{!schedules.length && !scheduleError && <tr><td colSpan={5} className="empty">등록된 정기 검사가 없습니다.</td></tr>}</tbody></table></div>}
     </section>}
   </>
 }
