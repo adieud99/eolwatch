@@ -38,6 +38,7 @@ MAX_PROCESSES = 5
 MAX_DISKS = 6
 MAX_AGENT_RESULTS = 8
 MAX_AGENT_OUTPUT_CHARS = 240
+OPENAI_MIN_COMPLETION_TOKENS = 4000
 
 SYSTEM_PROMPT = (
     "너는 EOLWatch의 보안 검토 보조자다. 취약점 검사 결과를 받아 운영 담당자가 바로 행동할 수 있게 한국어로 정리한다. "
@@ -156,7 +157,9 @@ def _complete_openai(prompt: str, system: str, json_mode: bool, max_tokens: int)
     """OpenAI chat completions over plain HTTPS; OPENAI_BASE_URL also lets any OpenAI-compatible server answer."""
     settings = get_settings()
     key = settings.openai_api_key or os.environ.get("OPENAI_API_KEY", "")
-    body: dict[str, Any] = {"model": settings.openai_model, "max_completion_tokens": max_tokens,
+    # Reasoning models (gpt-5, gemini-2.5 behind the compatible endpoint) spend hidden thinking tokens from
+    # the same budget, so the cap gets headroom; the prompt itself is what keeps the cost down.
+    body: dict[str, Any] = {"model": settings.openai_model, "max_completion_tokens": max(max_tokens * 4, OPENAI_MIN_COMPLETION_TOKENS),
                             "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]}
     if json_mode:
         body["response_format"] = {"type": "json_object"}
