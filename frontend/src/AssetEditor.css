@@ -30,3 +30,4 @@
 .asset-timeline li small { color: var(--muted); }
 .asset-timeline li span { color: var(--ink); font-size: .9rem; }
 @media (max-width: 680px) { .asset-editor-grid { grid-template-columns: 1fr; } }
+.asset-editor-wide { grid-column: 1 / -1; display: grid; gap: .5rem; }

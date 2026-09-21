@@ -23,8 +23,8 @@ from .analysis_profiles import (DEFAULT_SCAN_SCOPE, GIT_SCAN_SCOPE, PATH_SCAN_SC
 logger = logging.getLogger(__name__)
 RUNNING = ('COLLECTING', 'SCANNING', 'IMPORTING')
 ACTIVE = ('QUEUED', *RUNNING, 'CANCEL_REQUESTED')
-SNAPSHOT_FIELDS = ('id', 'asset_tag', 'name', 'ip_address', 'ssh_port', 'ssh_username')
-TARGET_FIELDS = ('ip_address', 'ssh_port', 'ssh_username')
+SNAPSHOT_FIELDS = ('id', 'asset_tag', 'name', 'ip_address', 'ssh_port', 'ssh_username', 'ssh_auth', 'ssh_password_encrypted', 'ssh_host_key')
+TARGET_FIELDS = ('ip_address', 'ssh_port', 'ssh_username', 'ssh_auth')
 
 
 class JobLeaseLost(RuntimeError):
@@ -358,6 +358,10 @@ def process_next_analysis_job() -> Optional[int]:
             payload = schemas.AnalysisImport(asset_id=job.asset_id, sbom=bundle['sbom'], report=bundle['report'],
                                             scan_scope=bundle['scan_scope'])
             run = import_analysis(db, payload, commit=False)
+            if bundle.get('learned_host_key'):
+                target = db.get(models.Asset, job.asset_id)
+                if target is not None and not target.ssh_host_key:
+                    target.ssh_host_key = bundle['learned_host_key']
             job.analysis_run_id = run.id
             job.status = 'SUCCESS'
             job.active_asset_id = None

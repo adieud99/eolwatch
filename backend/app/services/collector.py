@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..config import get_settings
+from . import ssh_auth
 
 
 COMMANDS = {
@@ -389,28 +390,25 @@ def collect_over_ssh(asset: models.Asset) -> dict[str, Any]:
     settings = get_settings()
     if not asset.ip_address or not asset.ssh_username:
         raise CollectionFailure("CONNECT", "TARGET_NOT_CONFIGURED", "IP 주소와 SSH 계정이 필요합니다")
-    key_path: Optional[str] = settings.ssh_private_key_path or None
+    password_mode = ssh_auth.auth_mode(asset) == ssh_auth.AUTH_PASSWORD
+    key_path: Optional[str] = None if password_mode else (settings.ssh_private_key_path or None)
+    if password_mode and not ssh_auth.decrypt_password(asset.ssh_password_encrypted):
+        raise CollectionFailure("AUTH", "PASSWORD_MISSING", "이 서버의 SSH 비밀번호가 저장되어 있지 않습니다")
     if key_path and not Path(key_path).is_file():
         raise CollectionFailure("AUTH", "KEY_NOT_FOUND", "설정한 SSH 개인키 파일이 없습니다")
 
     client = paramiko.SSHClient()
-    if settings.ssh_known_hosts_path:
-        client.load_host_keys(settings.ssh_known_hosts_path)
+    pinned = ssh_auth.PinnedHostKeyPolicy(asset.ssh_host_key)
+    if password_mode:
+        client.set_missing_host_key_policy(pinned)
     else:
-        client.load_system_host_keys()
-    client.set_missing_host_key_policy(paramiko.RejectPolicy() if settings.ssh_strict_host_key else paramiko.AutoAddPolicy())
+        if settings.ssh_known_hosts_path:
+            client.load_host_keys(settings.ssh_known_hosts_path)
+        else:
+            client.load_system_host_keys()
+        client.set_missing_host_key_policy(paramiko.RejectPolicy() if settings.ssh_strict_host_key else paramiko.AutoAddPolicy())
     try:
-        client.connect(
-            hostname=asset.ip_address,
-            port=asset.ssh_port,
-            username=asset.ssh_username,
-            key_filename=key_path,
-            timeout=settings.ssh_connect_timeout_seconds,
-            banner_timeout=settings.ssh_connect_timeout_seconds,
-            auth_timeout=settings.ssh_connect_timeout_seconds,
-            look_for_keys=not bool(key_path),
-            allow_agent=not bool(key_path),
-        )
+        client.connect(**ssh_auth.connect_kwargs(asset, settings.ssh_connect_timeout_seconds))
         raw = {name: _run_command(client, name, command) for name, command in COMMANDS.items()}
         for name, command in SERVER_INFO_COMMANDS.items():
             try:
@@ -418,7 +416,9 @@ def collect_over_ssh(asset: models.Asset) -> dict[str, Any]:
             except CollectionFailure:
                 raw[name] = ""
     except paramiko.AuthenticationException as exc:
-        raise CollectionFailure("AUTH", "AUTHENTICATION_FAILED", "SSH 키 인증에 실패했습니다") from exc
+        raise CollectionFailure("AUTH", "AUTHENTICATION_FAILED", "SSH 비밀번호 인증에 실패했습니다" if password_mode else "SSH 키 인증에 실패했습니다") from exc
+    except paramiko.BadHostKeyException as exc:
+        raise CollectionFailure("CONNECT", "HOST_KEY_CHANGED", "서버의 SSH 호스트 키가 처음 접속 때와 다릅니다. 서버를 재설치했다면 서버 수정에서 호스트 키를 초기화하세요") from exc
     except (paramiko.SSHException, socket.timeout, OSError) as exc:
         raise CollectionFailure("CONNECT", type(exc).__name__.upper(), str(exc)) from exc
     finally:
@@ -441,6 +441,7 @@ def collect_over_ssh(asset: models.Asset) -> dict[str, Any]:
         "packages": parse_packages(raw["packages"]),
         "package_context": package_context,
         "server_info": build_server_info(raw, package_context),
+        "learned_host_key": pinned.learned,
     }
 
 
@@ -459,6 +460,9 @@ def run_collection(db: Session, asset_id: int, trigger_type: str = "MANUAL") -> 
     db.refresh(job)
     try:
         metrics = collect_over_ssh(asset)
+        learned = metrics.pop("learned_host_key", None)
+        if learned and not asset.ssh_host_key:
+            asset.ssh_host_key = learned
         packages = metrics.pop("packages")
         package_context = metrics.pop("package_context")
         server_info = metrics.pop("server_info", None)

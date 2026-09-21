@@ -95,3 +95,19 @@ describe('이력 포함 삭제', () => {
     expect(path).toBe('/assets/1?purge=true')
   })
 })
+
+describe('비밀번호 인증', () => {
+  it('비밀번호 인증으로 바꾸면 비밀번호를 함께 보내고, 응답에는 비밀번호가 남지 않는다', async () => {
+    const request = vi.fn(async (path, options) => options?.method === 'PATCH' ? { ...asset, ssh_auth: 'password', has_password: true } : path === '/sboms' || path.endsWith('/timeline') ? [] : asset)
+    const { props } = open({ request })
+    await ready()
+    fireEvent.change(screen.getByLabelText('인증 방식'), { target: { value: 'password' } })
+    fireEvent.click(screen.getByRole('button', { name: '서버 변경 저장' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('SSH 비밀번호를 입력')
+    fireEvent.change(screen.getByLabelText('SSH 비밀번호'), { target: { value: 'hunter2' } })
+    fireEvent.click(screen.getByRole('button', { name: '서버 변경 저장' }))
+    await waitFor(() => expect(props.onSaved).toHaveBeenCalled())
+    const [, options] = request.mock.calls.find(([, options]) => options?.method === 'PATCH')
+    expect(JSON.parse(options.body)).toEqual({ ssh_auth: 'password', ssh_password: 'hunter2' })
+  })
+})

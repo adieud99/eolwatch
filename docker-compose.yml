@@ -19,6 +19,7 @@ services:
       DATABASE_URL: postgresql+psycopg://eolwatch:eolwatch@db:5432/eolwatch
       CORS_ORIGINS: http://localhost:5173,http://localhost:8080
       AUTO_CREATE_SCHEMA: "false"
+      CREDENTIAL_KEY: ${CREDENTIAL_KEY:-}
       JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-before-deployment}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Eolwatch!2026}

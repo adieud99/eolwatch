@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     ssh_known_hosts_path: str = ""
     ssh_strict_host_key: bool = True
     ssh_connect_timeout_seconds: int = 10
+    credential_key: str = ""
     collection_hour: int = 8
     collection_minute: int = 30
     scheduler_timezone: str = "Asia/Seoul"

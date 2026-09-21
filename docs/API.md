@@ -52,7 +52,8 @@
 | 방식 | 경로 | 권한 | 용도·query |
 |---|---|---|---|
 | GET | `/api/assets` | 로그인 | 서버 목록 · `q`(번호·이름·IP·SSH 계정), `asset_type` |
-| POST | `/api/assets` | ADMIN | 서버 등록 |
+| POST | `/api/assets` | ADMIN | 서버(대상) 등록. `ssh_auth`가 `password`면 `ssh_password` 필수(암호화 저장, 응답에 없음). 응답의 `has_password`, `ssh_host_key_fingerprint`로 상태 확인 |
+| POST(참고) | `/api/assets` | ADMIN | 서버 등록 |
 | GET | `/api/assets/{asset_id}` | 로그인 | 서버 상세 |
 | PATCH | `/api/assets/{asset_id}` | ADMIN | 서버 수정 |
 | DELETE | `/api/assets/{asset_id}` | ADMIN | 서버 삭제 |

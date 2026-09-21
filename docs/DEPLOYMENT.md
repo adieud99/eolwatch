@@ -84,6 +84,10 @@ curl -fsS https://eolwatch.example.com/health
 
 운영 Compose에서는 Caddy만 80·443을 호스트에 공개한다. FastAPI, PostgreSQL, 웹 Nginx는 Docker 내부 네트워크에서만 접근한다. API 컨테이너가 시작될 때 `alembic upgrade head`를 먼저 실행한다.
 
+### SSH 비밀번호 인증을 쓸 때
+
+관리 서버에 키·known_hosts가 없어도 서버 등록 때 `인증 방식: 비밀번호`를 고르면 접속한다. 비밀번호 암호화 키는 `.env`의 `CREDENTIAL_KEY`(권장, 임의의 긴 문자열)이며 비우면 `JWT_SECRET`을 쓴다. 두 값을 바꾸면 저장된 비밀번호를 복호화하지 못하므로 서버마다 비밀번호를 다시 입력해야 한다.
+
 ## 5. SSH 점검 계정
 
 대상 Linux 서버마다 전용 계정을 만든 뒤 읽기 명령만 허용한다. 시연 환경에서도 root 로그인과 비밀번호 인증은 사용하지 않는다.

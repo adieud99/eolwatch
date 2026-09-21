@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..config import get_settings
 from ..db import get_db
+from ..services import ssh_auth
 
 
 router = APIRouter(prefix="/assets", tags=["assets"])
@@ -32,9 +33,12 @@ def _asset_read(db: Session, asset: models.Asset) -> schemas.AssetRead:
             continue
         level = str(severity or "UNKNOWN").upper()
         vulnerability_counts[level if level in vulnerability_counts else "UNKNOWN"] += 1
-    values = {column.name: getattr(asset, column.name) for column in models.Asset.__table__.columns}
+    values = {column.name: getattr(asset, column.name) for column in models.Asset.__table__.columns
+              if column.name not in ("ssh_password_encrypted", "ssh_host_key")}
     return schemas.AssetRead(
         **values,
+        has_password=bool(asset.ssh_password_encrypted),
+        ssh_host_key_fingerprint=ssh_auth.host_key_fingerprint(asset.ssh_host_key),
         sbom_count=sbom_count,
         vulnerability_counts=vulnerability_counts,
         vulnerability_count=sum(vulnerability_counts.values()),
@@ -63,7 +67,13 @@ def list_assets(
 
 @router.post("", response_model=schemas.AssetRead, status_code=status.HTTP_201_CREATED)
 def create_asset(payload: schemas.AssetCreate, db: Session = Depends(get_db)):
-    asset = models.Asset(**payload.model_dump())
+    values = payload.model_dump()
+    password = values.pop("ssh_password", None)
+    if values.get("ssh_auth") == "password" and not password:
+        raise HTTPException(status_code=422, detail="비밀번호 인증을 고르면 SSH 비밀번호를 입력해야 합니다")
+    asset = models.Asset(**values)
+    if password and asset.ssh_auth == "password":
+        asset.ssh_password_encrypted = ssh_auth.encrypt_password(password)
     db.add(asset)
     try:
         db.commit()
@@ -113,8 +123,12 @@ def update_asset(asset_id: int, payload: schemas.AssetUpdate, db: Session = Depe
     if not asset:
         raise HTTPException(status_code=404, detail="자산이 없습니다")
     values = payload.model_dump(exclude_unset=True)
-    connection_fields = {"ip_address", "ssh_port", "ssh_username", "monitored", "asset_tag", "name"}
+    password = values.pop("ssh_password", None)
+    reset_host_key = values.pop("reset_host_key", None)
+    connection_fields = {"ip_address", "ssh_port", "ssh_username", "monitored", "asset_tag", "name", "ssh_auth"}
     changed_fields = {key for key, value in values.items() if value != getattr(asset, key)}
+    if password or reset_host_key:
+        changed_fields.add("ssh_auth")
     if changed_fields & connection_fields:
         active_analysis = db.scalar(select(models.AnalysisJob.id).where(models.AnalysisJob.asset_id == asset_id, models.AnalysisJob.active_asset_id.is_not(None)).limit(1))
         active_collection = db.scalar(select(models.CollectionJob.id).where(models.CollectionJob.asset_id == asset_id, models.CollectionJob.status.in_(("PENDING", "RUNNING"))).limit(1))
@@ -122,6 +136,14 @@ def update_asset(asset_id: int, payload: schemas.AssetUpdate, db: Session = Depe
             raise HTTPException(status_code=409, detail="분석 또는 SSH 점검 중에는 자산 식별정보와 연결 설정을 변경할 수 없습니다")
     for key, value in values.items():
         setattr(asset, key, value)
+    if password:
+        asset.ssh_password_encrypted = ssh_auth.encrypt_password(password)
+    if asset.ssh_auth == "password" and not asset.ssh_password_encrypted:
+        raise HTTPException(status_code=422, detail="비밀번호 인증을 고르면 SSH 비밀번호를 입력해야 합니다")
+    if asset.ssh_auth != "password":
+        asset.ssh_password_encrypted = None
+    if reset_host_key or ("ip_address" in changed_fields) or ("ssh_port" in changed_fields):
+        asset.ssh_host_key = None
     try:
         db.commit()
     except IntegrityError:

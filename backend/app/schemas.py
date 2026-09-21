@@ -45,11 +45,12 @@ class AssetBase(BaseModel):
         return validate_address(value)
     ssh_port: int = Field(default=22, ge=1, le=65535)
     ssh_username: Optional[str] = Field(default=None, max_length=80)
+    ssh_auth: Literal["key", "password"] = "key"
     monitored: bool = False
 
 
 class AssetCreate(AssetBase):
-    pass
+    ssh_password: Optional[str] = Field(default=None, min_length=1, max_length=200)
 
 
 class AssetUpdate(BaseModel):
@@ -65,11 +66,14 @@ class AssetUpdate(BaseModel):
         return validate_address(value)
     ssh_port: Optional[int] = Field(default=None, ge=1, le=65535)
     ssh_username: Optional[str] = Field(default=None, max_length=80)
+    ssh_auth: Optional[Literal["key", "password"]] = None
+    ssh_password: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    reset_host_key: Optional[bool] = None
     monitored: Optional[bool] = None
 
     @model_validator(mode="after")
     def required_values_not_null(self):
-        for name in ("asset_tag", "name", "asset_type", "ssh_port", "monitored"):
+        for name in ("asset_tag", "name", "asset_type", "ssh_port", "monitored", "ssh_auth"):
             if name in self.model_fields_set and getattr(self, name) is None:
                 raise ValueError(f"{name} 값은 비울 수 없습니다")
         return self
@@ -77,6 +81,8 @@ class AssetUpdate(BaseModel):
 
 class AssetRead(AssetBase):
     id: int
+    has_password: bool = False
+    ssh_host_key_fingerprint: Optional[str] = None
     sbom_count: int = 0
     vulnerability_counts: dict[str, int] = Field(default_factory=dict)
     vulnerability_count: int = 0

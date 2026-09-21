@@ -191,6 +191,7 @@ function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendin
   const [open, setOpen] = useState(false)
   const [error, setError] = useState('')
   const [scanScopes, setScanScopes] = useState({})
+  const [authMode, setAuthMode] = useState('key')
   async function submit(event) {
     const form = event.currentTarget
     event.preventDefault()
@@ -200,12 +201,13 @@ function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendin
     data.ip_address = address.host || null
     data.ssh_port = Number(data.ssh_port) || address.port || 22
     if (!data.ssh_username) data.ssh_username = null
+    if (data.ssh_auth !== 'password' || !data.ssh_password) delete data.ssh_password
     data.monitored = Boolean(data.monitored)
     try {
       await api('/assets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
       form.reset()
       setOpen(false)
-      onChanged('서버를 등록했습니다.')
+      onChanged('서버를 등록했습니다.'); setAuthMode('key')
     } catch (reason) { setError(reason.message) }
   }
   // Targets that only group development scans (no connection details) belong to 개발 검사, not here.
@@ -233,7 +235,10 @@ function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendin
           <label>서버 주소 (IP 또는 도메인)<input name="ip_address" placeholder="10.0.1.11 또는 db01.example.com" /></label>
           <label>SSH 포트<input name="ssh_port" type="number" min="1" max="65535" defaultValue="22" /></label>
           <label>SSH 계정<input name="ssh_username" placeholder="eolwatch" /></label>
+          <label>인증 방식<select name="ssh_auth" value={authMode} onChange={(event) => setAuthMode(event.target.value)}><option value="key">SSH 키 (관리 서버 키)</option><option value="password">비밀번호</option></select></label>
+          {authMode === 'password' && <label>SSH 비밀번호<input name="ssh_password" type="password" autoComplete="new-password" required /></label>}
           <label className="checkbox"><input type="checkbox" name="monitored" defaultChecked /> 검사 대상으로 사용</label>
+          <p className="subtle" style={{ gridColumn: '1 / -1', margin: 0 }}>비밀번호는 암호화해 저장하고 접속에만 씁니다. 처음 접속할 때 서버의 호스트 키를 기억해 두고 이후 바뀌면 접속을 막습니다.</p>
           {error && <p className="form-error">{error}</p>}
           <button className="primary submit" type="submit">저장</button>
         </form>
@@ -253,7 +258,7 @@ function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendin
                 <td><code>{asset.asset_tag}</code></td>
                 <td><strong>{asset.name}</strong><div className="action-row cell-actions"><button className="table-button" aria-label={`${asset.asset_tag} 서버 ${canEdit ? '수정' : '상세'}`} onClick={() => setEditing(asset)}>{canEdit ? '수정' : '상세'}</button><button className="table-button" aria-label={`${asset.asset_tag} 검사 기록`} onClick={() => onViewProjects(asset.id)}>검사 기록</button></div></td>
                 <td>{typeText[asset.asset_type] || asset.asset_type}</td>
-                <td>{asset.ip_address ? <><strong>{asset.ip_address}:{asset.ssh_port}</strong><small>{asset.ssh_username || 'SSH 계정 미입력'}</small></> : <small>주소 미입력</small>}</td>
+                <td>{asset.ip_address ? <><strong>{asset.ip_address}:{asset.ssh_port}</strong><small>{asset.ssh_username || 'SSH 계정 미입력'} · {asset.ssh_auth === 'password' ? '비밀번호' : 'SSH 키'}</small></> : <small>주소 미입력</small>}</td>
                 <td>{info ? <><strong>{info.os_name || 'OS 미확인'}</strong><small>{[info.cpu_cores ? `${info.cpu_cores}코어` : null, gigabytes(info.memory_total_mb), platformText[info.platform] || info.platform].filter(Boolean).join(' · ')}</small>{info.cloud && <small>{info.cloud.instance_id} · {info.cloud.instance_type}</small>}</> : <small>SSH 점검 후 표시</small>}</td>
                 <td>SBOM {asset.sbom_count ?? 0}<small>CVE {asset.vulnerability_count ?? 0}건</small></td>
                 <td><label>검사 범위<select aria-label={`${asset.asset_tag} 검사 범위`} value={scanScopes[asset.id] || 'ubuntu-dpkg-installed'} disabled={!canEdit || unavailable || pending || Boolean(activeJob)} onChange={(event) => setScanScopes((current) => ({ ...current, [asset.id]: event.target.value }))}>{Object.entries(analysisScopeText).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><div className="action-row"><button className="table-button" disabled={!canEdit || !asset.ip_address || !asset.ssh_username} onClick={async () => {
