@@ -45,6 +45,33 @@ function ServerInfoCard({ info }) {
 const tabTitles = { overview: '개요', dev: '개발 검사', infra: '인프라 검사', history: '검사 기록', admin: '관리' }
 const historyTitles = { projects: '검사 이력', cve: 'CVE 결과·조치', work: '조치 목록', sbom: '의존성 목록', comparison: '검사 전후 비교' }
 
+const fieldNames = { asset_tag: '서버 번호', name: '서버 이름', asset_type: '유형', ip_address: '서버 주소', ssh_port: 'SSH 포트', ssh_username: 'SSH 계정', project_name: '프로젝트 이름', repository_url: '저장소 주소', ref: '브랜치', access_token: '접근 토큰', username: '아이디', password: '비밀번호', interval_minutes: '검사 주기', target_path: '앱 경로' }
+// FastAPI validation errors arrive as a list; turn them into one readable sentence.
+export function describeDetail(detail, status) {
+  if (typeof detail === 'string' && detail) return detail
+  if (Array.isArray(detail) && detail.length) {
+    return detail.map((item) => {
+      const field = (item.loc || []).filter((part) => part !== 'body' && part !== 'query').map((part) => fieldNames[part] || part).join('.')
+      const message = String(item.msg || '').replace(/^Value error, /, '').replace(/^Assertion failed, /, '')
+      return field ? `${field}: ${message}` : message
+    }).join(' / ')
+  }
+  if (status === 401) return '로그인이 필요합니다.'
+  if (status === 403) return '관리자만 할 수 있는 작업입니다.'
+  if (status === 404) return '요청한 항목이 없습니다.'
+  if (status >= 500) return '서버 오류가 발생했습니다. 잠시 후 다시 시도하세요.'
+  return '요청을 처리하지 못했습니다.'
+}
+
+// Users paste addresses with a scheme, a path or a port; keep the host and move the port to its own field.
+export function splitAddress(value) {
+  let host = String(value || '').trim().replace(/^[a-z]+:\/\//i, '').replace(/\/.*$/, '')
+  let port = null
+  const match = host.match(/^([^[\]]+):(\d{1,5})$/)
+  if (match) { host = match[1]; port = Number(match[2]) }
+  return { host, port }
+}
+
 async function api(path, options) {
   const headers = new Headers(options?.headers || {})
   const token = localStorage.getItem('eolwatch_token')
@@ -52,7 +79,7 @@ async function api(path, options) {
   const response = await fetch(`/api${path}`, { ...options, headers })
   if (!response.ok) {
     const body = await response.json().catch(() => ({}))
-    const error = new Error(typeof body.detail === 'string' ? body.detail : '요청을 처리하지 못했습니다.')
+    const error = new Error(describeDetail(body.detail, response.status))
     error.status = response.status
     throw error
   }
@@ -169,8 +196,10 @@ function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendin
     event.preventDefault()
     setError('')
     const data = Object.fromEntries(new FormData(form))
-    for (const key of ['ip_address', 'ssh_username']) if (!data[key]) data[key] = null
-    data.ssh_port = Number(data.ssh_port) || 22
+    const address = splitAddress(data.ip_address)
+    data.ip_address = address.host || null
+    data.ssh_port = Number(data.ssh_port) || address.port || 22
+    if (!data.ssh_username) data.ssh_username = null
     data.monitored = Boolean(data.monitored)
     try {
       await api('/assets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })

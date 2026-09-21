@@ -133,3 +133,15 @@ describe('Git 저장소와 의존성 파일 입력', () => {
     expect(screen.queryByLabelText('저장소 주소 (https)')).not.toBeInTheDocument()
   })
 })
+
+describe('오류 문구와 주소 정리', () => {
+  it('검증 오류 목록을 필드 이름과 함께 한 문장으로 만들고 주소에서 스킴·경로·포트를 분리한다', async () => {
+    const { describeDetail, splitAddress } = await import('./App')
+    expect(describeDetail([{ loc: ['body', 'ip_address'], msg: 'Value error, 서버 주소는 IP 주소나 도메인 이름이어야 합니다' }], 422)).toBe('서버 주소: 서버 주소는 IP 주소나 도메인 이름이어야 합니다')
+    expect(describeDetail('이미 있는 번호입니다', 409)).toBe('이미 있는 번호입니다')
+    expect(describeDetail(undefined, 403)).toBe('관리자만 할 수 있는 작업입니다.')
+    expect(splitAddress(' https://db01.example.com/path ')).toEqual({ host: 'db01.example.com', port: null })
+    expect(splitAddress('192.168.0.10:2222')).toEqual({ host: '192.168.0.10', port: 2222 })
+    expect(splitAddress('')).toEqual({ host: '', port: null })
+  })
+})

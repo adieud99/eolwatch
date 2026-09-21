@@ -58,6 +58,7 @@ describe('서버 정보 수정', () => {
     const request = vi.fn((path, options) => options?.method === 'PATCH' ? new Promise((done) => { resolve = done }) : Promise.resolve(path === '/sboms' || path.endsWith('/timeline') ? [] : asset))
     const { props, unmount } = open({ request })
     await ready()
+    fireEvent.change(screen.getByLabelText('SSH 포트'), { target: { value: '2222' } })
     const submit = screen.getByRole('button', { name: '서버 변경 저장' })
     fireEvent.click(submit); fireEvent.click(submit)
     const writes = request.mock.calls.filter(([, options]) => options?.method === 'PATCH')

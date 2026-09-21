@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import './AssetEditor.css'
 
+const splitAddress = (value) => { let host = String(value || '').trim().replace(/^[a-z]+:\/\//i, '').replace(/\/.*$/, ''); let port = null; const match = host.match(/^([^[\]]+):(\d{1,5})$/); if (match) { host = match[1]; port = Number(match[2]) } return { host, port } }
+
 const types = { server: '서버', storage: '스토리지', network: '네트워크', security: '보안', vm: '가상머신', cloud: '클라우드', other: '기타' }
 const textFields = [['ip_address', '서버 주소 (IP 또는 도메인)'], ['ssh_username', 'SSH 사용자명']]
 const editable = ['asset_tag', 'name', 'asset_type', ...textFields.map(([key]) => key), 'ssh_port', 'monitored']
@@ -50,7 +52,10 @@ export default function AssetEditor({ asset, canEdit, request, onSaved, onClose,
     if (!canEdit || !ready || busy.current) return
     if (!draft.asset_tag.trim() || !draft.name.trim()) { setError('서버 번호와 서버 이름을 입력하세요.'); return }
     if (!Number.isInteger(Number(draft.ssh_port)) || Number(draft.ssh_port) < 1 || Number(draft.ssh_port) > 65535) { setError('SSH 포트는 1~65535 사이 정수여야 합니다.'); return }
-    const values = Object.fromEntries(editable.map((key) => [key, normalize(key, draft[key])]).filter(([key, value]) => value !== normalize(key, current[key] ?? (key === 'monitored' ? false : ''))))
+    const address = splitAddress(draft.ip_address)
+    const cleaned = { ...draft, ip_address: address.host, ssh_port: address.port && (String(draft.ssh_port) === '' || Number(draft.ssh_port) === current.ssh_port) ? address.port : draft.ssh_port }
+    const values = Object.fromEntries(editable.map((key) => [key, normalize(key, cleaned[key])]).filter(([key, value]) => value !== normalize(key, current[key] ?? (key === 'monitored' ? false : ''))))
+    if (!Object.keys(values).length) { setError('바뀐 내용이 없습니다.'); return }
     busy.current = true; setPending(true); setError('')
     const controller = new AbortController(); mutation.current = controller
     try {
