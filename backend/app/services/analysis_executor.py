@@ -28,6 +28,7 @@ from .analysis_profiles import (ANALYSIS_PROFILES, DEFAULT_SCAN_SCOPE, GIT_SCAN_
                                 ZIP_SCAN_SCOPE, AnalysisProfile, normalize_git_ref, normalize_repository_url, normalize_target_path, scope_identity)
 from .analysis_uploads import InvalidArchive, extract_upload
 from . import ssh_auth
+from .ai_library_reference import LibraryReferenceError, reference_libraries
 
 
 SCAN_SCOPE = DEFAULT_SCAN_SCOPE
@@ -488,6 +489,27 @@ def _clone_repository(run: _Run, snapshot: dict, settings, env: dict) -> str:
     return str(directory)
 
 
+def _ai_library_reference(run: _Run, directory: str, asset_snapshot: dict) -> Path:
+    """Syft found nothing pinned: let the AI name the libraries from imports and manifests (see ai_library_reference)."""
+    from . import ai_advisor
+    project_name = str(asset_snapshot.get("project_name") or asset_snapshot.get("asset_tag") or asset_snapshot.get("id"))
+    started = time.monotonic()
+    try:
+        spdx, entry = reference_libraries(directory, project_name=project_name, complete_json=ai_advisor.complete_json)
+    except LibraryReferenceError as error:
+        run.manifest["ai_library_reference"] = {"status": "failed", "error_code": error.code}
+        raise AnalysisExecutionError("EMPTY_COLLECTION", (
+            "버전이 고정된 의존성 파일(package-lock.json·yarn.lock, requirements.txt, pom.xml, go.sum, Gemfile.lock 등)을 찾지 못했고, "
+            f"AI 라이브러리 참조도 실패했습니다. {error.message} 취약점이 없다는 뜻이 아닙니다.")) from error
+    entry.update(status="ok", seconds=round(time.monotonic() - started, 1))
+    run.manifest["ai_library_reference"] = entry
+    spdx_path = run.directory / "sbom.spdx.json"
+    spdx_path.write_text(json.dumps(spdx, ensure_ascii=False, indent=1), encoding="utf-8")
+    run.manifest["artifacts"]["sbom.spdx.json"] = _sha256(spdx_path)
+    run.save()
+    return spdx_path
+
+
 def _environment(settings) -> dict:
     # Do not pass database/password/registry credentials into scanners or their reports.
     allowed = {"PATH", "HOME", "LANG", "LC_ALL", "TZ", "SSL_CERT_FILE", "SSL_CERT_DIR",
@@ -565,11 +587,17 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
         raw = _json(raw_path)
         packages = raw.get("artifacts")
         catalogers = raw.get("descriptor", {}).get("configuration", {}).get("catalogers", {}).get("used", [])
+        ai_reference = False
         if not isinstance(packages, list) or not packages:
-            if run.profile in SOURCE_SCAN_SCOPES:
+            if run.profile in SOURCE_SCAN_SCOPES and getattr(settings, "ai_pipeline", True):
+                spdx_path = _ai_library_reference(run, directory, asset_snapshot)
+                ai_reference = True
+                packages = []
+            elif run.profile in SOURCE_SCAN_SCOPES:
                 raise AnalysisExecutionError("EMPTY_COLLECTION", "버전이 고정된 의존성 파일(package-lock.json·yarn.lock, requirements.txt, pom.xml, go.sum, Gemfile.lock 등)을 찾지 못했습니다. package.json·build.gradle만으로는 구성요소를 확정할 수 없어 결과를 저장하지 않습니다. 취약점이 없다는 뜻이 아닙니다.")
-            raise AnalysisExecutionError("EMPTY_COLLECTION", "설치 패키지가 수집되지 않았습니다. 빈 결과는 정상 분석으로 저장하지 않습니다.")
-        if (any(not isinstance(package, dict) for package in packages)
+            else:
+                raise AnalysisExecutionError("EMPTY_COLLECTION", "설치 패키지가 수집되지 않았습니다. 빈 결과는 정상 분석으로 저장하지 않습니다.")
+        if not ai_reference and (any(not isinstance(package, dict) for package in packages)
                 or profile.cataloger and (catalogers != [profile.cataloger]
                     or any(package.get("type") != profile.package_type for package in packages))):
             raise AnalysisExecutionError("SCOPE_MISMATCH", "수집 결과의 구성요소 또는 수집 도구가 선택한 분석 범위와 일치하지 않습니다.")
@@ -577,14 +605,15 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
         if run.profile == DEFAULT_SCAN_SCOPE and (distro.get("id") != "ubuntu"
                 or not re.fullmatch(r"[0-9]+(?:\.[0-9]+)*", str(distro.get("versionID", "")))):
             raise AnalysisExecutionError("DISTRO_UNSUPPORTED", "현재 분석은 배포판 버전을 식별할 수 있는 Ubuntu 서버를 지원합니다.")
-        if (profile.relative_directory is not None or run.profile in PATH_SCAN_SCOPES or run.profile in SOURCE_SCAN_SCOPES) and raw.get("source", {}).get("metadata", {}).get("path") != directory:
+        if not ai_reference and (profile.relative_directory is not None or run.profile in PATH_SCAN_SCOPES or run.profile in SOURCE_SCAN_SCOPES) and raw.get("source", {}).get("metadata", {}).get("path") != directory:
             raise AnalysisExecutionError("SCOPE_MISMATCH", "수집 결과의 경로가 선택한 앱 디렉터리와 다릅니다.")
         run.manifest.update(distro=distro, package_count=len(packages), catalogers=catalogers)
         run.heartbeat("SCANNING")
         config = run.directory / "analysis-empty.yaml"
         config.write_text("{}\n", encoding="utf-8")
-        spdx_path = run.local("syft-convert-spdx", [str(syft), "convert", str(raw_path), "--config", str(config),
-                             "-o", "spdx-json@2.3"], 120, env, output="sbom.spdx.json")
+        if not ai_reference:
+            spdx_path = run.local("syft-convert-spdx", [str(syft), "convert", str(raw_path), "--config", str(config),
+                                 "-o", "spdx-json@2.3"], 120, env, output="sbom.spdx.json")
         sbom = _json(spdx_path)
         if sbom.get("spdxVersion") != "SPDX-2.3" or not sbom.get("packages"):
             raise AnalysisExecutionError("SPDX_INVALID", "SPDX 2.3 구성요소 목록 생성에 실패했습니다.")

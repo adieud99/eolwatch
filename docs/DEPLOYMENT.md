@@ -7,7 +7,6 @@
 ```bash
 cp .env.example .env
 docker compose up --build -d
-docker compose exec api python -m app.seed
 ```
 
 접속 주소:
@@ -109,7 +108,6 @@ SSH 점검 수집 명령(모두 읽기 전용):
 
 ```bash
 docker compose -f docker-compose.prod.yml exec api alembic current
-docker compose -f docker-compose.prod.yml exec api python -m app.seed
 docker compose -f docker-compose.prod.yml logs --tail=100 api worker
 ```
 

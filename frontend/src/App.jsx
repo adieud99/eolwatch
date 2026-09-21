@@ -39,7 +39,22 @@ function ServerInfoCard({ info }) {
     <div><dt>실행 환경</dt><dd>{platformText[info.platform] || info.platform || '미확인'}{info.dmi_vendor ? ` · ${info.dmi_vendor}${info.dmi_product ? ` ${info.dmi_product}` : ''}` : ''}{cloud ? ` · 인스턴스 ${cloud.instance_id} (${cloud.instance_type || '유형 미확인'}, ${cloud.region || '리전 미확인'})` : ''}</dd></div>
     <div><dt>통신 정보</dt><dd>{info.ip_addresses?.length ? info.ip_addresses.map((item) => `${item.interface} ${item.address}`).join(', ') : 'IP 미확인'} · 수신 포트 {info.listening_ports?.length ? info.listening_ports.map((item) => item.port).filter((port, index, all) => all.indexOf(port) === index).join(', ') : '없음'}</dd></div>
     <div><dt>실행 서비스</dt><dd>{info.services?.length ? `${info.services.length}개 · ${info.services.slice(0, 12).join(', ')}${info.services.length > 12 ? ' …' : ''}` : '수집되지 않음'}</dd></div>
+    {info.ai_collection && <AgentResults agent={info.ai_collection} />}
   </dl>
+}
+
+function AgentResults({ agent }) {
+  const [open, setOpen] = useState(null)
+  const results = agent.results || []
+  const who = agent.source === 'ai' ? `AI(${agent.model || '모델 미상'})가 이 서버에 맞춰 고른 점검` : 'OS 규칙으로 고른 점검'
+  return <div className="agent-results"><dt>수집 에이전트</dt><dd>
+    <p className="agent-note">{who} {results.length}개{agent.cached ? ' · 같은 환경의 답 재사용' : ''}{agent.input_tokens ? ` · 토큰 ${agent.input_tokens}/${agent.output_tokens || 0}` : ''}{agent.note ? ` · ${agent.note}` : ''}</p>
+    <ul className="agent-list">{results.map((item) => <li key={item.id}>
+      <button type="button" className="table-button" aria-expanded={open === item.id} onClick={() => setOpen(open === item.id ? null : item.id)}>{item.purpose}</button>
+      <small>{item.reason && item.reason !== item.purpose ? item.reason : ''}{item.ok ? '' : ' · 실행 실패'}</small>
+      {open === item.id && <pre className="agent-output"><code>{item.command}</code>{'\n'}{item.output}</pre>}
+    </li>)}</ul>
+  </dd></div>
 }
 
 const tabTitles = { overview: '개요', dev: '개발 검사', infra: '인프라 검사', history: '검사 기록' }
@@ -519,7 +534,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
         <tbody>{analyses.map((run) => <tr key={run.id}>
           <td>{new Date(run.imported_at).toLocaleString('ko-KR')}<small>검사 #{run.id} · SBOM #{run.sbom_id}</small></td>
           <td><strong>{run.asset_tag} · {run.asset_name}</strong><small>{analysisScopeText[run.scan_scope] || scopeLabel(run.scan_scope)}</small></td>
-          <td><strong>{run.scanner} {run.scanner_version}</strong><small>SBOM 생성: {run.generator || '미상'}</small>{(run.database_info?.built || run.database_info?.status?.built) && <small>DB 기준: {new Date(run.database_info.built || run.database_info.status.built).toLocaleString('ko-KR')}</small>}</td>
+          <td><strong>{run.scanner} {run.scanner_version}</strong><small>SBOM 생성: {run.generator?.includes('AI-Library-Reference') ? <span className="chip chip-ai">AI 라이브러리 참조 · 버전 추정</span> : (run.generator || '미상')}</small>{(run.database_info?.built || run.database_info?.status?.built) && <small>DB 기준: {new Date(run.database_info.built || run.database_info.status.built).toLocaleString('ko-KR')}</small>}</td>
           <td><strong>CVE {run.cve_count}개 · 구성요소 연결 {run.link_count}건</strong><small>구성요소 {run.component_count}개 · 전체 탐지 {run.match_count}건 · CVE 외 {run.ignored_non_cve}건</small></td>
           <td><div className="action-row"><button className="table-button" aria-label={`검사 ${run.id} CVE 보기`} onClick={() => selectSbom(String(run.sbom_id), true)}>CVE 보기</button><button className="table-button" aria-label={`검사 ${run.id} 원본 보기`} aria-pressed={bundle?.run?.id === run.id} onClick={() => viewBundle(run)}>원본 보기</button></div></td>
         </tr>)}{!analyses.length && <tr><td colSpan="5" className="empty">저장된 검사 결과가 없습니다.</td></tr>}</tbody>

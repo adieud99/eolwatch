@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     ai_model: str = "claude-opus-5"
     ollama_base_url: str = "http://host.docker.internal:11434"
     ollama_model: str = "qwen2.5:7b"
+    openai_api_key: str = ""
+    openai_model: str = "gpt-5-mini"
+    openai_base_url: str = "https://api.openai.com/v1"
+    # In-pipeline AI: library reference for sources without a lockfile, and the SSH collection agent.
+    ai_pipeline: bool = True
     analysis_git_path: str = "git"
     analysis_git_timeout_seconds: int = 300
     analysis_git_max_bytes: int = 250 * 1024 * 1024

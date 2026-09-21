@@ -1089,3 +1089,39 @@ describe('검사 원본 보기', () => {
     expect(screen.queryByRole('region', { name: '검사 원본' })).not.toBeInTheDocument()
   })
 })
+
+describe('파이프라인 AI 표시', () => {
+  afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+  const agent = { source: 'ai', model: 'gpt-5-mini', note: 'AWS의 Ubuntu 웹 서버', cached: false, input_tokens: 412, output_tokens: 57,
+    results: [{ id: 'apt_upgradable', purpose: 'apt로 미적용 보안 업데이트 확인', reason: 'Ubuntu라 apt를 쓴다', command: 'apt list --upgradable', ok: true, output: 'openssl/jammy-updates 3.0.2-0ubuntu1.18 amd64 [upgradable from: 3.0.2-0ubuntu1.15]' },
+      { id: 'firewall', purpose: '방화벽 활성 여부와 규칙 요약', reason: '외부 노출 서버', command: 'ufw status', ok: false, output: 'ufw: command not found' }] }
+  const check = { id: 31, asset_id: 7, asset_tag: 'srv-han', asset_name: '성민 서버', status: 'SUCCESS', started_at: '2026-09-21T09:00:00Z', cpu_percent: 3, memory_percent: 40, max_disk_percent: 55, health_level: 'OK',
+    server_info: { hostname: 'ip-10-0-1-5', os_name: 'Ubuntu 22.04.4 LTS', architecture: 'x86_64', platform: 'aws', services: ['ssh.service'], listening_ports: [{ port: 22 }], ai_collection: agent } }
+  const run = { id: 40, sbom_id: 9, asset_tag: 'GH-app', asset_name: 'GitHub app', scanner: 'grype', scanner_version: '0.118.0', generator: 'EOLWatch-AI-Library-Reference, gpt-5-mini', scan_scope: 'source-git:app', component_count: 6, match_count: 2, cve_count: 2, link_count: 2, ignored_non_cve: 0, imported_at: '2026-09-21T09:10:00Z', database_info: {} }
+  function setup(data) {
+    localStorage.clear(); localStorage.setItem('eolwatch_token', 'token'); localStorage.setItem('eolwatch_user', JSON.stringify({ id: 1, username: 'operator', role: 'ADMIN' }))
+    vi.stubGlobal('fetch', vi.fn(async (url) => ({ ok: true, status: 200, json: async () => (url in data ? data[url] : (url.startsWith('/api/ai/') ? null : [])) })))
+  }
+  it('SSH 점검의 서버 정보에 수집 에이전트가 고른 점검과 출력을 보여준다', async () => {
+    setup({ '/api/dashboard/summary': { assets: 1, lifecycle_risk: {}, sbom_quality: {}, urgent_items: [] }, '/api/assets': [{ id: 7, asset_tag: 'srv-han', name: '성민 서버', ip_address: '3.36.62.90', ssh_username: 'ubuntu', monitored: true }], '/api/checks': [check], '/api/ai/status': { enabled: false } })
+    render(<App />)
+    await screen.findByText('검사 대상')
+    fireEvent.click(screen.getByRole('button', { name: /인프라 검사/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '점검 31 서버 정보' }))
+    expect(screen.getByText(/AI\(gpt-5-mini\)가 이 서버에 맞춰 고른 점검 2개/)).toBeInTheDocument()
+    expect(screen.getByText(/토큰 412\/57/)).toBeInTheDocument()
+    expect(screen.getByText('외부 노출 서버 · 실행 실패')).toBeInTheDocument()
+    expect(screen.queryByText(/upgradable from/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'apt로 미적용 보안 업데이트 확인' }))
+    expect(screen.getByText(/upgradable from: 3\.0\.2-0ubuntu1\.15/)).toBeInTheDocument()
+    expect(screen.getByText('apt list --upgradable')).toBeInTheDocument()
+  })
+  it('AI가 라이브러리를 추정한 검사 결과에는 버전 추정 표시가 붙는다', async () => {
+    setup({ '/api/dashboard/summary': { assets: 0, lifecycle_risk: {}, sbom_quality: {}, urgent_items: [] }, '/api/analyses': [run], '/api/sboms': [{ id: 9, component_count: 6 }], '/api/ai/status': { enabled: false } })
+    render(<App />)
+    await screen.findByText('검사 대상')
+    openHistoryView('CVE 결과·조치')
+    await screen.findByRole('heading', { name: '최근 검사 결과' })
+    expect(screen.getByText('AI 라이브러리 참조 · 버전 추정')).toBeInTheDocument()
+  })
+})

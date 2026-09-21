@@ -22,7 +22,7 @@
 
 **관리 VM(18080)에 재범위화 코드를 배포하고 브라우저로 두 흐름을 끝까지 확인한 상태는 아니다.** 배포 시 `alembic upgrade head`가 `d2f8c4a71e9b`를 적용해 제거 대상 테이블·컬럼을 삭제하므로 배포 전에 DB 백업을 남긴다.
 
-AI 요약은 기본으로 같은 PC의 Ollama(`qwen2.5:7b`)를 쓴다. 시연 PC에서 `ollama serve`가 떠 있고 모델이 받아져 있으면 된다. Claude를 쓰려면 `.env`에 `AI_PROVIDER=anthropic`과 `ANTHROPIC_API_KEY`를 넣는다. 교수님 메모의 파이프라인 안 AI(라이브러리 참조, 수집 에이전트)는 다음 작업이다.
+AI 요약은 기본으로 같은 PC의 Ollama(`qwen2.5:7b`)를 쓴다. 시연 PC에서 `ollama serve`가 떠 있고 모델이 받아져 있으면 된다. OpenAI를 쓰려면 `.env`에 `AI_PROVIDER=openai`, `OPENAI_API_KEY`, `OPENAI_MODEL`을, Claude는 `AI_PROVIDER=anthropic`과 `ANTHROPIC_API_KEY`를 넣는다. 파이프라인 안 AI(잠금 파일 없는 소스의 라이브러리 참조, SSH 점검의 수집 에이전트)는 구현되어 같은 제공자를 쓴다. 워커도 AI 설정을 읽으므로 `.env`를 바꾸면 api·worker를 함께 다시 올린다.
 
 ## 다음 작업
 
@@ -48,7 +48,7 @@ docker compose ps
 curl -s http://127.0.0.1:8000/health
 ```
 
-`docker compose down -v`는 PostgreSQL 볼륨까지 지우므로 데이터 초기화가 필요할 때만 쓴다. 데모 데이터는 `docker compose exec api python -m app.seed`로 한 번만 넣는다.
+`docker compose down -v`는 PostgreSQL 볼륨까지 지우므로 데이터 초기화가 필요할 때만 쓴다.
 
 관리 VM에 코드만 갱신할 때는 **초기 배포용 `deploy-to-lab.sh`를 쓰지 않는다.** 변경한 소스·의존성·마이그레이션만 SSH/SCP로 전달하고 `/opt/eolwatch`에서 `sudo docker compose up --build -d`를 실행한 뒤, `status.sh`와 브라우저로 기동·기존 검사 이력을 확인한다. 기존 `.env`, SSH 키·known_hosts, PostgreSQL·검사 원본 볼륨은 유지한다. 절차 전문은 [로컬 VM 환경](../infrastructure/local-vm/README.md)에 있다.
 

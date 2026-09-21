@@ -1,6 +1,8 @@
 """AI advisor: turns a scan result or an SSH check into a short Korean assessment.
 
-Two providers: a local Ollama server (default, no key, works offline) or the Claude API.
+Three providers: a local Ollama server (default, no key, works offline), the OpenAI API, or the Claude API.
+``complete`` is also the single door the in-pipeline AI steps use (library reference for lockfile-less
+sources, the collection agent that picks OS-appropriate commands); those ask for JSON answers.
 The model only ever sees data EOLWatch already stores (CVE ids, components, versions,
 server facts) and that data is compacted first ("token diet"): findings are grouped per
 component, lists are capped, free text is trimmed and the JSON is sent without whitespace.
@@ -34,6 +36,8 @@ MAX_PORTS = 20
 MAX_SERVICES = 15
 MAX_PROCESSES = 5
 MAX_DISKS = 6
+MAX_AGENT_RESULTS = 8
+MAX_AGENT_OUTPUT_CHARS = 240
 
 SYSTEM_PROMPT = (
     "너는 EOLWatch의 보안 검토 보조자다. 취약점 검사 결과를 받아 운영 담당자가 바로 행동할 수 있게 한국어로 정리한다. "
@@ -82,6 +86,7 @@ def analysis_context(db: Session, run: models.AnalysisRun) -> dict[str, Any]:
     asset = run.sbom.asset
     return {
         "kind": "analysis", "run": run.id, "scope": run.scan_scope, "target": asset.asset_tag if asset else None,
+        "ai_estimated_versions": "AI-Library-Reference" in (run.generator or ""),
         "components_total": run.sbom.component_count, "cve_total": run.cve_count, "by_severity": counts,
         "top": components[:MAX_COMPONENTS], "omitted_components": max(0, len(components) - MAX_COMPONENTS),
     }
@@ -107,6 +112,7 @@ def check_context(job: models.CollectionJob) -> dict[str, Any]:
         "ips": [a.get("address") for a in (info.get("ip_addresses") or [])],
         "ports": sorted({p.get("port") for p in ports if p.get("port") is not None})[:MAX_PORTS],
         "services": (info.get("services") or [])[:MAX_SERVICES],
+        "agent": [{"id": r.get("id"), "out": (r.get("output") or "")[:MAX_AGENT_OUTPUT_CHARS]} for r in ((info.get("ai_collection") or {}).get("results") or [])[:MAX_AGENT_RESULTS]] or None,
         "failure": {"stage": job.failure_stage, "code": job.failure_code, "msg": (job.failure_message or "")[:160]} if job.status != "SUCCESS" else None,
     }
 
@@ -114,10 +120,11 @@ def check_context(job: models.CollectionJob) -> dict[str, Any]:
 def build_prompt(context: dict[str, Any]) -> str:
     if context["kind"] == "analysis":
         ask = ("검사 결과 하나다. 1) 전체 위험 수준 한두 문장, 2) 먼저 손볼 라이브러리 3~5개와 이유·권장 버전 목록, "
-               "3) 담당자가 확인할 점 목록. top에 없는 라이브러리는 언급하지 마라. 키 뜻: lib 라이브러리, ver 현재 버전, n CVE 수, max 최고 심각도, fix 수정 버전, cves 대표 CVE.")
+               "3) 담당자가 확인할 점 목록. top에 없는 라이브러리는 언급하지 마라. 키 뜻: lib 라이브러리, ver 현재 버전, n CVE 수, max 최고 심각도, fix 수정 버전, cves 대표 CVE. "
+               "ai_estimated_versions가 true면 잠금 파일이 없어 버전을 AI가 추정한 것이니 실제 설치 버전 확인을 첫 할 일로 두어라.")
     else:
         ask = ("서버 한 대의 SSH 점검 결과다. 1) 어떤 환경인지(OS, 하드웨어, 가상화·클라우드, 열린 포트) 한두 문장, "
-               "2) 자원 사용률·포트·서비스에서 눈여겨볼 점 목록, 3) 다음 할 일 목록. failure가 있으면 원인과 확인할 설정을 정리하라.")
+               "2) 자원 사용률·포트·서비스·agent(수집 에이전트가 실행한 점검 출력)에서 눈여겨볼 점 목록, 3) 다음 할 일 목록. failure가 있으면 원인과 확인할 설정을 정리하라.")
     return ask + "\n" + _dumps(context)
 
 
@@ -129,7 +136,12 @@ def provider_name() -> str:
 
 def current_model() -> str:
     settings = get_settings()
-    return settings.ollama_model if provider_name() == "ollama" else settings.ai_model
+    provider = provider_name()
+    if provider == "ollama":
+        return settings.ollama_model
+    if provider == "openai":
+        return settings.openai_model
+    return settings.ai_model
 
 
 def _ollama_url(path: str) -> str:
@@ -138,6 +150,8 @@ def _ollama_url(path: str) -> str:
 
 def ai_available() -> bool:
     settings = get_settings()
+    if provider_name() == "openai":
+        return bool(settings.openai_api_key or os.environ.get("OPENAI_API_KEY"))
     if provider_name() == "ollama":
         try:
             with httpx.Client(timeout=3) as client:
@@ -155,10 +169,12 @@ def ai_available() -> bool:
     return False
 
 
-def _complete_ollama(prompt: str) -> tuple[str, str, dict[str, int]]:
+def _complete_ollama(prompt: str, system: str, json_mode: bool, max_tokens: int) -> tuple[str, str, dict[str, int]]:
     settings = get_settings()
-    body = {"model": settings.ollama_model, "stream": False, "options": {"temperature": 0.2, "num_ctx": 8192, "num_predict": 700},
-            "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}]}
+    body = {"model": settings.ollama_model, "stream": False, "options": {"temperature": 0.2, "num_ctx": 8192, "num_predict": max_tokens},
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]}
+    if json_mode:
+        body["format"] = "json"
     try:
         with httpx.Client(timeout=180) as client:
             response = client.post(_ollama_url("/api/chat"), json=body)
@@ -172,7 +188,36 @@ def _complete_ollama(prompt: str) -> tuple[str, str, dict[str, int]]:
     return text, data.get("model") or settings.ollama_model, usage
 
 
-def _complete_anthropic(prompt: str) -> tuple[str, str, dict[str, int]]:
+def _complete_openai(prompt: str, system: str, json_mode: bool, max_tokens: int) -> tuple[str, str, dict[str, int]]:
+    """OpenAI chat completions over plain HTTPS; OPENAI_BASE_URL also lets any OpenAI-compatible server answer."""
+    settings = get_settings()
+    key = settings.openai_api_key or os.environ.get("OPENAI_API_KEY", "")
+    body: dict[str, Any] = {"model": settings.openai_model, "max_completion_tokens": max_tokens,
+                            "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]}
+    if json_mode:
+        body["response_format"] = {"type": "json_object"}
+    try:
+        with httpx.Client(timeout=180) as client:
+            response = client.post(settings.openai_base_url.rstrip("/") + "/chat/completions", json=body,
+                                   headers={"Authorization": f"Bearer {key}"})
+        if response.status_code == 401:
+            raise HTTPException(status_code=503, detail="OpenAI 인증에 실패했습니다. OPENAI_API_KEY를 확인하세요.")
+        if response.status_code == 429:
+            raise HTTPException(status_code=429, detail="OpenAI 요청 한도를 초과했습니다. 잠시 후 다시 시도하세요.")
+        if response.status_code == 404 or (response.status_code == 400 and "model" in response.text.lower()):
+            raise HTTPException(status_code=503, detail=f"OpenAI 모델 '{settings.openai_model}'을(를) 쓸 수 없습니다. OPENAI_MODEL을 확인하세요.")
+        response.raise_for_status()
+        data = response.json()
+    except httpx.HTTPError as error:
+        logger.warning("OpenAI request failed: %s", error)
+        raise HTTPException(status_code=502, detail="OpenAI에 연결하지 못했습니다. 잠시 후 다시 시도하세요.") from error
+    choices = data.get("choices") or [{}]
+    text = ((choices[0].get("message") or {}).get("content") or "").strip()
+    usage = data.get("usage") or {}
+    return text, data.get("model") or settings.openai_model, {"input_tokens": int(usage.get("prompt_tokens") or 0), "output_tokens": int(usage.get("completion_tokens") or 0)}
+
+
+def _complete_anthropic(prompt: str, system: str, json_mode: bool, max_tokens: int) -> tuple[str, str, dict[str, int]]:
     settings = get_settings()
     try:
         import anthropic
@@ -180,7 +225,7 @@ def _complete_anthropic(prompt: str) -> tuple[str, str, dict[str, int]]:
         raise HTTPException(status_code=503, detail="anthropic 패키지가 설치되지 않았습니다.") from error
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key or None, timeout=120.0)
     try:
-        response = client.messages.create(model=settings.ai_model, max_tokens=1200, system=SYSTEM_PROMPT,
+        response = client.messages.create(model=settings.ai_model, max_tokens=max_tokens, system=system,
                                           messages=[{"role": "user", "content": prompt}])
     except Exception as error:
         logger.warning("Claude request failed: %s", error)
@@ -210,17 +255,53 @@ def _plain(text: str) -> str:
     return "\n".join(lines).strip()
 
 
-def complete(prompt: str) -> tuple[str, str, dict[str, int]]:
-    """Return (text, model, usage). Raises HTTPException with a user-facing message on failure."""
+PROVIDERS = {"ollama": _complete_ollama, "openai": _complete_openai, "anthropic": _complete_anthropic}
+
+
+def unavailable_reason() -> str:
+    provider = provider_name()
+    if provider == "ollama":
+        return f"로컬 AI(Ollama)가 준비되지 않았습니다. `ollama pull {get_settings().ollama_model}` 뒤 `ollama serve`를 실행하세요."
+    if provider == "openai":
+        return "AI가 설정되지 않았습니다. OPENAI_API_KEY를 설정하세요."
+    return "AI가 설정되지 않았습니다. ANTHROPIC_API_KEY를 설정하세요."
+
+
+def complete(prompt: str, *, system: str = SYSTEM_PROMPT, json_mode: bool = False, max_tokens: int = 700) -> tuple[str, str, dict[str, int]]:
+    """Return (text, model, usage). Raises HTTPException with a user-facing message on failure.
+
+    json_mode asks the provider for a JSON object and leaves the text untouched; otherwise markdown is stripped.
+    """
     if not ai_available():
-        if provider_name() == "ollama":
-            raise HTTPException(status_code=503, detail=f"로컬 AI(Ollama)가 준비되지 않았습니다. `ollama pull {get_settings().ollama_model}` 뒤 `ollama serve`를 실행하세요.")
-        raise HTTPException(status_code=503, detail="AI 요약이 설정되지 않았습니다. ANTHROPIC_API_KEY를 설정하세요.")
-    text, model, usage = _complete_ollama(prompt) if provider_name() == "ollama" else _complete_anthropic(prompt)
-    text = _plain(text)
+        raise HTTPException(status_code=503, detail=unavailable_reason())
+    provider = PROVIDERS.get(provider_name())
+    if provider is None:
+        raise HTTPException(status_code=503, detail=f"알 수 없는 AI 제공자 '{provider_name()}'입니다. AI_PROVIDER는 ollama, openai, anthropic 중 하나여야 합니다.")
+    text, model, usage = provider(prompt, system, json_mode, max_tokens)
+    if not json_mode:
+        text = _plain(text)
     if not text:
         raise HTTPException(status_code=502, detail="AI 응답이 비어 있습니다.")
     return text, model, usage
+
+
+def complete_json(prompt: str, *, system: str, max_tokens: int = 1500) -> tuple[dict[str, Any], str, dict[str, int]]:
+    """complete() for pipeline steps: returns the parsed JSON object, tolerating code fences and stray prose."""
+    text, model, usage = complete(prompt, system=system, json_mode=True, max_tokens=max_tokens)
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        cleaned = cleaned[cleaned.find("{"):] if "{" in cleaned else cleaned
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start < 0 or end < start:
+        raise HTTPException(status_code=502, detail="AI가 JSON이 아닌 답을 보냈습니다.")
+    try:
+        data = json.loads(cleaned[start:end + 1])
+    except ValueError as error:
+        raise HTTPException(status_code=502, detail="AI 답(JSON)을 읽지 못했습니다.") from error
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail="AI 답이 JSON 객체가 아닙니다.")
+    return data, model, usage
 
 
 # ---------- persistence ----------

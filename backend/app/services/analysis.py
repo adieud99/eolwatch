@@ -78,7 +78,7 @@ def import_analysis(db: Session, payload: schemas.AnalysisImport, *, commit: boo
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail="Grype JSON 보고서의 필수 필드가 없거나 형식이 올바르지 않습니다") from exc
     # Grype retains the original directory/image source even when its input is an SPDX file.
-    if report.descriptor.name.lower() != 'grype' or report.source.get('type') not in {'sbom', 'directory', 'image', 'file'}:
+    if report.descriptor.name.lower() != 'grype' or report.source.get('type') not in {'sbom', 'sbom-file', 'directory', 'image', 'file'}:
         raise HTTPException(status_code=422, detail="지원하는 원본 유형의 Grype JSON 보고서가 필요합니다")
     if payload.sbom.get('spdxVersion') != 'SPDX-2.3':
         raise HTTPException(status_code=422, detail="분석 묶음에는 SPDX 2.3 JSON이 필요합니다")

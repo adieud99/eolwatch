@@ -27,8 +27,12 @@ services:
       AI_PROVIDER: ${AI_PROVIDER:-ollama}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       AI_MODEL: ${AI_MODEL:-claude-opus-5}
+      AI_PIPELINE: ${AI_PIPELINE:-true}
       PUBLIC_BASE_URL: https://${DOMAIN}
       DEMO_TARGET_IPS: ${DEMO_TARGET_IPS:-}
       SSH_PRIVATE_KEY_PATH: /run/secrets/eolwatch_ssh_key
@@ -54,6 +58,17 @@ services:
       target: analysis-worker
     command: ["python", "-m", "app.worker"]
     environment:
+      CREDENTIAL_KEY: ${CREDENTIAL_KEY:-}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      AI_PROVIDER: ${AI_PROVIDER:-ollama}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-claude-opus-5}
+      AI_PIPELINE: ${AI_PIPELINE:-true}
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-eolwatch}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-eolwatch}
       AUTO_CREATE_SCHEMA: "false"
       SSH_PRIVATE_KEY_PATH: /run/secrets/eolwatch_ssh_key

@@ -95,7 +95,7 @@ npm --prefix frontend run build
 
 테스트 컨테이너는 소스·테스트 자료만 읽기 전용으로 연결하고 네트워크 없이 실행한다. 의존성 변경 근거는 [의존성 보완 기록](docs/DEPENDENCY_REMEDIATION.md)에 있다.
 
-기본 실습 로그인은 `admin` / `Eolwatch!2026`이다. 개발용 합성 데이터가 필요한 경우에만 `docker compose exec api python -m app.seed`를 실행한다. API 시작 시 Alembic 마이그레이션을 적용하며, 인프라 검사에는 대상 서버와 SSH 키·known_hosts 설정이 필요하다. 세부 설정은 [웹 검사 실행 안내](docs/WEB_ANALYSIS.md)를 따른다.
+기본 실습 로그인은 `admin` / `Eolwatch!2026`이다. 합성 시연 데이터는 넣지 않는다. 서버는 인프라 검사에서 직접 등록한다. API 시작 시 Alembic 마이그레이션을 적용하며, 인프라 검사에는 대상 서버와 SSH 키·known_hosts 설정이 필요하다. 세부 설정은 [웹 검사 실행 안내](docs/WEB_ANALYSIS.md)를 따른다.
 
 ## 시연 순서
 

@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..config import get_settings
-from . import ssh_auth
+from . import ai_collection, ssh_auth
 
 
 COMMANDS = {
@@ -425,6 +425,14 @@ def collect_over_ssh(asset: models.Asset) -> dict[str, Any]:
                 raw[name] = _run_command(client, name, command)
             except CollectionFailure:
                 raw[name] = ""
+        package_context = parse_os_release(raw["os_release"], raw["architecture"])
+        server_info = build_server_info(raw, package_context)
+        if getattr(settings, "ai_pipeline", True):
+            # AI collection agent: picks OS-appropriate read-only commands from ai_collection.CATALOG and runs them here.
+            from . import ai_advisor
+            server_info["ai_collection"] = ai_collection.collect(
+                server_info, package_context, lambda command: _run_command(client, "ai-agent", command),
+                ai_advisor.complete_json if ai_advisor.ai_available() else None)
     except paramiko.AuthenticationException as exc:
         raise CollectionFailure("AUTH", "AUTHENTICATION_FAILED", "SSH 비밀번호 인증에 실패했습니다" if mode == ssh_auth.AUTH_PASSWORD else "SSH 키 인증에 실패했습니다") from exc
     except paramiko.BadHostKeyException as exc:
@@ -439,7 +447,6 @@ def collect_over_ssh(asset: models.Asset) -> dict[str, Any]:
     uptime = int(_number(raw["uptime"], "uptime"))
     disks = parse_disks(raw["disk"])
     max_disk = max((item["used_percent"] for item in disks), default=0.0)
-    package_context = parse_os_release(raw["os_release"], raw["architecture"])
     return {
         "cpu_percent": round(cpu, 2),
         "memory_percent": round(memory, 2),
@@ -450,7 +457,7 @@ def collect_over_ssh(asset: models.Asset) -> dict[str, Any]:
         "process_details": parse_processes(raw["process"]),
         "packages": parse_packages(raw["packages"]),
         "package_context": package_context,
-        "server_info": build_server_info(raw, package_context),
+        "server_info": server_info,
         "learned_host_key": pinned.learned,
     }
 
