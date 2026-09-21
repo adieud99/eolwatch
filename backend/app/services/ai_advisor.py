@@ -30,9 +30,9 @@ logger = logging.getLogger(__name__)
 
 SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
 # Token diet caps: enough for a useful assessment, small enough to keep every call cheap.
-MAX_COMPONENTS = 25
-MAX_CVES_PER_COMPONENT = 3
-MAX_SUMMARY_CHARS = 90
+MAX_COMPONENTS = 20
+MAX_CVES_PER_COMPONENT = 2
+MAX_SUMMARY_CHARS = 70
 MAX_PORTS = 20
 MAX_SERVICES = 15
 MAX_PROCESSES = 5
@@ -166,11 +166,17 @@ def _complete_openai(prompt: str, system: str, json_mode: bool, max_tokens: int)
                             "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]}
     if json_mode:
         body["response_format"] = {"type": "json_object"}
+    effort = (settings.openai_reasoning_effort or "").strip().lower()
+    if effort:
+        body["reasoning_effort"] = effort  # token diet: no hidden thinking unless asked for
     try:
         with httpx.Client(timeout=180) as client:
             for attempt in range(OPENAI_ATTEMPTS):
                 response = client.post(settings.openai_base_url.rstrip("/") + "/chat/completions", json=body,
                                        headers={"Authorization": f"Bearer {key}"})
+                if response.status_code == 400 and "reasoning_effort" in body and "reasoning" in response.text.lower():
+                    body.pop("reasoning_effort")  # this provider/model does not take the field; ask again without it
+                    continue
                 # Hosted endpoints answer 503/429 for a few seconds when overloaded; one short retry usually lands.
                 if response.status_code not in (429, 500, 502, 503, 504) or attempt == OPENAI_ATTEMPTS - 1:
                     break

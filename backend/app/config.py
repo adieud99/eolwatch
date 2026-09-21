@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model: str = "gpt-5-mini"
     openai_base_url: str = "https://api.openai.com/v1"
+    # Hidden "thinking" tokens are billed like output. "none" turns them off on Gemini/GPT-5.1; a provider that
+    # rejects the value gets the request again without it. Set to low/medium/high if you want reasoning.
+    openai_reasoning_effort: str = "none"
     # In-pipeline AI: library reference for sources without a lockfile, and the SSH collection agent.
     ai_pipeline: bool = True
     analysis_git_path: str = "git"
