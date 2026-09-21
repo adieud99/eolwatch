@@ -15,6 +15,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from typing import Any, Optional
 
 from fastapi import HTTPException
@@ -39,6 +40,8 @@ MAX_DISKS = 6
 MAX_AGENT_RESULTS = 8
 MAX_AGENT_OUTPUT_CHARS = 240
 OPENAI_MIN_COMPLETION_TOKENS = 4000
+OPENAI_ATTEMPTS = 3
+OPENAI_RETRY_SECONDS = 2
 
 SYSTEM_PROMPT = (
     "너는 EOLWatch의 보안 검토 보조자다. 취약점 검사 결과를 받아 운영 담당자가 바로 행동할 수 있게 한국어로 정리한다. "
@@ -165,8 +168,13 @@ def _complete_openai(prompt: str, system: str, json_mode: bool, max_tokens: int)
         body["response_format"] = {"type": "json_object"}
     try:
         with httpx.Client(timeout=180) as client:
-            response = client.post(settings.openai_base_url.rstrip("/") + "/chat/completions", json=body,
-                                   headers={"Authorization": f"Bearer {key}"})
+            for attempt in range(OPENAI_ATTEMPTS):
+                response = client.post(settings.openai_base_url.rstrip("/") + "/chat/completions", json=body,
+                                       headers={"Authorization": f"Bearer {key}"})
+                # Hosted endpoints answer 503/429 for a few seconds when overloaded; one short retry usually lands.
+                if response.status_code not in (429, 500, 502, 503, 504) or attempt == OPENAI_ATTEMPTS - 1:
+                    break
+                time.sleep(OPENAI_RETRY_SECONDS * (attempt + 1))
         if response.status_code == 401:
             raise HTTPException(status_code=503, detail="OpenAI 인증에 실패했습니다. OPENAI_API_KEY를 확인하세요.")
         if response.status_code == 429:
@@ -179,11 +187,18 @@ def _complete_openai(prompt: str, system: str, json_mode: bool, max_tokens: int)
             if response.status_code == 404 or error.get("param") == "model" or "model" in str(error.get("code", "")):
                 raise HTTPException(status_code=503, detail=f"OpenAI 모델 '{settings.openai_model}'을(를) 쓸 수 없습니다. OPENAI_MODEL을 확인하세요.")
             raise HTTPException(status_code=502, detail=f"OpenAI가 요청을 거부했습니다: {str(error.get('message') or response.text)[:160]}")
+        if response.status_code >= 500 or response.status_code == 429:
+            try:
+                reason = str(((response.json() or {}).get("error") or {}).get("message") or "")[:140]
+            except ValueError:
+                reason = ""
+            logger.warning("AI provider unavailable after %s attempts: %s %s", OPENAI_ATTEMPTS, response.status_code, reason)
+            raise HTTPException(status_code=503, detail="AI 서비스가 지금 혼잡합니다(모델 과부하). 잠시 후 다시 시도하세요." + (f" 제공자 메시지: {reason}" if reason else ""))
         response.raise_for_status()
         data = response.json()
     except httpx.HTTPError as error:
         logger.warning("OpenAI request failed: %s", error)
-        raise HTTPException(status_code=502, detail="OpenAI에 연결하지 못했습니다. 잠시 후 다시 시도하세요.") from error
+        raise HTTPException(status_code=502, detail="AI 서비스에 연결하지 못했습니다. 네트워크와 OPENAI_BASE_URL을 확인하세요.") from error
     choices = data.get("choices") or [{}]
     text = ((choices[0].get("message") or {}).get("content") or "").strip()
     usage = data.get("usage") or {}
