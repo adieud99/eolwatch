@@ -370,3 +370,13 @@ def test_import_records_the_package_managers_verdict_per_finding(client, bundle)
     bundle["report"]["descriptor"]["version"] = "test-fixture-1.2"
     third = client.post("/api/analyses/import", json=bundle).json()
     assert third["verified_fixable_cve_count"] == 0 and third["suspect_cve_count"] == 0 and third["package_updates"] is None
+
+
+def test_earlier_runs_keep_their_counts_when_the_same_sbom_is_imported_again(client, bundle):
+    first = client.post("/api/analyses/import", json=bundle).json()
+    assert first["fixable_cve_count"] == 1
+    bundle["report"]["descriptor"]["version"] = "test-fixture-2.0"   # new run, same SBOM: links get re-pointed
+    second = client.post("/api/analyses/import", json=bundle).json()
+    assert second["id"] != first["id"] and second["fixable_cve_count"] == 1
+    listed = {run["id"]: run for run in client.get("/api/analyses").json()}
+    assert listed[first["id"]]["fixable_cve_count"] == 1 and listed[first["id"]]["cve_count"] == 1

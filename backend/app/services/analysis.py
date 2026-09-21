@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
-from .cve_breakdown import is_kernel_package
+from .cve_breakdown import breakdown, is_kernel_package
 from .package_updates import fix_check
 from .sbom import import_spdx, validate_spdx_schema
 
@@ -185,6 +185,10 @@ def import_analysis(db: Session, payload: schemas.AnalysisImport, *, commit: boo
                 link.fix_check = None if is_kernel_package(component.name, component.purl) else fix_check(component.name, link.fixed_versions, payload.package_updates)
                 seen.add(key)
     run.cve_count, run.link_count = len(cves), len(seen)
+    # Freeze the fixable/kernel/verified split now: a later import on the same SBOM re-points the shared links
+    # (analysis_run_id) at itself, so a live per-run query would empty out this run's numbers.
+    db.flush()
+    run.database_info = {**(run.database_info or {}), 'counts': breakdown(db, [run.id])[run.id]}
     if commit:
         db.commit()
         db.refresh(run)

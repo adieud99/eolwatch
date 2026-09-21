@@ -21,6 +21,12 @@ SEVERITY = {'UNKNOWN': 0, 'NEGLIGIBLE': 1, 'LOW': 2, 'MEDIUM': 3, 'HIGH': 4, 'CR
 CVE = re.compile(r'CVE-\d{4}-\d{4,}')
 
 
+def scanner_db(run) -> dict:
+    """The grype DB descriptor only; run.database_info also carries EOLWatch bookkeeping (counts, package_updates)."""
+    info = run.database_info if isinstance(run.database_info, dict) else {}
+    return {k: v for k, v in info.items() if k not in ("counts", "package_updates")}
+
+
 def _invalid(message: str):
     raise HTTPException(status_code=422, detail=f'분석 비교 원본을 확인하세요: {message}')
 
@@ -193,7 +199,7 @@ def compare_analyses(db: Session, base_id: int, target_id: int) -> dict:
     if (base.scanner.lower(), base.scanner_version, old_report.descriptor.name.lower(), old_report.descriptor.version) != (
             target.scanner.lower(), target.scanner_version, new_report.descriptor.name.lower(), new_report.descriptor.version):
         warnings.append('분석 도구 또는 버전이 달라 탐지 결과의 차이에 영향을 줄 수 있습니다.')
-    if old_report.descriptor.db != new_report.descriptor.db or base.database_info != target.database_info:
+    if old_report.descriptor.db != new_report.descriptor.db or scanner_db(base) != scanner_db(target):
         warnings.append('취약점 데이터베이스 정보가 달라 탐지 결과의 차이에 영향을 줄 수 있습니다.')
     if not old_report.descriptor.db or not new_report.descriptor.db:
         warnings.append('취약점 데이터베이스 식별 정보가 없어 동일한 분석 기준인지 확인할 수 없습니다.')

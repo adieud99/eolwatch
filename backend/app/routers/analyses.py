@@ -135,7 +135,9 @@ def read(run: models.AnalysisRun, counts: Optional[dict[str, int]] = None) -> sc
         generator=run.generator, scan_scope=run.scan_scope,
         component_count=run.sbom.component_count, match_count=run.match_count,
         cve_count=run.cve_count, link_count=run.link_count, ignored_non_cve=run.ignored_non_cve,
-        database_info=run.database_info, imported_at=run.imported_at,
+        # database_info stays the scanner DB descriptor; our own bookkeeping (counts, package_updates) lives beside it
+        database_info={k: v for k, v in (run.database_info or {}).items() if k not in ('counts', 'package_updates')} if isinstance(run.database_info, dict) else run.database_info,
+        imported_at=run.imported_at,
     )
 
 
@@ -145,7 +147,8 @@ def list_analyses(db: Session = Depends(get_db)):
         defer(models.AnalysisRun.raw_report),
         joinedload(models.AnalysisRun.sbom).defer(models.SbomDocument.raw_document).joinedload(models.SbomDocument.asset)
     ).order_by(models.AnalysisRun.id.desc()).limit(100)).all()
-    counts = breakdown(db, [run.id for run in runs])
+    stored = {run.id: run.database_info['counts'] for run in runs if isinstance(run.database_info, dict) and run.database_info.get('counts')}
+    counts = {**breakdown(db, [run.id for run in runs if run.id not in stored]), **stored}  # older runs: live query
     return [read(run, counts.get(run.id)) for run in runs]
 
 
@@ -153,7 +156,7 @@ def list_analyses(db: Session = Depends(get_db)):
 def import_bundle(payload: schemas.AnalysisImport, db: Session = Depends(get_db)):
     try:
         run = import_analysis(db, payload)
-        return read(run, breakdown(db, [run.id])[run.id])
+        return read(run, (run.database_info or {}).get('counts') or breakdown(db, [run.id])[run.id])
     except HTTPException:
         db.rollback()
         raise
