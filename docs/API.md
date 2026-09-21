@@ -12,11 +12,12 @@
 
 인증은 미들웨어에서 검사하므로 OpenAPI 응답 목록에 없는 401·403도 반환할 수 있다. 비교·보고서 GET은 VEX를 변경하지 않는다. 로그인은 마지막 로그인 시각과 감사 로그를 기록한다. 아래 "로그인"은 ADMIN 또는 VIEWER를 뜻한다. 페이지 응답은 `items`, `total`, `limit`, `offset`을 포함한다.
 
-## 1. 개발 검사 — 소스 ZIP
+## 1. 개발 검사 — 소스 ZIP · 의존성 파일 · Git 저장소
 
 | 방식 | 경로 | 권한 | 용도·query |
 |---|---|---|---|
-| POST | `/api/analyses/assets/{asset_id}/uploads` | ADMIN | 소스 ZIP 업로드와 검사 요청 · multipart `file`, `project_name` |
+| POST | `/api/analyses/assets/{asset_id}/uploads` | ADMIN | 소스 ZIP 또는 의존성 파일 하나(requirements.txt·package-lock.json·pom.xml 등) 업로드와 검사 요청 · multipart `file`, `project_name`. 의존성 파일은 한 항목 ZIP으로 보관 |
+| POST | `/api/analyses/assets/{asset_id}/git` | ADMIN | Git 저장소 검사 요청 · JSON `repository_url`(https, 계정 정보 불가), `ref`(선택), `project_name`, `access_token`(선택, 저장하지 않음) → 범위 `source-git:<project_name>` |
 | GET | `/api/analyses/uploads` | 로그인 | 보관된 ZIP 페이지 · `asset_id`, `scan_scope`, `limit`(1~100), `offset` |
 | GET | `/api/analyses/uploads/{upload_id}/raw` | 로그인 | SHA-256 검증 후 원본 ZIP 다운로드 |
 | POST | `/api/analyses/uploads/{upload_id}/jobs` | ADMIN | 저장된 ZIP으로 재검사 |

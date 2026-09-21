@@ -17,7 +17,8 @@ from .. import models, schemas
 from ..config import get_settings
 from ..db import SessionLocal
 from .analysis import import_analysis
-from .analysis_profiles import DEFAULT_SCAN_SCOPE, PATH_SCAN_SCOPES, ZIP_SCAN_SCOPE, normalize_target_path, scope_identity
+from .analysis_profiles import (DEFAULT_SCAN_SCOPE, GIT_SCAN_SCOPE, PATH_SCAN_SCOPES, ZIP_SCAN_SCOPE, normalize_git_ref,
+                                normalize_repository_url, normalize_target_path, scope_identity)
 
 logger = logging.getLogger(__name__)
 RUNNING = ('COLLECTING', 'SCANNING', 'IMPORTING')
@@ -120,12 +121,23 @@ def execute_analysis(*args, **kwargs):
 
 
 def analysis_snapshot(db: Session, asset_id: int, scan_scope: str = DEFAULT_SCAN_SCOPE,
-                      target_path: Optional[str] = None, upload_id: Optional[str] = None) -> dict:
+                      target_path: Optional[str] = None, upload_id: Optional[str] = None,
+                      git: Optional[dict] = None) -> dict:
     asset = db.get(models.Asset, asset_id)
     if not asset:
         raise HTTPException(status_code=404, detail='분석할 자산이 없습니다')
     snapshot = {name: getattr(asset, name) for name in SNAPSHOT_FIELDS}
-    if scan_scope == ZIP_SCAN_SCOPE:
+    if scan_scope == GIT_SCAN_SCOPE:
+        git = git or {}
+        try:
+            snapshot.update(input_type='git', profile=GIT_SCAN_SCOPE, project_name=git.get('project_name'),
+                            git_url=normalize_repository_url(git.get('repository_url')), git_ref=normalize_git_ref(git.get('ref')))
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        if git.get('access_token'):
+            # Used once by the worker for the clone, then removed from the stored snapshot.
+            snapshot['git_token'] = git['access_token']
+    elif scan_scope == ZIP_SCAN_SCOPE:
         upload = db.get(models.AnalysisUpload, upload_id) if upload_id else None
         if not upload or upload.asset_id != asset_id:
             raise HTTPException(status_code=422, detail='동일 자산에 보관된 소스 ZIP이 필요합니다')
@@ -147,7 +159,7 @@ def analysis_snapshot(db: Session, asset_id: int, scan_scope: str = DEFAULT_SCAN
 
 def enqueue_analysis(db: Session, asset_id: int, retry_of_id: Optional[int] = None,
                      scan_scope: str = DEFAULT_SCAN_SCOPE, target_path: Optional[str] = None,
-                     upload_id: Optional[str] = None, *, commit: bool = True) -> models.AnalysisJob:
+                     upload_id: Optional[str] = None, git: Optional[dict] = None, *, commit: bool = True) -> models.AnalysisJob:
     if retry_of_id is not None:
         previous = db.get(models.AnalysisJob, retry_of_id)
         if not previous:
@@ -157,7 +169,10 @@ def enqueue_analysis(db: Session, asset_id: int, retry_of_id: Optional[int] = No
         scan_scope = previous.asset_snapshot.get('profile', previous.asset_snapshot.get('scan_scope', DEFAULT_SCAN_SCOPE))
         target_path = previous.asset_snapshot.get('target_path')
         upload_id = previous.asset_snapshot.get('upload_id')
-    snapshot = analysis_snapshot(db, asset_id, scan_scope, target_path, upload_id)
+        if previous.asset_snapshot.get('input_type') == 'git':
+            git = {'repository_url': previous.asset_snapshot.get('git_url'), 'ref': previous.asset_snapshot.get('git_ref'),
+                   'project_name': previous.asset_snapshot.get('project_name'), 'access_token': (git or {}).get('access_token')}
+    snapshot = analysis_snapshot(db, asset_id, scan_scope, target_path, upload_id, git)
     identity = snapshot['scan_scope']
     if retry_of_id is not None and snapshot.get('input_type') == 'zip':
         if any(snapshot.get(key) != previous.asset_snapshot.get(key)
@@ -261,8 +276,23 @@ def _check_target(db: Session, snapshot: dict) -> None:
         if not asset or not upload or upload.asset_id != asset.id or upload.sha256 != snapshot.get('upload_sha256'):
             raise HTTPException(status_code=409, detail='분석 자산 또는 보관된 업로드 원본 정보가 변경됐습니다.')
         return
+    if snapshot.get('input_type') == 'git':
+        if not asset:
+            raise HTTPException(status_code=409, detail='분석 대상이 삭제됐습니다.')
+        return
     if not asset or not asset.monitored or any(getattr(asset, key) != snapshot[key] for key in TARGET_FIELDS):
         raise HTTPException(status_code=409, detail='요청 후 분석 대상의 접속 정보가 변경됐습니다. 다시 요청하세요.')
+
+
+def _finalize_git_snapshot(job_id: int, token: str, snapshot: dict) -> None:
+    """Drop the one-time access token from the stored snapshot and keep the resolved commit."""
+    stored = {key: value for key, value in snapshot.items() if key != 'git_token'}
+    with SessionLocal() as db:
+        db.execute(update(models.AnalysisJob).where(
+            models.AnalysisJob.id == job_id, models.AnalysisJob.worker_token == token,
+        ).values(asset_snapshot=stored))
+        db.commit()
+    snapshot.pop('git_token', None)
 
 
 def _fail_job(job_id: int, token: str, error: Exception) -> None:
@@ -303,7 +333,14 @@ def process_next_analysis_job() -> Optional[int]:
         output_dir = Path(settings.analysis_artifacts_dir) / f'job-{job_id}-{token}'
         set_job_stage(job_id, token, 'COLLECTING')
         execution_started = True
-        bundle = execute_analysis(snapshot, output_dir, settings, lambda stage: set_job_stage(job_id, token, stage))
+        bundle = None
+        try:
+            bundle = execute_analysis(snapshot, output_dir, settings, lambda stage: set_job_stage(job_id, token, stage))
+        finally:
+            if snapshot.get('input_type') == 'git':
+                if bundle and bundle.get('git_commit'):
+                    snapshot['git_commit'] = bundle['git_commit']
+                _finalize_git_snapshot(job_id, token, snapshot)
         set_job_stage(job_id, token, 'IMPORTING')
         with SessionLocal() as db:
             # A conditional write also acquires SQLite's writer lock, closing

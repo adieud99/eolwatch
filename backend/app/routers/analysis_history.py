@@ -196,7 +196,7 @@ def verified_source(db, upload_id, *, include_content=False):
 def original_upload(upload_id: str, db: Session = Depends(get_db)):
     item, content = verified_source(db, upload_id, include_content=True)
     return Response(content, media_type='application/zip', headers={
-        'Content-Disposition': "attachment; filename*=UTF-8''" + quote(item.filename, safe=''),
+        'Content-Disposition': "attachment; filename*=UTF-8''" + quote(item.filename if item.filename.lower().endswith('.zip') else item.filename + '.zip', safe=''),
         'X-Content-SHA256': item.sha256, 'Cache-Control': 'no-store'})
 
 
@@ -264,9 +264,9 @@ def projects(asset_id: Optional[int] = Query(None, gt=0), q: Optional[str] = Que
         latest_job = db.scalar(job_q.order_by(models.AnalysisJob.requested_at.desc(), models.AnalysisJob.id.desc()).limit(1))
         schedule = db.scalar(select(models.AnalysisSchedule).options(joinedload(models.AnalysisSchedule.asset))
                              .where(models.AnalysisSchedule.asset_id == aid, models.AnalysisSchedule.scan_scope == scope))
-        project_name = scope.removeprefix('source-zip:') if scope.startswith('source-zip:') else None
+        project_name = scope.split(':', 1)[1] if scope.startswith(('source-zip:', 'source-git:')) else None
         upload_count = db.scalar(select(func.count(models.AnalysisUpload.id)).where(
-            models.AnalysisUpload.asset_id == aid, models.AnalysisUpload.project_name == project_name)) if project_name else 0
+            models.AnalysisUpload.asset_id == aid, models.AnalysisUpload.project_name == project_name)) if project_name and scope.startswith('source-zip:') else 0
         items.append({'asset_id': aid, 'asset_tag': row.asset_tag, 'asset_name': row.name, 'scan_scope': scope,
             'project_name': project_name, 'analysis_count': count_rows(db, run_q),
             'job_count': count_rows(db, job_q), 'upload_count': upload_count,

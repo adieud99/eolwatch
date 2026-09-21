@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     analysis_job_lease_seconds: int = 180
     analysis_poll_seconds: int = 3
     analysis_uploads_dir: str = "/var/lib/eolwatch/uploads"
+    analysis_git_path: str = "git"
+    analysis_git_timeout_seconds: int = 300
+    analysis_git_max_bytes: int = 250 * 1024 * 1024
     analysis_upload_max_bytes: int = 50 * 1024 * 1024
     analysis_zip_max_unpacked_bytes: int = 250 * 1024 * 1024
     analysis_zip_max_file_bytes: int = 32 * 1024 * 1024

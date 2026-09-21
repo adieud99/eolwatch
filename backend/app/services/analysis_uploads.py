@@ -24,6 +24,30 @@ class InvalidArchive(ValueError):
     pass
 
 
+# Dependency manifests and lock files Syft reads on its own; a single such file
+# may be uploaded instead of a whole source tree and is wrapped into a ZIP.
+MANIFEST_NAMES = frozenset({
+    "requirements.txt", "pipfile.lock", "poetry.lock", "pyproject.toml", "setup.py",
+    "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+    "pom.xml", "build.gradle", "build.gradle.kts", "gradle.lockfile",
+    "go.mod", "go.sum", "gemfile.lock", "cargo.lock", "composer.lock", "packages.lock.json",
+    "package.resolved", "pubspec.lock", "mix.lock", "conanfile.txt", "conan.lock",
+})
+MANIFEST_PATTERNS = (re.compile(r"requirements[\w.-]*\.txt"), re.compile(r"[\w.-]+\.csproj"), re.compile(r"[\w.-]+\.deps\.json"))
+ZIP_MAGIC = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
+
+
+def is_manifest_filename(filename: str) -> bool:
+    name = filename.casefold()
+    return name in MANIFEST_NAMES or any(pattern.fullmatch(name) for pattern in MANIFEST_PATTERNS)
+
+
+def wrap_manifest(source: Path, filename: str, destination: Path) -> None:
+    """Store a lone dependency file as a one-entry ZIP so the ZIP pipeline applies unchanged."""
+    with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.write(source, arcname=filename)
+
+
 def archive_path(settings, sha256: str) -> Path:
     if not re.fullmatch(r"[0-9a-f]{64}", sha256):
         raise InvalidArchive("업로드 원본 해시가 올바르지 않습니다.")
@@ -140,6 +164,20 @@ async def save_upload(db: Session, asset_id: int, file: UploadFile, project_name
         await file.close()
         filename = (file.filename or "source.zip").replace("\\", "/").split("/")[-1]
         filename = "".join(c for c in filename if ord(c) >= 32 and ord(c) != 127)[:255] or "source.zip"
+        with temporary.open("rb") as stream:
+            magic = stream.read(4)
+        if size and not magic.startswith(ZIP_MAGIC):
+            if not is_manifest_filename(filename):
+                raise InvalidArchive("소스 ZIP 또는 지원하는 의존성 파일(requirements.txt, package-lock.json, pom.xml 등)을 선택하세요.")
+            wrapped = Path(tempfile.mkstemp(prefix=".manifest-", dir=root)[1])
+            try:
+                await run_in_threadpool(wrap_manifest, temporary, filename, wrapped)
+                temporary.unlink(missing_ok=True)
+                temporary = wrapped
+                digest, size = hashlib.sha256(temporary.read_bytes()), temporary.stat().st_size
+            except BaseException:
+                wrapped.unlink(missing_ok=True)
+                raise
         return await run_in_threadpool(_persist_upload, db, asset_id, temporary, digest.hexdigest(),
                                        size, filename, project_name, settings)
     except InvalidArchive as error:

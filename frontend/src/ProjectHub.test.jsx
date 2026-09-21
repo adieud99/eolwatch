@@ -203,7 +203,7 @@ describe('프로젝트별 서버 페이지 이력', () => {
     const { props } = open({ initialAssetId: 1, initialScope: 'source-zip:orders' })
     await screen.findByText('분석 #204')
     fireEvent.click(screen.getByRole('button', { name: '이 프로젝트 새 분석' }))
-    expect(props.onNewAnalysis).toHaveBeenCalledWith({ assetId: 1, scanScope: 'source-zip:orders', projectName: 'orders', targetPath: '' })
+    expect(props.onNewAnalysis).toHaveBeenCalledWith({ assetId: 1, scanScope: 'source-zip:orders', projectName: 'orders', targetPath: '', gitUrl: '', gitRef: '' })
     fireEvent.click(screen.getByRole('button', { name: '이 자산 조치목록' }))
     expect(props.onViewWork).toHaveBeenCalledWith(1)
     expect(props.request.mock.calls.some(([path]) => path.startsWith('/analyses/projects?asset_id=1&'))).toBe(true)

@@ -24,7 +24,7 @@ const analysisScopeText = { 'ubuntu-dpkg-installed': 'OS · 설치 패키지', '
 const comparisonStatusText = { PERSISTENT: '계속 검출', NEW: '새로 검출', NO_LONGER_DETECTED: '재검사 미검출', COMPONENT_REMOVED: '구성요소 제거' }
 const vexStatusText = { AFFECTED: '영향 있음', NOT_AFFECTED: '영향 없음', FIXED: '조치 완료', UNDER_INVESTIGATION: '조사 중' }
 const activeAnalysisJob = (job) => ['QUEUED', 'COLLECTING', 'SCANNING', 'IMPORTING', 'CANCEL_REQUESTED'].includes(job.status)
-const isZipScope = (scope = '') => scope.startsWith('source-zip')
+const isZipScope = (scope = '') => scope.startsWith('source-')
 const platformText = { aws: 'AWS EC2', gcp: 'Google Cloud', azure: 'Azure', kvm: 'KVM 가상머신', qemu: 'QEMU 가상머신', vmware: 'VMware 가상머신', oracle: 'VirtualBox 가상머신', microsoft: 'Hyper-V 가상머신', xen: 'Xen 가상머신', lxc: 'LXC 컨테이너', docker: 'Docker 컨테이너', physical: '물리 서버', unknown: '미확인' }
 const gigabytes = (mb) => mb == null ? null : mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`
 const bytesText = (value) => value == null ? '-' : `${(value / (1024 ** 3)).toFixed(1)} GB`
@@ -42,7 +42,7 @@ function ServerInfoCard({ info }) {
   </dl>
 }
 
-const tabTitles = { overview: '개요', dev: '개발 검사 · 소스 ZIP', infra: '인프라 검사 · 서버', history: '검사 기록', admin: '관리' }
+const tabTitles = { overview: '개요', dev: '개발 검사 · 소스 ZIP · Git', infra: '인프라 검사 · 서버', history: '검사 기록', admin: '관리' }
 const historyTitles = { projects: '검사 이력', cve: 'CVE 결과·조치', work: '조치 작업목록', sbom: '의존성 목록', comparison: '검사 전후 비교' }
 
 async function api(path, options) {
@@ -266,7 +266,7 @@ function AnalysisJobs({ jobs, error, pendingAssets, onRetry, onCancel, onViewRes
     <div className="table-wrap"><table aria-label={title}><thead><tr><th>요청 시각</th><th>대상</th><th>진행 상태</th><th>결과·오류</th><th>확인</th></tr></thead><tbody>
       {jobs.map((job) => <tr key={job.id}>
         <td>{new Date(job.requested_at).toLocaleString('ko-KR')}<small>작업 #{job.id}{job.retry_of_id ? ` · 작업 #${job.retry_of_id} 재시도` : ''}</small></td>
-        <td><strong>{job.asset_tag || `서버 #${job.asset_id}`}</strong><small>{job.asset_name}</small><small>{analysisScopeText[job.scan_scope] || scopeLabel(job.scan_scope)}</small></td>
+        <td><strong>{job.asset_tag || `서버 #${job.asset_id}`}</strong><small>{job.asset_name}</small><small>{analysisScopeText[job.scan_scope] || scopeLabel(job.scan_scope)}</small>{job.git_url && <small>{job.git_url}{job.git_ref ? ` @ ${job.git_ref}` : ''}{job.git_commit ? ` · ${job.git_commit.slice(0, 12)}` : ''}</small>}</td>
         <td><span className={`job job-${job.status === 'SUCCESS' ? 'success' : job.status === 'FAILED' ? 'failed' : 'running'}`}>{analysisJobText[job.status] || job.status}</span>{job.finished_at && <small>{new Date(job.finished_at).toLocaleString('ko-KR')}</small>}</td>
         <td>{job.error_message ? <><strong>{job.error_message}</strong>{job.error_code && <small>{job.error_code}</small>}</> : job.status === 'SUCCESS' ? <><strong>검사 #{job.analysis_run_id}</strong><small>SBOM #{job.sbom_id}</small></> : <small>{job.status === 'CANCELLED' ? '검사를 취소했습니다.' : job.status === 'CANCEL_REQUESTED' ? '실행 중인 프로세스 종료를 확인하고 있습니다.' : '진행 상태를 자동으로 확인합니다.'}</small>}</td>
         <td>{job.status === 'SUCCESS' && job.sbom_id && <button className="table-button" aria-label={`작업 ${job.id} 결과 보기`} onClick={() => onViewResult(job.sbom_id)}>결과 보기</button>}{job.status === 'FAILED' && <button className="table-button" aria-label={`작업 ${job.id} 재시도`} disabled={!canEdit || pendingAssets.includes(job.asset_id) || jobs.some((item) => item.asset_id === job.asset_id && activeAnalysisJob(item))} onClick={() => onRetry(job)}>재시도</button>}{canEdit && activeAnalysisJob(job) && <button className="table-button" aria-label={`작업 ${job.id} 취소`} disabled={job.status === 'CANCEL_REQUESTED' || pendingAssets.includes(job.asset_id)} onClick={() => onCancel(job)}>검사 취소</button>}</td>
@@ -717,7 +717,7 @@ export default function App() {
         {tab === 'history' && <div className="analysis-input-tabs" role="tablist" aria-label="검사 기록 종류">{historyViews.map(([value, label]) => <button key={value} className="secondary" role="tab" aria-selected={historyView === value} aria-pressed={historyView === value} onClick={() => setHistoryView(value)}>{label}</button>)}</div>}
         {loading ? <div className="loading">데이터를 불러오는 중입니다…</div>
           : tab === 'overview' ? <Overview summary={summary} onViewResult={viewAnalysisResult} analysisJobs={analysisJobs} />
-          : tab === 'dev' ? <><AnalysisTargets mode="zip" assets={assets} canEdit={canEdit} request={api} onJobQueued={acceptedAnalysisJob} initialAssetId={analysisInput.assetId} initialProjectName={analysisInput.projectName} initialScope={analysisInput.scanScope} initialTargetPath={analysisInput.targetPath} /><AnalysisJobs jobs={zipJobs} title="소스 ZIP 검사 작업" hint="업로드한 ZIP에서 의존성 목록을 뽑고 취약점 DB와 대조합니다. 완료되면 결과를 확인할 수 있습니다." {...jobsProps} /></>
+          : tab === 'dev' ? <><AnalysisTargets mode="zip" assets={assets} canEdit={canEdit} request={api} onJobQueued={acceptedAnalysisJob} initialAssetId={analysisInput.assetId} initialProjectName={analysisInput.projectName} initialScope={analysisInput.scanScope} initialTargetPath={analysisInput.targetPath} initialGitUrl={analysisInput.gitUrl} initialGitRef={analysisInput.gitRef} /><AnalysisJobs jobs={zipJobs} title="소스 검사 작업" hint="업로드한 ZIP·의존성 파일 또는 복제한 Git 저장소에서 의존성 목록을 뽑고 취약점 DB와 대조합니다. 완료되면 결과를 확인할 수 있습니다." {...jobsProps} /></>
           : tab === 'infra' ? <><Servers assets={assets} checks={checks} onChanged={load} canEdit={canEdit} analysisJobs={analysisJobs} pendingAssets={pendingAssets} onStartAnalysis={requestAnalysis} focusedAssetId={focusedAssetId} onViewProjects={viewProjects} onViewCve={viewAssetWork} onViewSbom={viewSbom} /><AnalysisJobs jobs={serverJobs} title="서버 검사 작업" hint="검사 도구를 서버에 복사해 실행하고 설치 패키지를 수집한 뒤 취약점을 검사합니다." {...jobsProps} /><AnalysisTargets mode="ssh" assets={assets} canEdit={canEdit} request={api} onJobQueued={acceptedAnalysisJob} initialAssetId={analysisInput.assetId} initialProjectName={analysisInput.projectName} initialScope={analysisInput.scanScope} initialTargetPath={analysisInput.targetPath} /><Checks checks={checks} /></>
           : tab === 'history' ? (
             historyView === 'projects' ? <ProjectHub assets={assets} canEdit={canEdit} request={api} download={download} onChanged={load} onJobQueued={acceptedAnalysisJob} onViewResult={viewAnalysisResult} onViewSbom={viewSbom} onCompare={viewComparison} onNewAnalysis={(input) => { setAnalysisInput(input); setTab(input.scanScope && !isZipScope(input.scanScope) ? 'infra' : 'dev') }} initialAssetId={projectContext.assetId} initialScope={projectContext.scanScope} onSelectionChange={setProjectContext} onViewWork={viewAssetWork} />

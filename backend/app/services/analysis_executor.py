@@ -24,7 +24,8 @@ import uuid
 
 import paramiko
 
-from .analysis_profiles import ANALYSIS_PROFILES, DEFAULT_SCAN_SCOPE, PATH_SCAN_SCOPES, ZIP_SCAN_SCOPE, AnalysisProfile, normalize_target_path, scope_identity
+from .analysis_profiles import (ANALYSIS_PROFILES, DEFAULT_SCAN_SCOPE, GIT_SCAN_SCOPE, PATH_SCAN_SCOPES, SOURCE_SCAN_SCOPES,
+                                ZIP_SCAN_SCOPE, AnalysisProfile, normalize_git_ref, normalize_repository_url, normalize_target_path, scope_identity)
 from .analysis_uploads import InvalidArchive, extract_upload
 
 
@@ -90,6 +91,7 @@ class _Run:
             "target_path": asset.get("target_path"), "upload_id": asset.get("upload_id"),
             "upload_sha256": asset.get("upload_sha256"), "upload_filename": asset.get("upload_filename"),
             "project_name": asset.get("project_name"),
+            "git_url": asset.get("git_url"), "git_ref": asset.get("git_ref"),
         }
         self.save()
 
@@ -385,6 +387,57 @@ def _provision(client, syft: Path, run: _Run):
         return target, config, pid
 
 
+def _clone_repository(run: _Run, snapshot: dict, settings, env: dict) -> str:
+    """Shallow, read-only clone into the run directory. The token never reaches argv or the manifest."""
+    try:
+        url = normalize_repository_url(snapshot.get("git_url"))
+        ref = normalize_git_ref(snapshot.get("git_ref"))
+    except ValueError as error:
+        raise AnalysisExecutionError("TARGET_INVALID", str(error)) from error
+    directory = run.directory / "source"
+    git_env = dict(env, GIT_TERMINAL_PROMPT="0", GIT_CONFIG_NOSYSTEM="1", GIT_ASKPASS="/bin/false",
+                   HOME=str(run.directory), GIT_LFS_SKIP_SMUDGE="1")
+    credential = None
+    argv = [settings.analysis_git_path, "-c", "credential.helper=", "-c", "core.hooksPath=/dev/null",
+            "-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "-c", "core.symlinks=false"]
+    token = snapshot.get("git_token")
+    if token:
+        credential = run.directory / ".git-credential"
+        credential.touch(mode=0o600)
+        credential.write_text(f"#!/bin/sh\necho username=oauth2\necho password={shlex.quote(token)}\n", encoding="utf-8")
+        credential.chmod(0o700)
+        argv.extend(["-c", "credential.helper=" + str(credential)])
+    argv.extend(["clone", "--depth", "1", "--no-tags", "--single-branch", "--recurse-submodules=no"])
+    if ref:
+        argv.extend(["--branch", ref])
+    argv.extend(["--", url, str(directory)])
+    try:
+        run.local("git-clone", argv, settings.analysis_git_timeout_seconds, git_env)
+    except AnalysisExecutionError as error:
+        if error.code == "TOOL_FAILED":
+            raise AnalysisExecutionError("GIT_CLONE_FAILED", "저장소를 가져오지 못했습니다. 주소·브랜치·접근 권한(비공개 저장소는 토큰)을 확인하세요.") from error
+        raise
+    finally:
+        if credential is not None:
+            credential.unlink(missing_ok=True)
+    head = run.local("git-head", [settings.analysis_git_path, "-C", str(directory), "rev-parse", "HEAD"], 30, git_env)
+    commit = head.read_text(encoding="utf-8", errors="replace").strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise AnalysisExecutionError("GIT_CLONE_FAILED", "가져온 저장소의 커밋을 확인하지 못했습니다.")
+    run.manifest["git_commit"] = commit
+    total = 0
+    for path in directory.rglob("*"):
+        if path.is_symlink():
+            path.unlink()
+            continue
+        if path.is_file():
+            total += path.stat().st_size
+            if total > settings.analysis_git_max_bytes:
+                raise AnalysisExecutionError("SOURCE_TOO_LARGE", "저장소 크기가 허용 한도를 초과했습니다.")
+    run.save()
+    return str(directory)
+
+
 def _environment(settings) -> dict:
     # Do not pass database/password/registry credentials into scanners or their reports.
     allowed = {"PATH", "HOME", "LANG", "LC_ALL", "TZ", "SSL_CERT_FILE", "SSL_CERT_DIR",
@@ -412,7 +465,7 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
         profile = ANALYSIS_PROFILES.get(run.profile)
         if profile is None:
             raise AnalysisExecutionError("UNSUPPORTED_SCAN_SCOPE", "지원하지 않는 분석 범위입니다.")
-        if run.profile in PATH_SCAN_SCOPES or run.profile == ZIP_SCAN_SCOPE:
+        if run.profile in PATH_SCAN_SCOPES or run.profile in SOURCE_SCAN_SCOPES:
             try:
                 expected_scope = scope_identity(run.profile, asset_snapshot.get('target_path'), asset_snapshot.get('project_name'))
             except ValueError as error:
@@ -430,11 +483,14 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
             scan_options.extend(["--override-default-catalogers", profile.cataloger])
         for exclude in profile.exclusions:
             scan_options.extend(["--exclude", exclude])
-        if run.profile == ZIP_SCAN_SCOPE:
-            try:
-                directory = str(extract_upload(asset_snapshot, run.directory / "source", settings, run.heartbeat))
-            except InvalidArchive as error:
-                raise AnalysisExecutionError("INVALID_SOURCE_ARCHIVE", str(error)) from error
+        if run.profile in SOURCE_SCAN_SCOPES:
+            if run.profile == GIT_SCAN_SCOPE:
+                directory = _clone_repository(run, asset_snapshot, settings, env)
+            else:
+                try:
+                    directory = str(extract_upload(asset_snapshot, run.directory / "source", settings, run.heartbeat))
+                except InvalidArchive as error:
+                    raise AnalysisExecutionError("INVALID_SOURCE_ARCHIVE", str(error)) from error
             config_path = run.directory / "source-syft.json"
             config_path.write_text(json.dumps(SYFT_CONFIG), encoding="utf-8")
             raw_path = run.local("syft-scan", [str(syft), "scan", "dir:" + directory,
@@ -468,7 +524,7 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
         if run.profile == DEFAULT_SCAN_SCOPE and (distro.get("id") != "ubuntu"
                 or not re.fullmatch(r"[0-9]+(?:\.[0-9]+)*", str(distro.get("versionID", "")))):
             raise AnalysisExecutionError("DISTRO_UNSUPPORTED", "현재 분석은 배포판 버전을 식별할 수 있는 Ubuntu 서버를 지원합니다.")
-        if (profile.relative_directory is not None or run.profile in PATH_SCAN_SCOPES or run.profile == ZIP_SCAN_SCOPE) and raw.get("source", {}).get("metadata", {}).get("path") != directory:
+        if (profile.relative_directory is not None or run.profile in PATH_SCAN_SCOPES or run.profile in SOURCE_SCAN_SCOPES) and raw.get("source", {}).get("metadata", {}).get("path") != directory:
             raise AnalysisExecutionError("SCOPE_MISMATCH", "수집 결과의 경로가 선택한 앱 디렉터리와 다릅니다.")
         run.manifest.update(distro=distro, package_count=len(packages), catalogers=catalogers)
         run.heartbeat("SCANNING")
@@ -492,7 +548,10 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
         run.manifest.update(match_count=len(report["matches"]), grype_db=report.get("descriptor", {}).get("db"))
         run.heartbeat("IMPORTING")
         run.manifest["status"] = "ready_for_import"
-        return {"sbom": sbom, "report": report, "scan_scope": run.scan_scope}
+        result = {"sbom": sbom, "report": report, "scan_scope": run.scan_scope}
+        if run.manifest.get("git_commit"):
+            result["git_commit"] = run.manifest["git_commit"]
+        return result
     except AnalysisExecutionError as error:
         run.manifest.update(status="failed", error_code=error.code, error=error.message)
         raise

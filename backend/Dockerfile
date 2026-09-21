@@ -18,6 +18,7 @@ EXPOSE 8000
 CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
 
 FROM base AS analysis-worker
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=analysis-tools /opt/analysis-tools /opt/analysis-tools
 RUN mkdir -p /var/lib/eolwatch/analysis /var/cache/eolwatch
 CMD ["python", "-m", "app.worker"]

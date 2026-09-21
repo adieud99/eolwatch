@@ -12,6 +12,7 @@ DEMO_PYTHON_SCAN_SCOPE = "demo-python-venv"
 SSH_PYTHON_SCAN_SCOPE = "ssh-python-environment"
 SSH_PROJECT_SCAN_SCOPE = "ssh-project-directory"
 ZIP_SCAN_SCOPE = "source-zip"
+GIT_SCAN_SCOPE = "source-git"
 
 
 @dataclass(frozen=True)
@@ -53,9 +54,15 @@ ANALYSIS_PROFILES = {
         description="Installed and declared dependencies in an immutable source ZIP; nested archives and application execution are excluded.",
         exclusions=("./.git/**",),
     ),
+    GIT_SCAN_SCOPE: AnalysisProfile(
+        cataloger=None, package_type=None, relative_directory=None,
+        description="Declared dependencies in a shallow, read-only clone of a Git repository; no build, install or application execution.",
+        exclusions=("./.git/**",),
+    ),
 }
 SUPPORTED_SCAN_SCOPES = frozenset(ANALYSIS_PROFILES)
 PATH_SCAN_SCOPES = frozenset((SSH_PYTHON_SCAN_SCOPE, SSH_PROJECT_SCAN_SCOPE))
+SOURCE_SCAN_SCOPES = frozenset((ZIP_SCAN_SCOPE, GIT_SCAN_SCOPE))
 
 
 def normalize_target_path(value: Optional[str]) -> str:
@@ -76,10 +83,28 @@ def normalize_project_name(value: str) -> str:
     return name
 
 
+def normalize_repository_url(value: Optional[str]) -> str:
+    """Only https URLs without embedded credentials, fragments or shell-significant characters."""
+    url = (value or "").strip()
+    if (not re.fullmatch(r"https://[A-Za-z0-9.\-]+(?::[0-9]{1,5})?/[A-Za-z0-9._~%/\-]+", url)
+            or "@" in url or "//" in url[8:] or len(url) > 500 or ".." in url):
+        raise ValueError("저장소 주소는 계정 정보가 없는 https:// 주소여야 합니다.")
+    return url.rstrip("/")
+
+
+def normalize_git_ref(value: Optional[str]) -> Optional[str]:
+    ref = (value or "").strip()
+    if not ref:
+        return None
+    if ref.startswith("-") or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/\-]{0,199}", ref) or ".." in ref or ref.endswith(".lock"):
+        raise ValueError("브랜치·태그 이름 형식이 올바르지 않습니다.")
+    return ref
+
+
 def scope_identity(profile: str, target_path: Optional[str] = None, project_name: Optional[str] = None) -> str:
     if profile in PATH_SCAN_SCOPES:
         return profile + ":" + normalize_target_path(target_path)
-    if profile == ZIP_SCAN_SCOPE:
+    if profile in SOURCE_SCAN_SCOPES:
         return profile + ":" + normalize_project_name(project_name or "")
     if profile not in SUPPORTED_SCAN_SCOPES:
         raise ValueError("지원하지 않는 분석 범위입니다.")

@@ -343,6 +343,14 @@ class AnalysisJobRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class AnalysisGitRequest(BaseModel):
+    repository_url: str = Field(min_length=12, max_length=500)
+    ref: Optional[str] = Field(default=None, max_length=200)
+    project_name: str = Field(min_length=1, max_length=80)
+    access_token: Optional[str] = Field(default=None, min_length=1, max_length=400)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
 class AnalysisJobRead(BaseModel):
     id: int
     asset_id: int
@@ -359,12 +367,15 @@ class AnalysisJobRead(BaseModel):
     sbom_id: Optional[int]
     retry_of_id: Optional[int]
     profile: str = "ubuntu-dpkg-installed"
-    input_type: Literal["ssh", "zip"] = "ssh"
+    input_type: Literal["ssh", "zip", "git"] = "ssh"
     target_path: Optional[str] = None
     upload_id: Optional[str] = None
     upload_sha256: Optional[str] = None
     upload_filename: Optional[str] = None
     project_name: Optional[str] = None
+    git_url: Optional[str] = None
+    git_ref: Optional[str] = None
+    git_commit: Optional[str] = None
 
 
 class AnalysisScheduleCreate(AnalysisJobRequest):

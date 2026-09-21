@@ -31,6 +31,7 @@ def read_job(job: models.AnalysisJob) -> schemas.AnalysisJobRead:
         input_type=job.asset_snapshot.get('input_type', 'ssh'), target_path=job.asset_snapshot.get('target_path'),
         upload_id=job.asset_snapshot.get('upload_id'), upload_sha256=job.asset_snapshot.get('upload_sha256'),
         upload_filename=job.asset_snapshot.get('upload_filename'), project_name=job.asset_snapshot.get('project_name'),
+        git_url=job.asset_snapshot.get('git_url'), git_ref=job.asset_snapshot.get('git_ref'), git_commit=job.asset_snapshot.get('git_commit'),
     )
 
 
@@ -68,6 +69,12 @@ async def upload_source(asset_id: int, file: UploadFile = File(), project_name: 
     except IntegrityError as error:
         await run_in_threadpool(db.rollback)
         raise HTTPException(status_code=409, detail='동시에 요청된 분석이 있습니다. 작업 목록을 확인하세요.') from error
+
+
+@router.post('/assets/{asset_id}/git', response_model=schemas.AnalysisJobRead, status_code=202)
+def scan_repository(asset_id: int, payload: schemas.AnalysisGitRequest, db: Session = Depends(get_db)):
+    """Queue a read-only shallow clone of a Git repository for dependency scanning."""
+    return read_job(enqueue_analysis(db, asset_id, scan_scope='source-git', git=payload.model_dump()))
 
 
 def _queue_upload(db, asset_id, upload_id):

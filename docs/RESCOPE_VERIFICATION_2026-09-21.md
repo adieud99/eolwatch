@@ -26,6 +26,17 @@
 | 조치 기록 `POST /api/vulnerabilities/1/actions` | FIXED, 검사 #3 근거, 이력 조회 가능. 오래된 revision으로 재요청 시 409 |
 | 대시보드 | `open_cves` 17 → 조치 후 미완료 작업목록 감소, `current_open_cves`는 최신 검사 기준 |
 
+## 개발 검사 추가 입력 (같은 날 추가)
+
+| 단계 | 결과 |
+|---|---|
+| 의존성 파일만 업로드 (`requirements.txt`, 수정 버전 4개) | 작업 #1 SUCCESS, 범위 `source-zip:orders-api`, 구성요소 5개, CVE 2건. 보관 파일은 한 항목 ZIP, 다운로드 이름 `requirements.txt.zip` |
+| Git 저장소 `https://github.com/pallets/flask` 태그 `3.0.0` | 작업 #2 SUCCESS, 범위 `source-git:flask`, 커밋 `735a4701…` 기록, 구성요소 32개(requirements/*.txt·GitHub Actions), CVE 13건 |
+| 존재하지 않는 저장소 + 더미 토큰 | FAILED `GIT_CLONE_FAILED`, DB 스냅샷과 worker 산출물 어디에도 토큰 문자열 없음 |
+| 잘못된 요청 (http://, 계정 포함 URL, `--`로 시작하는 브랜치) | 422 |
+
+worker 이미지에 `git`이 필요하다(Dockerfile analysis-worker 단계에 추가). 검증에는 기존 worker 이미지 위에 git만 설치한 임시 이미지를 썼다.
+
 ## 인프라 검사 (서버)
 
 | 단계 | 결과 |
