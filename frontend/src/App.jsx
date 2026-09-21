@@ -179,7 +179,10 @@ function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendin
       onChanged('서버를 등록했습니다.')
     } catch (reason) { setError(reason.message) }
   }
-  const visible = assets.filter((asset) => {
+  // Targets that only group development scans (no connection details) belong to 개발 검사, not here.
+  const servers = assets.filter((asset) => asset.ip_address || asset.ssh_username || asset.monitored)
+  const devOnly = assets.length - servers.length
+  const visible = servers.filter((asset) => {
     const query = assetQuery.trim().toLowerCase()
     const searchable = [asset.asset_tag, asset.name, asset.ip_address, asset.ssh_username].filter(Boolean).join(' ').toLowerCase()
     return !query || searchable.includes(query)
@@ -206,7 +209,7 @@ function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendin
           <button className="primary submit" type="submit">저장</button>
         </form>
       )}
-      <div className="management-search asset-search"><label>서버 검색<input value={assetQuery} maxLength={100} onChange={(event) => setAssetQuery(event.target.value)} placeholder="서버 이름, 번호, IP, 계정" /></label></div>
+      <div className="management-search asset-search"><label>서버 검색<input value={assetQuery} maxLength={100} onChange={(event) => setAssetQuery(event.target.value)} placeholder="서버 이름, 번호, IP, 계정" /></label>{devOnly > 0 && <span className="subtle">접속 정보가 없는 개발 검사 전용 대상 {devOnly}개는 여기에 표시하지 않습니다. 검사 기록에서 확인하세요.</span>}</div>
       <div className="table-wrap">
         <table>
           <thead><tr><th>서버 번호</th><th>서버</th><th>구분</th><th>접속 정보</th><th>서버 정보</th><th>검사 결과</th><th>점검·검사</th></tr></thead>
@@ -232,7 +235,7 @@ function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendin
                 }}>SSH 점검</button><button className="table-button" aria-label={`${asset.asset_tag} 취약점 검사`} disabled={!canEdit || unavailable || pending || Boolean(activeJob)} title={!canEdit ? '관리자만 검사를 요청할 수 있습니다.' : unavailable ? '검사 대상 설정, 서버 IP와 SSH 계정이 필요합니다.' : activeJob ? `검사 작업 #${activeJob.id} 진행 중` : '설치 패키지를 수집한 뒤 취약점을 검사합니다.'} onClick={() => onStartAnalysis(asset.id, undefined, scanScopes[asset.id] || 'ubuntu-dpkg-installed')}>{pending ? '요청 중…' : activeJob ? `검사 진행 중 · ${analysisJobText[activeJob.status]}` : '취약점 검사'}</button></div>{unavailable && <small>검사에는 검사 대상 설정·IP·SSH 계정이 필요합니다.</small>}</td>
               </tr>
             )})}
-            {!visible.length && <tr><td colSpan="7" className="empty">{assets.length ? '검색 조건에 맞는 서버가 없습니다.' : '등록된 서버가 없습니다. 서버 IP와 SSH 계정을 등록하세요.'}</td></tr>}
+            {!visible.length && <tr><td colSpan="7" className="empty">{servers.length ? '검색 조건에 맞는 서버가 없습니다.' : '등록된 서버가 없습니다. 서버 IP와 SSH 계정을 등록하세요.'}</td></tr>}
           </tbody>
         </table>
       </div>
