@@ -67,7 +67,6 @@ h3 { font-size: 15px; font-weight: 700; }
 .metric > span { display: block; color: var(--muted); font-size: 14px; }
 .metric strong { display: block; margin: 14px 0 6px; font-size: 40px; font-weight: 700; letter-spacing: -.03em; color: var(--ink); }
 .metric small { color: var(--gray); font-size: 12px; }
-.split-grid { display: grid; grid-template-columns: 1.08fr .92fr; gap: 14px; }
 .panel { padding: 28px; border: 1px solid #d9d9d9; border-radius: 10px; background: var(--paper); }
 .panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 22px; }
 .panel-heading small { display: block; margin-top: 8px; color: var(--muted); font-size: 12px; line-height: 1.7; }
@@ -127,11 +126,6 @@ input[type="file"] { padding: 7px 10px; }
 .file-drop small { color: var(--muted); font-size: 11px; }
 .wide { width: 100%; }
 .vertical-form { display: grid; gap: 12px; margin-top: 22px; }
-.simple-list { display: grid; gap: 8px; margin-top: 24px; }
-.simple-list > div { padding: 12px 14px; border: 1px solid var(--line); border-radius: 6px; }
-.simple-list strong, .simple-list small { display: block; }
-.simple-list strong { font-size: 13px; }
-.simple-list small { margin-top: 4px; color: var(--muted); font-size: 11px; }
 
 /* Status chips */
 .job, .severity, .risk { display: inline-block; padding: 6px 12px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap; }
@@ -162,7 +156,6 @@ input[type="file"] { padding: 7px 10px; }
 .diff-grid small { color: var(--muted); font-size: 11px; }
 
 /* Admin */
-.operations-section, .audit-panel { margin-top: 14px; }
 
 /* Server information card */
 .server-info { display: grid; gap: 8px; margin: 4px 0; font-size: 12px; }
@@ -179,7 +172,6 @@ input[type="file"] { padding: 7px 10px; }
 
 @media (max-width: 1000px) {
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
-  .split-grid { grid-template-columns: 1fr; }
   .asset-form { grid-template-columns: repeat(2, 1fr); }
   .diff-grid { grid-template-columns: repeat(2, 1fr); }
 }

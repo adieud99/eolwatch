@@ -42,7 +42,7 @@ function ServerInfoCard({ info }) {
   </dl>
 }
 
-const tabTitles = { overview: '개요', dev: '개발 검사', infra: '인프라 검사', history: '검사 기록', admin: '관리' }
+const tabTitles = { overview: '개요', dev: '개발 검사', infra: '인프라 검사', history: '검사 기록' }
 const historyTitles = { projects: '검사 이력', cve: 'CVE 결과·조치', work: '조치 목록', sbom: '의존성 목록', comparison: '검사 전후 비교' }
 
 const fieldNames = { asset_tag: '서버 번호', name: '서버 이름', asset_type: '유형', ip_address: '서버 주소', ssh_port: 'SSH 포트', ssh_username: 'SSH 계정', project_name: '프로젝트 이름', repository_url: '저장소 주소', ref: '브랜치', access_token: '접근 토큰', username: '아이디', password: '비밀번호', interval_minutes: '검사 주기', target_path: '앱 경로' }
@@ -553,26 +553,6 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
   </>
 }
 
-function Admin({ auditLogs, users, onChanged, canEdit }) {
-  async function createUser(event) {
-    const form = event.currentTarget
-    event.preventDefault()
-    try {
-      const data = Object.fromEntries(new FormData(form))
-      await api('/auth/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
-      form.reset(); onChanged('사용자 계정을 만들었습니다.')
-    } catch (reason) { onChanged(reason.message, true) }
-  }
-  if (!canEdit) return <section className="panel full-panel"><p className="empty">사용자 관리와 감사 로그는 관리자만 볼 수 있습니다.</p></section>
-  return <>
-    <section className="split-grid operations-section">
-      <article className="panel"><span className="eyebrow">ACCESS CONTROL</span><h2>사용자 관리</h2><form className="vertical-form" onSubmit={createUser}><label>아이디<input name="username" minLength="3" required /></label><label>초기 비밀번호<input name="password" type="password" minLength="10" required /></label><label>권한<select name="role"><option value="VIEWER">조회자</option><option value="ADMIN">관리자</option></select></label><button className="primary">계정 생성</button></form><div className="simple-list">{users.map((item) => <div key={item.id}><strong>{item.username}</strong><small>{item.role} · {item.active ? '사용 중' : '비활성'}</small></div>)}</div></article>
-      <article className="panel"><span className="eyebrow">ROLES</span><h2>권한 안내</h2><p className="workspace-help">관리자는 등록·검사·조치 기록을 할 수 있고, 조회자는 보기만 할 수 있습니다. 모든 변경은 감사 로그에 남습니다.</p></article>
-    </section>
-    <section className="panel full-panel audit-panel"><div className="panel-heading"><div><span className="eyebrow">AUDIT</span><h2>변경 감사 로그</h2></div><span className="subtle">최근 {auditLogs.length}건</span></div><div className="table-wrap"><table><thead><tr><th>시각</th><th>사용자</th><th>방식</th><th>경로</th><th>결과</th></tr></thead><tbody>{auditLogs.map((item) => <tr key={item.id}><td>{new Date(item.created_at).toLocaleString('ko-KR')}</td><td>{item.username}</td><td><code>{item.method}</code></td><td>{item.path}</td><td>{item.status_code}</td></tr>)}</tbody></table></div></section>
-  </>
-}
-
 export default function App() {
   const [user, setUser] = useState(() => {
     try { return JSON.parse(localStorage.getItem('eolwatch_user')) }
@@ -595,7 +575,6 @@ export default function App() {
   const comparisonRequest = useRef(null)
   const jobsRevision = useRef(0)
   const messageTimer = useRef(null)
-  const [auditLogs, setAuditLogs] = useState([])
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
@@ -613,12 +592,12 @@ export default function App() {
   }, [])
   const load = useCallback(async (message = '', isError = false, signal) => {
     try {
-      const [nextSummary, nextAssets, nextSboms, nextChecks, nextAnalyses, nextAuditLogs, nextUsers] = await Promise.all([
+      const [nextSummary, nextAssets, nextSboms, nextChecks, nextAnalyses, nextUsers] = await Promise.all([
         ...['/dashboard/summary', '/assets', '/sboms', '/checks', '/analyses'].map((path) => api(path, { signal })),
-        canEdit ? api('/auth/audit-logs', { signal }) : Promise.resolve([]), canEdit ? api('/auth/users', { signal }) : Promise.resolve([]),
+        canEdit ? api('/auth/users', { signal }) : Promise.resolve([]),
       ])
       if (signal?.aborted) return false
-      setSummary(nextSummary); setAssets(nextAssets); setSboms(nextSboms); setChecks(nextChecks); setAnalyses(nextAnalyses); setAuditLogs(nextAuditLogs); setUsers(nextUsers)
+      setSummary(nextSummary); setAssets(nextAssets); setSboms(nextSboms); setChecks(nextChecks); setAnalyses(nextAnalyses); setUsers(nextUsers)
       setError(isError ? message : ''); setMessage(isError ? '' : message)
       clearTimeout(messageTimer.current)
       if (message) messageTimer.current = setTimeout(() => setMessage(''), 2500)
@@ -804,7 +783,6 @@ export default function App() {
             <button className={tab === 'dev' ? 'active' : ''} onClick={() => setTab('dev')}>개발 검사</button>
             <button className={tab === 'infra' ? 'active' : ''} onClick={() => setTab('infra')}>인프라 검사</button>
             <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}>검사 기록</button>
-            <button className={tab === 'admin' ? 'active' : ''} onClick={() => setTab('admin')}>관리</button>
           </nav>
           <div className="standard-note"><b>{user.username}</b><p>{canEdit ? '관리자' : '조회자'} 권한으로 접속했습니다.</p><button className="logout" onClick={logout}>로그아웃</button></div>
         </div>
@@ -827,7 +805,7 @@ export default function App() {
             : explorerSbomId ? <SbomExplorer key={explorerSbomId} sbomId={explorerSbomId} request={api} download={download} canEdit={canEdit} onChanged={load} onClose={() => { setExplorerSbomId(null); setHistoryView('projects') }} onViewCve={viewAnalysisResult} />
             : <p className="empty">검사 이력에서 결과를 선택하세요.</p>
           )
-          : <Admin auditLogs={auditLogs} users={users} onChanged={load} canEdit={canEdit} />}
+          : null}
       </main>
       <footer className="site-footer"><strong>EOLWatch</strong><p>개발 소스 및 운영 서버의 취약점(CVE)을 검사하고 기록하는 B2B 보안 검사 도구입니다.</p></footer>
     </div>

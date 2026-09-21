@@ -36,7 +36,7 @@ describe('EOLWatch 인증 화면', () => {
       if (url === '/api/auth/login') {
         return Promise.resolve({ ok: true, status: 200, json: async () => ({ access_token: 'token', user: { id: 1, username: 'admin', role: 'ADMIN' } }) })
       }
-      const emptyLists = ['/api/assets', '/api/software', '/api/sboms', '/api/customers', '/api/sites', '/api/checks', '/api/analyses', '/api/analyses/jobs', '/api/analyses/jobs/active', '/api/notifications', '/api/auth/audit-logs', '/api/auth/users']
+      const emptyLists = ['/api/assets', '/api/software', '/api/sboms', '/api/customers', '/api/sites', '/api/checks', '/api/analyses', '/api/analyses/jobs', '/api/analyses/jobs/active', '/api/notifications', '/api/auth/users']
       if (emptyLists.includes(url)) return Promise.resolve({ ok: true, status: 200, json: async () => [] })
       return Promise.resolve({ ok: true, status: 200, json: async () => ({ assets: 0, software_products: 0, sbom_documents: 0, components: 0, dependencies: 0, open_cves: 0, affected_assets: 0, failed_checks_24h: 0, lifecycle_risk: { EXPIRED: 0, CRITICAL: 0, WARN: 0, SAFE: 0, UNKNOWN: 0 }, sbom_quality: { average_score: 0, below_70: 0 }, urgent_items: [] }) })
     })
@@ -53,7 +53,6 @@ describe('등록 완료 후 폼 초기화와 목록 갱신', () => {
   afterEach(() => { cleanup(); vi.unstubAllGlobals() })
   it.each([
     { kind: '서버', nav: /인프라 검사/, open: '+ 서버 등록', path: '/api/assets', fields: { '서버 번호': 'VERIFY-ASSET', '서버 이름': '검증 서버', 'SSH 비밀번호': 'pw' }, submit: '저장', message: '서버를 등록했습니다.', row: '검증 서버', closedLabel: '서버 이름' },
-    { kind: '사용자', nav: /관리/, path: '/api/auth/users', fields: { '아이디': 'verify-viewer', '초기 비밀번호': 'VerifyOnly!2026' }, submit: '계정 생성', message: '사용자 계정을 만들었습니다.', row: 'verify-viewer', resetLabel: '아이디' },
   ])('$kind 등록의 비동기 응답 뒤 폼을 초기화하고 새 항목을 표시한다', async (scenario) => {
     localStorage.clear()
     localStorage.setItem('eolwatch_token', 'token')
