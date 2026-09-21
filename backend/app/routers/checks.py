@@ -35,6 +35,7 @@ def _read(job: models.CollectionJob) -> schemas.CollectionJobRead:
         memory_percent=result.memory_percent if result else None,
         max_disk_percent=result.max_disk_percent if result else None,
         uptime_seconds=result.uptime_seconds if result else None,
+        server_info=(result.raw_metrics or {}).get("server_info") if result else None,
     )
 
 

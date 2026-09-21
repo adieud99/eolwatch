@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import socket
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -24,6 +26,24 @@ COMMANDS = {
     "packages": "if command -v dpkg-query >/dev/null 2>&1; then dpkg-query -W -f='${Package}|${Version}\\n'; elif command -v rpm >/dev/null 2>&1; then rpm -qa --qf '%{NAME}|%{VERSION}-%{RELEASE}\\n'; fi",
     "os_release": "cat /etc/os-release",
     "architecture": "uname -m",
+}
+
+# Server information for the infrastructure scan. Every command tolerates a
+# missing tool or file so the collection never fails because of it.
+SERVER_INFO_COMMANDS = {
+    "hostname": "hostname 2>/dev/null || true",
+    "kernel": "uname -r 2>/dev/null || true",
+    "cpu_model": "awk -F: '/model name/ {sub(/^ +/, \"\", $2); print $2; exit}' /proc/cpuinfo 2>/dev/null || true",
+    "cpu_cores": "nproc 2>/dev/null || true",
+    "memory_total": "awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || true",
+    "disk_totals": "df -P -B1 -x tmpfs -x devtmpfs 2>/dev/null | awk 'NR>1 {print $6 \"|\" $2 \"|\" $3}' || true",
+    "virtualization": "systemd-detect-virt 2>/dev/null || true",
+    "dmi_vendor": "cat /sys/class/dmi/id/sys_vendor 2>/dev/null || true",
+    "dmi_product": "cat /sys/class/dmi/id/product_name 2>/dev/null || true",
+    "cloud_metadata": "T=$(curl -s -m 2 -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' 2>/dev/null); if [ -n \"$T\" ]; then curl -s -m 2 -H \"X-aws-ec2-metadata-token: $T\" http://169.254.169.254/latest/dynamic/instance-identity/document 2>/dev/null; fi; true",
+    "ip_addresses": "ip -4 -o addr show scope global 2>/dev/null | awk '{print $2 \"|\" $4}' || true",
+    "listening_ports": "ss -tlnH 2>/dev/null | awk '{print $1 \"|\" $4}' || true",
+    "services": "systemctl list-units --type=service --state=running --no-legend --plain 2>/dev/null | awk '{print $1}' | head -100 || true",
 }
 
 
@@ -216,6 +236,134 @@ def packages_to_spdx(
     }
 
 
+def _int_or_none(value: str) -> Optional[int]:
+    try:
+        return int(value.strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def detect_platform(virtualization: str, dmi_vendor: str, dmi_product: str, cloud: Optional[dict[str, Any]]) -> str:
+    """Classify where the server runs: a cloud provider, a hypervisor or physical hardware."""
+    if cloud:
+        return "aws"
+    vendor = f"{dmi_vendor} {dmi_product}".lower()
+    virt = (virtualization or "").strip().lower()
+    if "amazon" in vendor:
+        return "aws"
+    if "google" in vendor:
+        return "gcp"
+    if "microsoft" in vendor and "virtual" in vendor:
+        return "azure"
+    if virt in {"", "none"}:
+        return "physical" if vendor.strip() else "unknown"
+    return virt
+
+
+def parse_cloud_metadata(output: str) -> Optional[dict[str, Any]]:
+    """EC2 instance identity document → instance id, type, region; None when not on EC2."""
+    text = (output or "").strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        document = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(document, dict) or not document.get("instanceId"):
+        return None
+    return {
+        "provider": "aws",
+        "instance_id": document.get("instanceId"),
+        "instance_type": document.get("instanceType"),
+        "region": document.get("region"),
+        "availability_zone": document.get("availabilityZone"),
+        "account_id": document.get("accountId"),
+        "image_id": document.get("imageId"),
+    }
+
+
+def parse_disk_totals(output: str) -> list[dict[str, Any]]:
+    disks = []
+    for line in output.splitlines():
+        parts = line.strip().split("|")
+        if len(parts) != 3:
+            continue
+        total, used = _int_or_none(parts[1]), _int_or_none(parts[2])
+        if total is None:
+            continue
+        disks.append({"mount": parts[0], "total_bytes": total, "used_bytes": used})
+    return disks
+
+
+def parse_ip_addresses(output: str) -> list[dict[str, str]]:
+    addresses = []
+    for line in output.splitlines():
+        parts = line.strip().split("|")
+        if len(parts) == 2 and parts[1]:
+            addresses.append({"interface": parts[0], "address": parts[1]})
+    return addresses
+
+
+def parse_listening_ports(output: str, limit: int = 200) -> list[dict[str, Any]]:
+    ports: list[dict[str, Any]] = []
+    seen = set()
+    for line in output.splitlines():
+        parts = line.strip().split("|")
+        if len(parts) != 2 or ":" not in parts[1]:
+            continue
+        address, _, port = parts[1].rpartition(":")
+        number = _int_or_none(port)
+        if number is None or (parts[0], address, number) in seen:
+            continue
+        seen.add((parts[0], address, number))
+        ports.append({"protocol": parts[0], "address": address or "*", "port": number})
+        if len(ports) >= limit:
+            break
+    return sorted(ports, key=lambda item: (item["port"], item["address"]))
+
+
+def parse_services(output: str, limit: int = 100) -> list[str]:
+    names = []
+    for line in output.splitlines():
+        name = line.strip()
+        if not name.endswith(".service"):
+            continue
+        base = name[: -len(".service")]
+        if base and base not in names:
+            names.append(base)
+        if len(names) >= limit:
+            break
+    return names
+
+
+def build_server_info(raw: dict[str, str], os_release: dict[str, str]) -> dict[str, Any]:
+    """Hardware, OS, virtualization/cloud and network facts collected over SSH."""
+    cloud = parse_cloud_metadata(raw.get("cloud_metadata", ""))
+    memory_kb = _int_or_none(raw.get("memory_total", ""))
+    virtualization = raw.get("virtualization", "").strip()
+    vendor, product = raw.get("dmi_vendor", "").strip(), raw.get("dmi_product", "").strip()
+    return {
+        "hostname": raw.get("hostname", "").strip() or None,
+        "kernel": raw.get("kernel", "").strip() or None,
+        "os_name": os_release.get("pretty_name") or os_release.get("name") or None,
+        "os_id": os_release.get("id") or None,
+        "os_version": os_release.get("version_id") or None,
+        "architecture": os_release.get("architecture") or None,
+        "cpu_model": raw.get("cpu_model", "").strip() or None,
+        "cpu_cores": _int_or_none(raw.get("cpu_cores", "")),
+        "memory_total_mb": round(memory_kb / 1024) if memory_kb else None,
+        "disks": parse_disk_totals(raw.get("disk_totals", "")),
+        "virtualization": virtualization or None,
+        "dmi_vendor": vendor or None,
+        "dmi_product": product or None,
+        "platform": detect_platform(virtualization, vendor, product, cloud),
+        "cloud": cloud,
+        "ip_addresses": parse_ip_addresses(raw.get("ip_addresses", "")),
+        "listening_ports": parse_listening_ports(raw.get("listening_ports", "")),
+        "services": parse_services(raw.get("services", "")),
+    }
+
+
 def parse_os_release(output: str, architecture: str) -> dict[str, str]:
     values: dict[str, str] = {}
     for line in output.splitlines():
@@ -264,6 +412,11 @@ def collect_over_ssh(asset: models.Asset) -> dict[str, Any]:
             allow_agent=not bool(key_path),
         )
         raw = {name: _run_command(client, name, command) for name, command in COMMANDS.items()}
+        for name, command in SERVER_INFO_COMMANDS.items():
+            try:
+                raw[name] = _run_command(client, name, command)
+            except CollectionFailure:
+                raw[name] = ""
     except paramiko.AuthenticationException as exc:
         raise CollectionFailure("AUTH", "AUTHENTICATION_FAILED", "SSH 키 인증에 실패했습니다") from exc
     except (paramiko.SSHException, socket.timeout, OSError) as exc:
@@ -276,6 +429,7 @@ def collect_over_ssh(asset: models.Asset) -> dict[str, Any]:
     uptime = int(_number(raw["uptime"], "uptime"))
     disks = parse_disks(raw["disk"])
     max_disk = max((item["used_percent"] for item in disks), default=0.0)
+    package_context = parse_os_release(raw["os_release"], raw["architecture"])
     return {
         "cpu_percent": round(cpu, 2),
         "memory_percent": round(memory, 2),
@@ -285,7 +439,8 @@ def collect_over_ssh(asset: models.Asset) -> dict[str, Any]:
         "disk_details": disks,
         "process_details": parse_processes(raw["process"]),
         "packages": parse_packages(raw["packages"]),
-        "package_context": parse_os_release(raw["os_release"], raw["architecture"]),
+        "package_context": package_context,
+        "server_info": build_server_info(raw, package_context),
     }
 
 
@@ -306,10 +461,11 @@ def run_collection(db: Session, asset_id: int, trigger_type: str = "MANUAL") -> 
         metrics = collect_over_ssh(asset)
         packages = metrics.pop("packages")
         package_context = metrics.pop("package_context")
+        server_info = metrics.pop("server_info", None)
         db.add(
             models.CheckResult(
                 collection_job_id=job.id,
-                raw_metrics={"package_count": len(packages), "packages": packages, "package_context": package_context},
+                raw_metrics={"package_count": len(packages), "packages": packages, "package_context": package_context, "server_info": server_info},
                 **metrics,
             )
         )

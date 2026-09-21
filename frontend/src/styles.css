@@ -152,3 +152,8 @@ input:focus, select:focus { border-color: #547d6e; box-shadow: 0 0 0 2px #dce8e2
   .action-row { flex-wrap: wrap; }
   .login-page { padding: 16px; }.login-card { padding: 28px 22px; }
 }
+
+.server-info { display: grid; gap: 6px; margin: 4px 0; font-size: 12px; }
+.server-info div { display: grid; grid-template-columns: 96px 1fr; gap: 10px; }
+.server-info dt { color: #51637a; font-weight: 600; }
+.server-info dd { margin: 0; word-break: break-word; }

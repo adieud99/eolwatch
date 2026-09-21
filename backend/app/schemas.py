@@ -138,6 +138,7 @@ class CollectionJobRead(BaseModel):
     memory_percent: Optional[float] = None
     max_disk_percent: Optional[float] = None
     uptime_seconds: Optional[int] = None
+    server_info: Optional[dict[str, Any]] = None
 
 
 class CheckResultRead(BaseModel):

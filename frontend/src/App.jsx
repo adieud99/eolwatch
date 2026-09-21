@@ -25,6 +25,23 @@ const comparisonStatusText = { PERSISTENT: '계속 검출', NEW: '새로 검출'
 const vexStatusText = { AFFECTED: '영향 있음', NOT_AFFECTED: '영향 없음', FIXED: '조치 완료', UNDER_INVESTIGATION: '조사 중' }
 const activeAnalysisJob = (job) => ['QUEUED', 'COLLECTING', 'SCANNING', 'IMPORTING', 'CANCEL_REQUESTED'].includes(job.status)
 const isZipScope = (scope = '') => scope.startsWith('source-zip')
+const platformText = { aws: 'AWS EC2', gcp: 'Google Cloud', azure: 'Azure', kvm: 'KVM 가상머신', qemu: 'QEMU 가상머신', vmware: 'VMware 가상머신', oracle: 'VirtualBox 가상머신', microsoft: 'Hyper-V 가상머신', xen: 'Xen 가상머신', lxc: 'LXC 컨테이너', docker: 'Docker 컨테이너', physical: '물리 서버', unknown: '미확인' }
+const gigabytes = (mb) => mb == null ? null : mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`
+const bytesText = (value) => value == null ? '-' : `${(value / (1024 ** 3)).toFixed(1)} GB`
+const latestServerInfo = (checks, assetId) => checks.find((job) => job.asset_id === assetId && job.status === 'SUCCESS' && job.server_info)
+
+function ServerInfoCard({ info }) {
+  if (!info) return null
+  const cloud = info.cloud
+  return <dl className="server-info" aria-label="수집한 서버 정보">
+    <div><dt>호스트·OS</dt><dd>{info.hostname || '호스트명 미확인'} · {info.os_name || 'OS 미확인'}{info.kernel ? ` · 커널 ${info.kernel}` : ''}{info.architecture ? ` · ${info.architecture}` : ''}</dd></div>
+    <div><dt>하드웨어</dt><dd>{info.cpu_model || 'CPU 미확인'}{info.cpu_cores ? ` · ${info.cpu_cores}코어` : ''} · 메모리 {gigabytes(info.memory_total_mb) || '미확인'}{info.disks?.length ? ` · 디스크 ${info.disks.map((disk) => `${disk.mount} ${bytesText(disk.total_bytes)}`).join(', ')}` : ''}</dd></div>
+    <div><dt>실행 환경</dt><dd>{platformText[info.platform] || info.platform || '미확인'}{info.dmi_vendor ? ` · ${info.dmi_vendor}${info.dmi_product ? ` ${info.dmi_product}` : ''}` : ''}{cloud ? ` · 인스턴스 ${cloud.instance_id} (${cloud.instance_type || '유형 미확인'}, ${cloud.region || '리전 미확인'})` : ''}</dd></div>
+    <div><dt>통신 정보</dt><dd>{info.ip_addresses?.length ? info.ip_addresses.map((item) => `${item.interface} ${item.address}`).join(', ') : 'IP 미확인'} · 수신 포트 {info.listening_ports?.length ? info.listening_ports.map((item) => item.port).filter((port, index, all) => all.indexOf(port) === index).join(', ') : '없음'}</dd></div>
+    <div><dt>실행 서비스</dt><dd>{info.services?.length ? `${info.services.length}개 · ${info.services.slice(0, 12).join(', ')}${info.services.length > 12 ? ' …' : ''}` : '수집되지 않음'}</dd></div>
+  </dl>
+}
+
 const tabTitles = { overview: '개요', dev: '개발 검사 · 소스 ZIP', infra: '인프라 검사 · 서버', history: '검사 기록', admin: '관리' }
 const historyTitles = { projects: '검사 이력', cve: 'CVE 결과·조치', work: '조치 작업목록', sbom: '의존성 목록', comparison: '검사 전후 비교' }
 
@@ -140,7 +157,7 @@ function Overview({ summary, onViewResult, analysisJobs }) {
   )
 }
 
-function Servers({ assets, onChanged, canEdit, analysisJobs, pendingAssets, onStartAnalysis, focusedAssetId, onViewProjects, onViewCve, onViewSbom }) {
+function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendingAssets, onStartAnalysis, focusedAssetId, onViewProjects, onViewCve, onViewSbom }) {
   const [editing, setEditing] = useState(null)
   const [assetQuery, setAssetQuery] = useState('')
   useEffect(() => { if (focusedAssetId) setEditing(assets.find((asset) => asset.id === focusedAssetId) || null) }, [focusedAssetId])
@@ -192,18 +209,20 @@ function Servers({ assets, onChanged, canEdit, analysisJobs, pendingAssets, onSt
       <div className="management-search asset-search"><label>서버 검색<input value={assetQuery} maxLength={100} onChange={(event) => setAssetQuery(event.target.value)} placeholder="서버 이름, 번호, IP, 계정" /></label></div>
       <div className="table-wrap">
         <table>
-          <thead><tr><th>서버 번호</th><th>서버</th><th>구분</th><th>접속 정보</th><th>검사 결과</th><th>점검·검사</th></tr></thead>
+          <thead><tr><th>서버 번호</th><th>서버</th><th>구분</th><th>접속 정보</th><th>서버 정보</th><th>검사 결과</th><th>점검·검사</th></tr></thead>
           <tbody>
             {visible.map((asset) => {
               const activeJob = analysisJobs.find((job) => job.asset_id === asset.id && activeAnalysisJob(job))
               const pending = pendingAssets.includes(asset.id)
               const unavailable = !asset.monitored || !asset.ip_address || !asset.ssh_username
+              const info = latestServerInfo(checks, asset.id)?.server_info
               return (
               <tr key={asset.id}>
                 <td><code>{asset.asset_tag}</code></td>
                 <td><strong>{asset.name}</strong><button className="table-button" aria-label={`${asset.asset_tag} 서버 ${canEdit ? '수정' : '상세'}`} onClick={() => setEditing(asset)}>{canEdit ? '수정' : '상세'}</button><button className="table-button" aria-label={`${asset.asset_tag} 검사 기록`} onClick={() => onViewProjects(asset.id)}>검사 기록</button></td>
                 <td>{typeText[asset.asset_type] || asset.asset_type}</td>
                 <td>{asset.ip_address ? <><strong>{asset.ip_address}:{asset.ssh_port}</strong><small>{asset.ssh_username || 'SSH 계정 미입력'}</small></> : <small>IP 미입력</small>}</td>
+                <td>{info ? <><strong>{info.os_name || 'OS 미확인'}</strong><small>{[info.cpu_cores ? `${info.cpu_cores}코어` : null, gigabytes(info.memory_total_mb), platformText[info.platform] || info.platform].filter(Boolean).join(' · ')}</small>{info.cloud && <small>{info.cloud.instance_id} · {info.cloud.instance_type}</small>}</> : <small>SSH 점검으로 수집</small>}</td>
                 <td>SBOM {asset.sbom_count ?? 0}<small>CVE {asset.vulnerability_count ?? 0}건</small></td>
                 <td><label>검사 범위<select aria-label={`${asset.asset_tag} 검사 범위`} value={scanScopes[asset.id] || 'ubuntu-dpkg-installed'} disabled={!canEdit || unavailable || pending || Boolean(activeJob)} onChange={(event) => setScanScopes((current) => ({ ...current, [asset.id]: event.target.value }))}>{Object.entries(analysisScopeText).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><div className="action-row"><button className="table-button" disabled={!canEdit || !asset.ip_address || !asset.ssh_username} onClick={async () => {
                   try {
@@ -213,7 +232,7 @@ function Servers({ assets, onChanged, canEdit, analysisJobs, pendingAssets, onSt
                 }}>SSH 점검</button><button className="table-button" aria-label={`${asset.asset_tag} 취약점 검사`} disabled={!canEdit || unavailable || pending || Boolean(activeJob)} title={!canEdit ? '관리자만 검사를 요청할 수 있습니다.' : unavailable ? '검사 대상 설정, 서버 IP와 SSH 계정이 필요합니다.' : activeJob ? `검사 작업 #${activeJob.id} 진행 중` : '설치 패키지를 수집한 뒤 취약점을 검사합니다.'} onClick={() => onStartAnalysis(asset.id, undefined, scanScopes[asset.id] || 'ubuntu-dpkg-installed')}>{pending ? '요청 중…' : activeJob ? `검사 진행 중 · ${analysisJobText[activeJob.status]}` : '취약점 검사'}</button></div>{unavailable && <small>검사에는 검사 대상 설정·IP·SSH 계정이 필요합니다.</small>}</td>
               </tr>
             )})}
-            {!visible.length && <tr><td colSpan="6" className="empty">{assets.length ? '검색 조건에 맞는 서버가 없습니다.' : '등록된 서버가 없습니다. 서버 IP와 SSH 계정을 등록하세요.'}</td></tr>}
+            {!visible.length && <tr><td colSpan="7" className="empty">{assets.length ? '검색 조건에 맞는 서버가 없습니다.' : '등록된 서버가 없습니다. 서버 IP와 SSH 계정을 등록하세요.'}</td></tr>}
           </tbody>
         </table>
       </div>
@@ -222,9 +241,10 @@ function Servers({ assets, onChanged, canEdit, analysisJobs, pendingAssets, onSt
 }
 
 function Checks({ checks }) {
+  const [openId, setOpenId] = useState(null)
   return (
     <section className="panel full-panel">
-      <div className="panel-heading"><div><span className="eyebrow">SERVER INFORMATION</span><h2>서버 정보 수집 이력</h2><small>SSH로 수집한 CPU·메모리·디스크 사용률과 OS 정보입니다.</small></div><span className="subtle">최근 {checks.length}건</span></div>
+      <div className="panel-heading"><div><span className="eyebrow">SERVER INFORMATION</span><h2>서버 정보 수집 이력</h2><small>SSH로 수집한 하드웨어·OS·실행 환경(가상화·클라우드)·통신 정보와 CPU·메모리·디스크 사용률입니다.</small></div><span className="subtle">최근 {checks.length}건</span></div>
       <div className="table-wrap"><table aria-label="서버 정보 수집 이력">
         <thead><tr><th>실행 시각</th><th>서버</th><th>상태</th><th>CPU</th><th>메모리</th><th>디스크</th><th>결과</th></tr></thead>
         <tbody>{checks.map((job) => <tr key={job.id}>
@@ -232,8 +252,8 @@ function Checks({ checks }) {
           <td><strong>{job.asset_name}</strong><small>{job.asset_tag}</small></td>
           <td><span className={`job job-${job.status.toLowerCase()}`}>{job.status}</span></td>
           <td>{job.cpu_percent === null ? '-' : `${job.cpu_percent}%`}</td><td>{job.memory_percent === null ? '-' : `${job.memory_percent}%`}</td><td>{job.max_disk_percent === null ? '-' : `${job.max_disk_percent}%`}</td>
-          <td>{job.health_level || job.failure_stage || '-'}<small>{job.failure_message}</small></td>
-        </tr>)}{checks.length === 0 && <tr><td colSpan="7" className="empty">수집 이력이 없습니다. 서버 목록에서 SSH 점검을 실행할 수 있습니다.</td></tr>}</tbody>
+          <td>{job.health_level || job.failure_stage || '-'}<small>{job.failure_message}</small>{job.server_info && <button className="table-button" aria-label={`점검 ${job.id} 서버 정보`} onClick={() => setOpenId(openId === job.id ? null : job.id)}>{openId === job.id ? '서버 정보 닫기' : '서버 정보'}</button>}</td>
+        </tr>).flatMap((row, index) => { const job = checks[index]; return openId === job.id && job.server_info ? [row, <tr key={`${job.id}-info`}><td colSpan="7"><ServerInfoCard info={job.server_info} /></td></tr>] : [row] })}{checks.length === 0 && <tr><td colSpan="7" className="empty">수집 이력이 없습니다. 서버 목록에서 SSH 점검을 실행할 수 있습니다.</td></tr>}</tbody>
       </table></div>
     </section>
   )
@@ -698,7 +718,7 @@ export default function App() {
         {loading ? <div className="loading">데이터를 불러오는 중입니다…</div>
           : tab === 'overview' ? <Overview summary={summary} onViewResult={viewAnalysisResult} analysisJobs={analysisJobs} />
           : tab === 'dev' ? <><AnalysisTargets mode="zip" assets={assets} canEdit={canEdit} request={api} onJobQueued={acceptedAnalysisJob} initialAssetId={analysisInput.assetId} initialProjectName={analysisInput.projectName} initialScope={analysisInput.scanScope} initialTargetPath={analysisInput.targetPath} /><AnalysisJobs jobs={zipJobs} title="소스 ZIP 검사 작업" hint="업로드한 ZIP에서 의존성 목록을 뽑고 취약점 DB와 대조합니다. 완료되면 결과를 확인할 수 있습니다." {...jobsProps} /></>
-          : tab === 'infra' ? <><Servers assets={assets} onChanged={load} canEdit={canEdit} analysisJobs={analysisJobs} pendingAssets={pendingAssets} onStartAnalysis={requestAnalysis} focusedAssetId={focusedAssetId} onViewProjects={viewProjects} onViewCve={viewAssetWork} onViewSbom={viewSbom} /><AnalysisJobs jobs={serverJobs} title="서버 검사 작업" hint="검사 도구를 서버에 복사해 실행하고 설치 패키지를 수집한 뒤 취약점을 검사합니다." {...jobsProps} /><AnalysisTargets mode="ssh" assets={assets} canEdit={canEdit} request={api} onJobQueued={acceptedAnalysisJob} initialAssetId={analysisInput.assetId} initialProjectName={analysisInput.projectName} initialScope={analysisInput.scanScope} initialTargetPath={analysisInput.targetPath} /><Checks checks={checks} /></>
+          : tab === 'infra' ? <><Servers assets={assets} checks={checks} onChanged={load} canEdit={canEdit} analysisJobs={analysisJobs} pendingAssets={pendingAssets} onStartAnalysis={requestAnalysis} focusedAssetId={focusedAssetId} onViewProjects={viewProjects} onViewCve={viewAssetWork} onViewSbom={viewSbom} /><AnalysisJobs jobs={serverJobs} title="서버 검사 작업" hint="검사 도구를 서버에 복사해 실행하고 설치 패키지를 수집한 뒤 취약점을 검사합니다." {...jobsProps} /><AnalysisTargets mode="ssh" assets={assets} canEdit={canEdit} request={api} onJobQueued={acceptedAnalysisJob} initialAssetId={analysisInput.assetId} initialProjectName={analysisInput.projectName} initialScope={analysisInput.scanScope} initialTargetPath={analysisInput.targetPath} /><Checks checks={checks} /></>
           : tab === 'history' ? (
             historyView === 'projects' ? <ProjectHub assets={assets} canEdit={canEdit} request={api} download={download} onChanged={load} onJobQueued={acceptedAnalysisJob} onViewResult={viewAnalysisResult} onViewSbom={viewSbom} onCompare={viewComparison} onNewAnalysis={(input) => { setAnalysisInput(input); setTab(input.scanScope && !isZipScope(input.scanScope) ? 'infra' : 'dev') }} initialAssetId={projectContext.assetId} initialScope={projectContext.scanScope} onSelectionChange={setProjectContext} onViewWork={viewAssetWork} />
             : historyView === 'cve' ? <Security analyses={analyses} sboms={sboms} users={users} onChanged={load} canEdit={canEdit} sbomId={selectedSbomId} onSelectSbom={setSelectedSbomId} onViewSbom={viewSbom} onViewHistory={() => viewProjects()} />
