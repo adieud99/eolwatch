@@ -164,7 +164,8 @@ input[type="file"] { padding: 7px 10px; }
 .server-info dd { margin: 0; word-break: break-word; }
 .agent-results { grid-template-columns: 96px 1fr; }
 .cve-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; margin: 8px 0 10px; font-size: 13px; }
-.cve-filters label { display: flex; align-items: center; gap: 6px; }
+.cve-filters label { display: flex; flex-direction: row; align-items: center; gap: 6px; white-space: nowrap; margin: 0; width: auto; }
+.cve-filters input[type="checkbox"] { width: auto; margin: 0; }
 .cve-filters select { padding: 6px 8px; }
 .cve-filters small { color: var(--muted); flex-basis: 100%; }
 .agent-note { margin: 0 0 6px; color: var(--muted); }
