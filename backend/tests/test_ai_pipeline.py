@@ -48,9 +48,9 @@ def test_answer_is_validated_and_turned_into_spdx_with_purls():
     libraries = reference.validate_libraries(answer)
     assert [l["purl"] for l in libraries] == ["pkg:pypi/pyyaml@6.0", "pkg:npm/%40babel/core@7.20.0", "pkg:pypi/pillow@9.0.0"]
     assert libraries[2]["name"] == "Pillow" and libraries[2]["confidence"] == "high"  # no evidence given: the model's word stands
-    spdx = reference.to_spdx(libraries, project_name="demo", model="qwen2.5:7b", evidence={"imports": {"pypi": ["yaml"]}, "manifests": []})
+    spdx = reference.to_spdx(libraries, project_name="demo", model="gpt-5-mini", evidence={"imports": {"pypi": ["yaml"]}, "manifests": []})
     validate_spdx_schema(spdx)
-    assert spdx["creationInfo"]["creators"] == ["Tool: EOLWatch-AI-Library-Reference", "Tool: qwen2.5:7b"]
+    assert spdx["creationInfo"]["creators"] == ["Tool: EOLWatch-AI-Library-Reference", "Tool: gpt-5-mini"]
     assert "AI 추정 · 신뢰도 high · 근거: import yaml" == spdx["packages"][0]["comment"]
     assert spdx["packages"][0]["externalRefs"][0]["referenceLocator"] == "pkg:pypi/pyyaml@6.0"
 
@@ -89,7 +89,7 @@ def test_lockfile_less_source_is_scanned_from_ai_library_reference(tmp_path, sou
         prompts.append((prompt, system))
         return ({"libraries": [{"ecosystem": "pypi", "name": "Flask", "version": "2.2.2", "confidence": "low", "evidence": "from flask import"},
                                {"ecosystem": "npm", "name": "lodash", "version": "4.17.20", "confidence": "high", "evidence": "package.json ^4.17.20"}]},
-                "qwen2.5:7b", {"input_tokens": 310, "output_tokens": 80})
+                "gpt-5-mini", {"input_tokens": 310, "output_tokens": 80})
     monkeypatch.setattr(ai_advisor, "complete_json", fake_complete_json)
     bundle = executor.execute_analysis(snapshot, tmp_path / "job", settings, state["stages"].append)
     prompt, system = prompts[0]
@@ -109,11 +109,11 @@ def test_lockfile_less_source_is_scanned_from_ai_library_reference(tmp_path, sou
 
 def test_ai_failure_keeps_the_honest_empty_collection_error(tmp_path, source_pipeline, monkeypatch):
     settings, state, snapshot = source_pipeline
-    monkeypatch.setattr(ai_advisor, "complete_json", lambda *a, **k: (_ for _ in ()).throw(HTTPException(503, "로컬 AI(Ollama)가 준비되지 않았습니다.")))
+    monkeypatch.setattr(ai_advisor, "complete_json", lambda *a, **k: (_ for _ in ()).throw(HTTPException(503, "AI가 설정되지 않았습니다. OPENAI_API_KEY를 설정하세요.")))
     with pytest.raises(executor.AnalysisExecutionError) as failure:
         executor.execute_analysis(snapshot, tmp_path / "job", settings, state["stages"].append)
     assert failure.value.code == "EMPTY_COLLECTION"
-    assert "AI 라이브러리 참조도 실패" in failure.value.message and "Ollama" in failure.value.message
+    assert "AI 라이브러리 참조도 실패" in failure.value.message and "OPENAI_API_KEY" in failure.value.message
     manifest = json.loads((tmp_path / "job" / "manifest.json").read_text())
     assert manifest["ai_library_reference"] == {"status": "failed", "error_code": "AI_UNAVAILABLE"}
 

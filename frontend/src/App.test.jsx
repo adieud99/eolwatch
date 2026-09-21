@@ -1070,7 +1070,7 @@ describe('검사 원본 보기', () => {
       if (url === '/api/sboms') return json([{ id: 12, component_count: 2 }])
       if (url === '/api/analyses/20/bundle') return json(bundle)
       if (url.startsWith('/api/vulnerability-work?')) return json({ items: [], total: 0, limit: 100, offset: 0 })
-      if (url.startsWith('/api/ai/')) return json({ enabled: false, provider: 'ollama', model: 'qwen2.5:7b' })
+      if (url.startsWith('/api/ai/')) return json({ enabled: false, provider: 'openai', model: 'gpt-5-mini' })
       return json([])
     }))
     vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() })

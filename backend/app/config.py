@@ -32,11 +32,9 @@ class Settings(BaseSettings):
     analysis_job_lease_seconds: int = 180
     analysis_poll_seconds: int = 3
     analysis_uploads_dir: str = "/var/lib/eolwatch/uploads"
-    ai_provider: str = "ollama"
+    ai_provider: str = "openai"
     anthropic_api_key: str = ""
     ai_model: str = "claude-opus-5"
-    ollama_base_url: str = "http://host.docker.internal:11434"
-    ollama_model: str = "qwen2.5:7b"
     openai_api_key: str = ""
     openai_model: str = "gpt-5-mini"
     openai_base_url: str = "https://api.openai.com/v1"

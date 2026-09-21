@@ -1,6 +1,6 @@
 """AI advisor: turns a scan result or an SSH check into a short Korean assessment.
 
-Three providers: a local Ollama server (default, no key, works offline), the OpenAI API, or the Claude API.
+Two providers: the OpenAI API (default) or the Claude API; both need a key in .env.
 ``complete`` is also the single door the in-pipeline AI steps use (library reference for lockfile-less
 sources, the collection agent that picks OS-appropriate commands); those ask for JSON answers.
 The model only ever sees data EOLWatch already stores (CVE ids, components, versions,
@@ -28,7 +28,7 @@ from ..config import get_settings
 logger = logging.getLogger(__name__)
 
 SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "UNKNOWN": 4}
-# Token diet caps: enough for a useful assessment, small enough for a 7B local model's context.
+# Token diet caps: enough for a useful assessment, small enough to keep every call cheap.
 MAX_COMPONENTS = 25
 MAX_CVES_PER_COMPONENT = 3
 MAX_SUMMARY_CHARS = 90
@@ -131,35 +131,18 @@ def build_prompt(context: dict[str, Any]) -> str:
 # ---------- providers ----------
 
 def provider_name() -> str:
-    return (get_settings().ai_provider or "ollama").lower()
+    return (get_settings().ai_provider or "openai").lower()
 
 
 def current_model() -> str:
     settings = get_settings()
-    provider = provider_name()
-    if provider == "ollama":
-        return settings.ollama_model
-    if provider == "openai":
-        return settings.openai_model
-    return settings.ai_model
-
-
-def _ollama_url(path: str) -> str:
-    return get_settings().ollama_base_url.rstrip("/") + path
+    return settings.openai_model if provider_name() == "openai" else settings.ai_model
 
 
 def ai_available() -> bool:
     settings = get_settings()
     if provider_name() == "openai":
         return bool(settings.openai_api_key or os.environ.get("OPENAI_API_KEY"))
-    if provider_name() == "ollama":
-        try:
-            with httpx.Client(timeout=3) as client:
-                response = client.get(_ollama_url("/api/tags"))
-            return response.status_code == 200 and any(
-                m.get("name", "").split(":")[0] == settings.ollama_model.split(":")[0] for m in response.json().get("models", []))
-        except (httpx.HTTPError, ValueError):
-            return False
     if settings.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
         try:
             import anthropic  # noqa: F401
@@ -167,25 +150,6 @@ def ai_available() -> bool:
         except ImportError:
             return False
     return False
-
-
-def _complete_ollama(prompt: str, system: str, json_mode: bool, max_tokens: int) -> tuple[str, str, dict[str, int]]:
-    settings = get_settings()
-    body = {"model": settings.ollama_model, "stream": False, "options": {"temperature": 0.2, "num_ctx": 8192, "num_predict": max_tokens},
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}]}
-    if json_mode:
-        body["format"] = "json"
-    try:
-        with httpx.Client(timeout=180) as client:
-            response = client.post(_ollama_url("/api/chat"), json=body)
-        response.raise_for_status()
-        data = response.json()
-    except httpx.HTTPError as error:
-        logger.warning("Ollama request failed: %s", error)
-        raise HTTPException(status_code=502, detail="로컬 AI(Ollama)에 연결하지 못했습니다. `ollama serve`와 모델 설치를 확인하세요.") from error
-    text = (data.get("message") or {}).get("content", "").strip()
-    usage = {"input_tokens": int(data.get("prompt_eval_count") or 0), "output_tokens": int(data.get("eval_count") or 0)}
-    return text, data.get("model") or settings.ollama_model, usage
 
 
 def _complete_openai(prompt: str, system: str, json_mode: bool, max_tokens: int) -> tuple[str, str, dict[str, int]]:
@@ -243,7 +207,7 @@ def _complete_anthropic(prompt: str, system: str, json_mode: bool, max_tokens: i
 
 
 def _plain(text: str) -> str:
-    """Small models ignore the no-markdown rule now and then; strip the usual decorations."""
+    """Models ignore the no-markdown rule now and then; strip the usual decorations."""
     lines = []
     for line in text.replace("**", "").replace("__", "").splitlines():
         stripped = line.strip()
@@ -255,14 +219,11 @@ def _plain(text: str) -> str:
     return "\n".join(lines).strip()
 
 
-PROVIDERS = {"ollama": _complete_ollama, "openai": _complete_openai, "anthropic": _complete_anthropic}
+PROVIDERS = {"openai": _complete_openai, "anthropic": _complete_anthropic}
 
 
 def unavailable_reason() -> str:
-    provider = provider_name()
-    if provider == "ollama":
-        return f"로컬 AI(Ollama)가 준비되지 않았습니다. `ollama pull {get_settings().ollama_model}` 뒤 `ollama serve`를 실행하세요."
-    if provider == "openai":
+    if provider_name() == "openai":
         return "AI가 설정되지 않았습니다. OPENAI_API_KEY를 설정하세요."
     return "AI가 설정되지 않았습니다. ANTHROPIC_API_KEY를 설정하세요."
 
@@ -276,7 +237,7 @@ def complete(prompt: str, *, system: str = SYSTEM_PROMPT, json_mode: bool = Fals
         raise HTTPException(status_code=503, detail=unavailable_reason())
     provider = PROVIDERS.get(provider_name())
     if provider is None:
-        raise HTTPException(status_code=503, detail=f"알 수 없는 AI 제공자 '{provider_name()}'입니다. AI_PROVIDER는 ollama, openai, anthropic 중 하나여야 합니다.")
+        raise HTTPException(status_code=503, detail=f"알 수 없는 AI 제공자 '{provider_name()}'입니다. AI_PROVIDER는 openai 또는 anthropic이어야 합니다.")
     text, model, usage = provider(prompt, system, json_mode, max_tokens)
     if not json_mode:
         text = _plain(text)

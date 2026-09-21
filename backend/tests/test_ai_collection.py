@@ -40,9 +40,9 @@ def test_ai_choice_is_validated_against_the_catalog_and_reused_for_the_same_shap
 
 def test_rules_take_over_when_the_ai_is_unavailable_or_answers_nothing_useful():
     def broken(prompt, *, system, max_tokens):
-        raise HTTPException(503, "로컬 AI(Ollama)가 준비되지 않았습니다.")
+        raise HTTPException(503, "AI가 설정되지 않았습니다. OPENAI_API_KEY를 설정하세요.")
     chosen = agent.plan(UBUNTU, broken)
-    assert chosen["source"] == "rules" and "Ollama" in chosen["note"]
+    assert chosen["source"] == "rules" and "OPENAI_API_KEY" in chosen["note"]
     assert [c["id"] for c in chosen["commands"]][:2] == ["apt_upgradable", "reboot_required"] and "web_servers" in [c["id"] for c in chosen["commands"]]
     rhel = agent.plan({"os_id": "rocky", "ports": [22]}, None)
     assert [c["id"] for c in rhel["commands"]][:2] == ["dnf_updates", "needs_restarting"] and "web_servers" not in [c["id"] for c in rhel["commands"]]
@@ -60,9 +60,9 @@ def test_collect_runs_only_catalog_commands_and_keeps_failures_as_findings():
         return "x" * 5000
     server_info = {"listening_ports": [{"port": 22}, {"port": 443}], "services": ["ssh.service"], "architecture": "aarch64", "platform": "aws"}
     result = agent.collect(server_info, {"id": "ubuntu", "pretty_name": "Ubuntu 24.04"}, run_command,
-                           lambda prompt, *, system, max_tokens: ({"commands": [{"id": "firewall", "reason": "방화벽"}, {"id": "os_support", "reason": "EOL"}]}, "qwen2.5:7b", {"input_tokens": 1, "output_tokens": 1}))
+                           lambda prompt, *, system, max_tokens: ({"commands": [{"id": "firewall", "reason": "방화벽"}, {"id": "os_support", "reason": "EOL"}]}, "gpt-5-mini", {"input_tokens": 1, "output_tokens": 1}))
     assert executed == [agent.CATALOG["firewall"]["command"], agent.CATALOG["os_support"]["command"]]
     firewall, support = result["results"]
     assert firewall["ok"] is False and "command not found" in firewall["output"] and firewall["purpose"] == agent.CATALOG["firewall"]["purpose"]
     assert support["ok"] is True and len(support["output"]) == agent.MAX_OUTPUT_CHARS + 2 and support["output"].endswith("…")
-    assert result["source"] == "ai" and result["model"] == "qwen2.5:7b"
+    assert result["source"] == "ai" and result["model"] == "gpt-5-mini"

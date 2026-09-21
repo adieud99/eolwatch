@@ -65,12 +65,12 @@ def test_summary_endpoint_stores_and_returns_latest(client, monkeypatch):
     calls = []
     def fake_complete(prompt):
         calls.append(prompt)
-        return "위험 수준은 높음이다.\n- Jinja2를 3.1.6으로 올린다.", "qwen2.5:7b", {"input_tokens": 321, "output_tokens": 88}
+        return "위험 수준은 높음이다.\n- Jinja2를 3.1.6으로 올린다.", "gpt-5-mini", {"input_tokens": 321, "output_tokens": 88}
     monkeypatch.setattr(ai_advisor, "complete", fake_complete)
     created = client.post(f"/api/ai/analyses/{run_id}")
     assert created.status_code == 200, created.text
     body = created.json()
-    assert body["kind"] == "analysis" and body["target_id"] == run_id and body["model"] == "qwen2.5:7b" and body["provider"] == "ollama"
+    assert body["kind"] == "analysis" and body["target_id"] == run_id and body["model"] == "gpt-5-mini" and body["provider"] == "openai"
     assert body["summary"].startswith("위험 수준은 높음") and body["generated_by"] == "admin"
     assert body["input_tokens"] == 321 and body["output_tokens"] == 88 and body["prompt_chars"] == len(calls[0])
     assert len(calls) == 1 and "CVE-2025-27516" in calls[0]
@@ -88,9 +88,9 @@ def test_summary_requires_configuration_and_admin(client, monkeypatch):
     run_id = _import_run(client)
     monkeypatch.setattr(ai_advisor, "ai_available", lambda: False)
     status = client.get("/api/ai/status").json()
-    assert status["enabled"] is False and status["provider"] in ("ollama", "anthropic") and status["model"]
+    assert status["enabled"] is False and status["provider"] in ("openai", "anthropic") and status["model"]
     response = client.post(f"/api/ai/analyses/{run_id}")
-    assert response.status_code == 503 and ("Ollama" in response.json()["detail"] or "ANTHROPIC_API_KEY" in response.json()["detail"])
+    assert response.status_code == 503 and ("OPENAI_API_KEY" in response.json()["detail"] or "ANTHROPIC_API_KEY" in response.json()["detail"])
     client.post("/api/auth/users", json={"username": "viewer-ai", "password": "ViewerOnly!2026", "role": "VIEWER"})
     token = client.post("/api/auth/login", json={"username": "viewer-ai", "password": "ViewerOnly!2026"}).json()["access_token"]
     viewer = client.post(f"/api/ai/analyses/{run_id}", headers={"Authorization": f"Bearer {token}"})
@@ -134,7 +134,7 @@ def test_purge_deletes_target_with_all_history_and_reports_conflicts(client, mon
     with SessionLocal() as db:
         run = db.get(models.AnalysisRun, run_id)
         asset_id, sbom_id = run.sbom.asset_id, run.sbom_id
-    monkeypatch.setattr(ai_advisor, "complete", lambda prompt: ("요약", "qwen2.5:7b", {"input_tokens": 1, "output_tokens": 1}))
+    monkeypatch.setattr(ai_advisor, "complete", lambda prompt: ("요약", "gpt-5-mini", {"input_tokens": 1, "output_tokens": 1}))
     assert client.post(f"/api/ai/analyses/{run_id}").status_code == 200
     plain = client.delete(f"/api/assets/{asset_id}")
     assert plain.status_code == 409 and "이력 포함 삭제" in plain.json()["detail"]

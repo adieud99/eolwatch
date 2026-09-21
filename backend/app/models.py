@@ -338,7 +338,7 @@ class AiSummary(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     kind: Mapped[str] = mapped_column(String(20))
     target_id: Mapped[int] = mapped_column(Integer)
-    provider: Mapped[str] = mapped_column(String(20), default="ollama", server_default="anthropic")
+    provider: Mapped[str] = mapped_column(String(20), default="openai", server_default="anthropic")
     model: Mapped[str] = mapped_column(String(80))
     prompt_sha256: Mapped[str] = mapped_column(String(64))
     summary: Mapped[str] = mapped_column(Text)

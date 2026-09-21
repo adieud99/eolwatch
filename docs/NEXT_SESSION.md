@@ -22,7 +22,7 @@
 
 **관리 VM(18080)에 재범위화 코드를 배포하고 브라우저로 두 흐름을 끝까지 확인한 상태는 아니다.** 배포 시 `alembic upgrade head`가 `d2f8c4a71e9b`를 적용해 제거 대상 테이블·컬럼을 삭제하므로 배포 전에 DB 백업을 남긴다.
 
-AI 요약은 기본으로 같은 PC의 Ollama(`qwen2.5:7b`)를 쓴다. 시연 PC에서 `ollama serve`가 떠 있고 모델이 받아져 있으면 된다. OpenAI를 쓰려면 `.env`에 `AI_PROVIDER=openai`, `OPENAI_API_KEY`, `OPENAI_MODEL`을, Claude는 `AI_PROVIDER=anthropic`과 `ANTHROPIC_API_KEY`를 넣는다. 파이프라인 안 AI(잠금 파일 없는 소스의 라이브러리 참조, SSH 점검의 수집 에이전트)는 구현되어 같은 제공자를 쓴다. 워커도 AI 설정을 읽으므로 `.env`를 바꾸면 api·worker를 함께 다시 올린다.
+AI는 기본으로 OpenAI를 쓴다. `.env`에 `OPENAI_API_KEY`와 `OPENAI_MODEL`을 넣는다(키는 git에 올라가지 않는다). Claude는 `AI_PROVIDER=anthropic`과 `ANTHROPIC_API_KEY`를 넣는다. 파이프라인 안 AI(잠금 파일 없는 소스의 라이브러리 참조, SSH 점검의 수집 에이전트)는 구현되어 같은 제공자를 쓴다. 워커도 AI 설정을 읽으므로 `.env`를 바꾸면 api·worker를 함께 다시 올린다.
 
 ## 다음 작업
 
