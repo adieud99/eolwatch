@@ -196,7 +196,7 @@ def _normalize_product(db: Session, item: dict[str, Any]) -> models.ProductRelea
             matches.append(existing)
         elif (existing.product_type, existing.vendor, existing.name, existing.version) == (product_type, supplier, name, version):
             # A missing identifier can be enriched, but distinct known package
-            # ecosystems/namespaces must not share lifecycle dates accidentally.
+            # ecosystems/namespaces must not share a product identity accidentally.
             if existing.purl or existing.cpe:
                 fail("동일한 제품 이름·버전에 충돌하는 식별정보가 있습니다.")
             matches.append(existing)
@@ -311,7 +311,6 @@ def import_cyclonedx(
     db: Session,
     document: dict[str, Any],
     asset_id: Optional[int] = None,
-    software_product_id: Optional[int] = None,
 ) -> models.SbomDocument:
     if document.get("bomFormat") != "CycloneDX":
         raise HTTPException(status_code=422, detail="현재 CycloneDX JSON SBOM만 가져올 수 있습니다")
@@ -321,8 +320,6 @@ def import_cyclonedx(
     validate_cyclonedx_schema(document, spec_version)
     if asset_id and not db.get(models.Asset, asset_id):
         raise HTTPException(status_code=404, detail="연결할 자산이 없습니다")
-    if software_product_id and not db.get(models.SoftwareProduct, software_product_id):
-        raise HTTPException(status_code=404, detail="연결할 소프트웨어가 없습니다")
 
     raw_components = _flatten_components(document.get("components") or [])
     raw_dependencies = document.get("dependencies") or []
@@ -334,7 +331,6 @@ def import_cyclonedx(
         document_version=int(document.get("version", 1)),
         generated_at=_parse_timestamp((document.get("metadata") or {}).get("timestamp")),
         asset_id=asset_id,
-        software_product_id=software_product_id,
         component_count=len(raw_components),
         dependency_count=sum(len(d.get("dependsOn") or []) for d in raw_dependencies if isinstance(d, dict)),
         quality_score=score,
@@ -384,7 +380,6 @@ def import_spdx(
     db: Session,
     document: dict[str, Any],
     asset_id: Optional[int] = None,
-    software_product_id: Optional[int] = None,
     commit: bool = True,
 ) -> models.SbomDocument:
     spec_version = str(document.get("spdxVersion", ""))
@@ -393,8 +388,6 @@ def import_spdx(
     validate_spdx_schema(document)
     if asset_id and not db.get(models.Asset, asset_id):
         raise HTTPException(status_code=404, detail="연결할 자산이 없습니다")
-    if software_product_id and not db.get(models.SoftwareProduct, software_product_id):
-        raise HTTPException(status_code=404, detail="연결할 소프트웨어가 없습니다")
 
     packages = document.get("packages") or []
     relationships = document.get("relationships") or []
@@ -415,7 +408,6 @@ def import_spdx(
         document_version=1,
         generated_at=_parse_timestamp((document.get("creationInfo") or {}).get("created")),
         asset_id=asset_id,
-        software_product_id=software_product_id,
         component_count=len(components),
         dependency_count=dependency_count,
         quality_score=score,
@@ -472,10 +464,9 @@ def import_sbom(
     db: Session,
     document: dict[str, Any],
     asset_id: Optional[int] = None,
-    software_product_id: Optional[int] = None,
 ) -> models.SbomDocument:
     if document.get("spdxVersion"):
-        return import_spdx(db, document, asset_id, software_product_id)
+        return import_spdx(db, document, asset_id)
     if document.get("bomFormat") == "CycloneDX":
-        return import_cyclonedx(db, document, asset_id, software_product_id)
+        return import_cyclonedx(db, document, asset_id)
     raise HTTPException(status_code=422, detail="SPDX 2.3 또는 CycloneDX JSON SBOM만 가져올 수 있습니다")

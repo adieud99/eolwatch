@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -13,33 +13,8 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class Customer(Base):
-    __tablename__ = "customers"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    customer_code: Mapped[str] = mapped_column(String(40), unique=True, index=True)
-    name: Mapped[str] = mapped_column(String(160), index=True)
-    status: Mapped[str] = mapped_column(String(20), default="ACTIVE", index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-    sites: Mapped[list[Site]] = relationship(back_populates="customer", cascade="all, delete-orphan")
-    contracts: Mapped[list[Contract]] = relationship(back_populates="customer", cascade="all, delete-orphan")
 
 
-class Site(Base):
-    __tablename__ = "sites"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"), index=True)
-    site_code: Mapped[str] = mapped_column(String(40))
-    name: Mapped[str] = mapped_column(String(160))
-    address: Mapped[Optional[str]] = mapped_column(Text)
-    timezone: Mapped[str] = mapped_column(String(50), default="Asia/Seoul")
-
-    customer: Mapped[Customer] = relationship(back_populates="sites")
-    assets: Mapped[list[Asset]] = relationship(back_populates="site_record")
-
-    __table_args__ = (UniqueConstraint("customer_id", "site_code", name="uq_customer_site_code"),)
 
 
 class ProductRelease(Base):
@@ -52,91 +27,30 @@ class ProductRelease(Base):
     version: Mapped[str] = mapped_column(String(100), default="N/A")
     purl: Mapped[Optional[str]] = mapped_column(String(500), unique=True, index=True)
     cpe: Mapped[Optional[str]] = mapped_column(String(500), unique=True, index=True)
-    eol_date: Mapped[Optional[date]] = mapped_column(Date, index=True)
-    support_end_date: Mapped[Optional[date]] = mapped_column(Date, index=True)
-    security_end_date: Mapped[Optional[date]] = mapped_column(Date, index=True)
-    lifecycle_source_url: Mapped[Optional[str]] = mapped_column(Text)
-    verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
-    assets: Mapped[list[Asset]] = relationship(back_populates="model_release")
-    deployments: Mapped[list[Deployment]] = relationship(back_populates="software_product", cascade="all, delete-orphan")
-    sboms: Mapped[list[SbomDocument]] = relationship(back_populates="software_product")
     component_occurrences: Mapped[list[Component]] = relationship(back_populates="product_release")
 
     __table_args__ = (UniqueConstraint("product_type", "vendor", "name", "version", name="uq_product_release_identity"),)
 
 
 class Asset(Base):
+    """등록 서버. SSH 접속 정보와 식별 정보만 보관한다."""
     __tablename__ = "assets"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    site_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sites.id", ondelete="SET NULL"), index=True)
-    model_release_id: Mapped[Optional[int]] = mapped_column(ForeignKey("product_releases.id", ondelete="SET NULL"), index=True)
     asset_tag: Mapped[str] = mapped_column(String(80), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(160), index=True)
     asset_type: Mapped[str] = mapped_column(String(40), index=True)
-    manufacturer: Mapped[Optional[str]] = mapped_column(String(120))
-    model: Mapped[Optional[str]] = mapped_column(String(160))
-    serial_number: Mapped[Optional[str]] = mapped_column(String(160))
-    site: Mapped[Optional[str]] = mapped_column(String(160))
-    building: Mapped[Optional[str]] = mapped_column(String(120))
-    floor: Mapped[Optional[str]] = mapped_column(String(40))
-    room: Mapped[Optional[str]] = mapped_column(String(120))
-    rack: Mapped[Optional[str]] = mapped_column(String(80))
-    rack_position: Mapped[Optional[str]] = mapped_column(String(40))
     ip_address: Mapped[Optional[str]] = mapped_column(String(64), index=True)
     ssh_port: Mapped[int] = mapped_column(Integer, default=22)
     ssh_username: Mapped[Optional[str]] = mapped_column(String(80))
-    introduced_on: Mapped[Optional[date]] = mapped_column(Date)
-    purchase_date: Mapped[Optional[date]] = mapped_column(Date)
-    purchase_price: Mapped[Optional[float]] = mapped_column(Numeric(14, 2))
-    power_watts: Mapped[Optional[float]] = mapped_column(Float)
-    power_source: Mapped[Optional[str]] = mapped_column(String(40))
-    warranty_end_date: Mapped[Optional[date]] = mapped_column(Date)
-    owner_name: Mapped[Optional[str]] = mapped_column(String(120))
-    owner_department: Mapped[Optional[str]] = mapped_column(String(120))
-    operational_status: Mapped[str] = mapped_column(String(30), default="ACTIVE", server_default="ACTIVE", index=True)
-    service_criticality: Mapped[str] = mapped_column(String(20), default="STANDARD", server_default="STANDARD", index=True)
-    support_end_date: Mapped[Optional[date]] = mapped_column(Date, index=True)
-    lifecycle_source_url: Mapped[Optional[str]] = mapped_column(Text)
     monitored: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
-    site_record: Mapped[Optional[Site]] = relationship(back_populates="assets", foreign_keys=[site_id])
-    model_release: Mapped[Optional[ProductRelease]] = relationship(back_populates="assets", foreign_keys=[model_release_id])
-    deployments: Mapped[list[Deployment]] = relationship(back_populates="asset", cascade="all, delete-orphan")
     sboms: Mapped[list[SbomDocument]] = relationship(back_populates="asset")
     collection_jobs: Mapped[list[CollectionJob]] = relationship(back_populates="asset", cascade="all, delete-orphan")
-
-
-class AssetRiskSnapshot(Base):
-    __tablename__ = "asset_risk_snapshots"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), index=True)
-    score: Mapped[int] = mapped_column(Integer)
-    priority_level: Mapped[str] = mapped_column(String(20), index=True)
-    factors: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    calculated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
-
-    asset: Mapped[Asset] = relationship()
-
-
-class Deployment(Base):
-    __tablename__ = "deployments"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), index=True)
-    software_product_id: Mapped[int] = mapped_column(ForeignKey("product_releases.id", ondelete="CASCADE"), index=True)
-    environment: Mapped[str] = mapped_column(String(40), default="production")
-    discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-    asset: Mapped[Asset] = relationship(back_populates="deployments")
-    software_product: Mapped[ProductRelease] = relationship(back_populates="deployments")
-
-    __table_args__ = (UniqueConstraint("asset_id", "software_product_id", name="uq_deployment"),)
 
 
 class SbomDocument(Base):
@@ -150,7 +64,6 @@ class SbomDocument(Base):
     generated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     asset_id: Mapped[Optional[int]] = mapped_column(ForeignKey("assets.id", ondelete="SET NULL"), index=True)
-    software_product_id: Mapped[Optional[int]] = mapped_column(ForeignKey("product_releases.id", ondelete="SET NULL"), index=True)
     collection_job_id: Mapped[Optional[int]] = mapped_column(ForeignKey("collection_jobs.id", ondelete="SET NULL"), index=True)
     component_count: Mapped[int] = mapped_column(Integer, default=0)
     dependency_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -159,7 +72,6 @@ class SbomDocument(Base):
     raw_document: Mapped[dict[str, Any]] = mapped_column(JSON)
 
     asset: Mapped[Optional[Asset]] = relationship(back_populates="sboms")
-    software_product: Mapped[Optional[ProductRelease]] = relationship(back_populates="sboms")
     components: Mapped[list[Component]] = relationship(back_populates="sbom", cascade="all, delete-orphan")
     dependencies: Mapped[list[DependencyEdge]] = relationship(back_populates="sbom", cascade="all, delete-orphan")
 
@@ -182,8 +94,6 @@ class Component(Base):
     cpe: Mapped[Optional[str]] = mapped_column(String(700))
     licenses: Mapped[list[Any]] = mapped_column(JSON, default=list)
     hashes: Mapped[list[Any]] = mapped_column(JSON, default=list)
-    support_end_date: Mapped[Optional[date]] = mapped_column(Date, index=True)
-    lifecycle_source_url: Mapped[Optional[str]] = mapped_column(Text)
 
     sbom: Mapped[SbomDocument] = relationship(back_populates="components")
     product_release: Mapped[Optional[ProductRelease]] = relationship(back_populates="component_occurrences")
@@ -204,30 +114,8 @@ class DependencyEdge(Base):
     __table_args__ = (UniqueConstraint("sbom_id", "source_ref", "target_ref", name="uq_dependency_edge"),)
 
 
-class Contract(Base):
-    __tablename__ = "contracts"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"), index=True)
-    contract_no: Mapped[str] = mapped_column(String(80), unique=True, index=True)
-    provider: Mapped[str] = mapped_column(String(160))
-    start_date: Mapped[date] = mapped_column(Date)
-    end_date: Mapped[date] = mapped_column(Date, index=True)
-    annual_cost: Mapped[Optional[float]] = mapped_column(Numeric(14, 2))
-    service_level: Mapped[Optional[str]] = mapped_column(String(100))
-
-    customer: Mapped[Customer] = relationship(back_populates="contracts")
-    assets: Mapped[list[ContractAsset]] = relationship(back_populates="contract", cascade="all, delete-orphan")
 
 
-class ContractAsset(Base):
-    __tablename__ = "contract_assets"
-
-    contract_id: Mapped[int] = mapped_column(ForeignKey("contracts.id", ondelete="CASCADE"), primary_key=True)
-    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), primary_key=True)
-
-    contract: Mapped[Contract] = relationship(back_populates="assets")
-    asset: Mapped[Asset] = relationship()
 
 
 class CollectionJob(Base):
@@ -359,22 +247,7 @@ class VulnerabilityAction(Base):
     __table_args__ = (Index("ix_vulnerability_actions_link_id_id", "link_id", "id"),)
 
 
-class NotificationDelivery(Base):
-    __tablename__ = "notification_deliveries"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    channel: Mapped[str] = mapped_column(String(30), default="TEAMS")
-    event_type: Mapped[str] = mapped_column(String(50), index=True)
-    status: Mapped[str] = mapped_column(String(20), index=True)
-    response_code: Mapped[Optional[int]] = mapped_column(Integer)
-    error_message: Mapped[Optional[str]] = mapped_column(Text)
-    recipient_label: Mapped[Optional[str]] = mapped_column(String(160))
-    payload_summary: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
-
-
-# 기존 API 이름을 유지하면서 목표 ERD의 PRODUCT_RELEASE를 사용한다.
-SoftwareProduct = ProductRelease
 
 
 class AnalysisRun(Base):
@@ -453,38 +326,4 @@ class AnalysisSchedule(Base):
     __table_args__ = (UniqueConstraint("asset_id", "scan_scope", name="uq_analysis_schedule_target"),)
 
 
-class LifecycleCatalogCache(Base):
-    __tablename__ = "lifecycle_catalog_cache"
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    cache_key: Mapped[str] = mapped_column(String(160), unique=True)
-    source_url: Mapped[str] = mapped_column(Text)
-    raw_document: Mapped[Optional[str]] = mapped_column(Text)
-    content_sha256: Mapped[Optional[str]] = mapped_column(String(64))
-    fetched_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    provider_generated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    provider_last_modified: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    last_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    last_error_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    last_error: Mapped[Optional[str]] = mapped_column(String(500))
-    etag: Mapped[Optional[str]] = mapped_column(Text)
-
-
-class LifecycleCatalogApplication(Base):
-    __tablename__ = "lifecycle_catalog_applications"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    product_release_id: Mapped[int] = mapped_column(ForeignKey("product_releases.id", ondelete="CASCADE"), index=True)
-    applied_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    product_slug: Mapped[str] = mapped_column(String(120))
-    release_cycle: Mapped[str] = mapped_column(String(100))
-    source_url: Mapped[str] = mapped_column(Text)
-    policy_url: Mapped[Optional[str]] = mapped_column(Text)
-    source_sha256: Mapped[str] = mapped_column(String(64))
-    source_document: Mapped[str] = mapped_column(Text)
-    provider_generated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    provider_last_modified: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    previous_values: Mapped[dict[str, Any]] = mapped_column(JSON)
-    applied_values: Mapped[dict[str, Any]] = mapped_column(JSON)

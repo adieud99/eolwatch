@@ -3,78 +3,21 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 AssetType = Literal["server", "storage", "network", "security", "vm", "cloud", "other"]
-ProductType = Literal["HARDWARE_MODEL", "OS", "FIRMWARE", "HYPERVISOR", "MIDDLEWARE", "DBMS", "AGENT", "LIBRARY", "APPLICATION"]
-
-
-class CustomerCreate(BaseModel):
-    customer_code: str = Field(min_length=1, max_length=40)
-    name: str = Field(min_length=1, max_length=160)
-
-
-class CustomerRead(CustomerCreate):
-    id: int
-    status: str
-    site_count: int = 0
-    asset_count: int = 0
-    created_at: datetime
-
-
-class SiteCreate(BaseModel):
-    customer_id: int
-    site_code: str = Field(min_length=1, max_length=40)
-    name: str = Field(min_length=1, max_length=160)
-    address: Optional[str] = None
-    timezone: str = "Asia/Seoul"
-
-
-class SiteRead(SiteCreate):
-    id: int
-    customer_name: str
-    asset_count: int = 0
 
 
 class AssetBase(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
-    site_id: Optional[int] = Field(default=None, ge=1)
-    model_release_id: Optional[int] = Field(default=None, ge=1)
     asset_tag: str = Field(min_length=1, max_length=80)
     name: str = Field(min_length=1, max_length=160)
     asset_type: AssetType
-    manufacturer: Optional[str] = None
-    model: Optional[str] = None
-    serial_number: Optional[str] = None
-    site: Optional[str] = None
-    building: Optional[str] = None
-    floor: Optional[str] = None
-    room: Optional[str] = None
-    rack: Optional[str] = None
-    rack_position: Optional[str] = None
-    ip_address: Optional[str] = None
+    ip_address: Optional[str] = Field(default=None, max_length=64)
     ssh_port: int = Field(default=22, ge=1, le=65535)
-    ssh_username: Optional[str] = None
-    introduced_on: Optional[date] = None
-    purchase_date: Optional[date] = None
-    purchase_price: Optional[float] = Field(default=None, ge=0, le=1000000000000)
-    power_watts: Optional[float] = Field(default=None, ge=0, le=1000000)
-    power_source: Optional[str] = Field(default=None, max_length=40)
-    warranty_end_date: Optional[date] = None
-    owner_name: Optional[str] = None
-    owner_department: Optional[str] = None
-    operational_status: str = Field(default="ACTIVE", max_length=30)
-    service_criticality: str = Field(default="STANDARD", max_length=20)
-    support_end_date: Optional[date] = None
-    lifecycle_source_url: Optional[HttpUrl] = None
+    ssh_username: Optional[str] = Field(default=None, max_length=80)
     monitored: bool = False
-
-    @model_validator(mode="after")
-    def lifecycle_has_source(self):
-        if self.support_end_date and not self.lifecycle_source_url:
-            raise ValueError("지원종료일에는 근거 URL이 필요합니다")
-        return self
 
 
 class AssetCreate(AssetBase):
@@ -83,35 +26,12 @@ class AssetCreate(AssetBase):
 
 class AssetUpdate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-    site_id: Optional[int] = Field(default=None, ge=1)
-    model_release_id: Optional[int] = Field(default=None, ge=1)
     asset_tag: Optional[str] = Field(default=None, min_length=1, max_length=80)
     name: Optional[str] = Field(default=None, min_length=1, max_length=160)
     asset_type: Optional[AssetType] = None
-    manufacturer: Optional[str] = None
-    model: Optional[str] = None
-    serial_number: Optional[str] = None
-    site: Optional[str] = None
-    building: Optional[str] = None
-    floor: Optional[str] = None
-    room: Optional[str] = None
-    rack: Optional[str] = None
-    rack_position: Optional[str] = None
-    ip_address: Optional[str] = None
+    ip_address: Optional[str] = Field(default=None, max_length=64)
     ssh_port: Optional[int] = Field(default=None, ge=1, le=65535)
-    ssh_username: Optional[str] = None
-    introduced_on: Optional[date] = None
-    purchase_date: Optional[date] = None
-    purchase_price: Optional[float] = Field(default=None, ge=0, le=1000000000000)
-    power_watts: Optional[float] = Field(default=None, ge=0, le=1000000)
-    power_source: Optional[str] = Field(default=None, max_length=40)
-    warranty_end_date: Optional[date] = None
-    owner_name: Optional[str] = None
-    owner_department: Optional[str] = None
-    operational_status: Optional[str] = Field(default=None, max_length=30)
-    service_criticality: Optional[str] = Field(default=None, max_length=20)
-    support_end_date: Optional[date] = None
-    lifecycle_source_url: Optional[HttpUrl] = None
+    ssh_username: Optional[str] = Field(default=None, max_length=80)
     monitored: Optional[bool] = None
 
     @model_validator(mode="after")
@@ -124,91 +44,17 @@ class AssetUpdate(BaseModel):
 
 class AssetRead(AssetBase):
     id: int
-    risk_level: str
-    days_left: Optional[int]
-    software_count: int = 0
     sbom_count: int = 0
     vulnerability_counts: dict[str, int] = Field(default_factory=dict)
     vulnerability_count: int = 0
-    risk_score: int = 0
-    priority_level: str = "LOW"
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 
 
-class SoftwareCreate(BaseModel):
-    product_type: ProductType = "OS"
-    name: str = Field(min_length=1, max_length=200)
-    vendor: Optional[str] = None
-    version: str = Field(min_length=1, max_length=100)
-    purl: Optional[str] = None
-    cpe: Optional[str] = None
-    support_end_date: Optional[date] = None
-    lifecycle_source_url: Optional[HttpUrl] = None
-    asset_id: Optional[int] = None
-    environment: str = "production"
-
-
-class SoftwareRead(BaseModel):
-    id: int
-    product_type: str
-    name: str
-    vendor: Optional[str]
-    version: str
-    purl: Optional[str]
-    cpe: Optional[str]
-    support_end_date: Optional[date]
-    lifecycle_source_url: Optional[str]
-    risk_level: str
-    days_left: Optional[int]
-    asset_ids: list[int]
-
-
-class ProductReleaseUpdate(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-    product_type: Optional[ProductType] = None
-    vendor: Optional[str] = Field(default=None, max_length=160)
-    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
-    version: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    purl: Optional[str] = Field(default=None, max_length=500)
-    cpe: Optional[str] = Field(default=None, max_length=500)
-    eol_date: Optional[date] = None
-    support_end_date: Optional[date] = None
-    security_end_date: Optional[date] = None
-    lifecycle_source_url: Optional[HttpUrl] = None
-
-    @model_validator(mode="after")
-    def required_values_not_null(self):
-        for name in ("product_type", "name", "version"):
-            if name in self.model_fields_set and getattr(self, name) is None:
-                raise ValueError(f"{name} 값은 비울 수 없습니다")
-        return self
-
-
-class ProductReleaseRead(BaseModel):
-    id: int
-    product_type: str
-    vendor: Optional[str]
-    name: str
-    version: str
-    purl: Optional[str]
-    cpe: Optional[str]
-    eol_date: Optional[date]
-    support_end_date: Optional[date]
-    security_end_date: Optional[date]
-    lifecycle_source_url: Optional[str]
-    verified_at: Optional[datetime]
-    risk_level: str
-    days_left: Optional[int]
-    deployment_count: int
-    component_occurrence_count: int
-
-
 class SbomImportEnvelope(BaseModel):
     document: dict[str, Any]
     asset_id: Optional[int] = None
-    software_product_id: Optional[int] = None
 
 
 class SbomRead(BaseModel):
@@ -220,7 +66,6 @@ class SbomRead(BaseModel):
     generated_at: Optional[datetime]
     imported_at: datetime
     asset_id: Optional[int]
-    software_product_id: Optional[int]
     component_count: int
     dependency_count: int
     quality_score: float
@@ -240,27 +85,8 @@ class ComponentRead(BaseModel):
     purl: Optional[str]
     cpe: Optional[str]
     licenses: list[Any]
-    support_end_date: Optional[date]
-    risk_level: str
-    days_left: Optional[int]
     product_release_id: Optional[int] = None
-    lifecycle_source_url: Optional[str] = None
     hashes: list[Any] = Field(default_factory=list)
-    lifecycle_origin: str = "unknown"
-    override_support_end_date: Optional[date] = None
-
-
-class ComponentLifecycleUpdate(BaseModel):
-    support_end_date: Optional[date] = None
-    lifecycle_source_url: Optional[HttpUrl] = None
-
-    @model_validator(mode="after")
-    def lifecycle_source_required(self):
-        if self.support_end_date and not self.lifecycle_source_url:
-            raise ValueError("지원종료일에는 공식 근거 URL이 필요합니다")
-        return self
-
-    model_config = ConfigDict(extra="forbid")
 
 
 class DashboardLatestAnalysis(BaseModel):
@@ -281,19 +107,17 @@ class DashboardLatestAnalysis(BaseModel):
 
 class DashboardSummary(BaseModel):
     assets: int
-    software_products: int
     sbom_documents: int
     components: int
     dependencies: int
     open_cves: int
     affected_assets: int
     failed_checks_24h: int
-    lifecycle_risk: dict[str, int]
     sbom_quality: dict[str, Union[int, float]]
-    urgent_items: list[dict[str, Any]]
     latest_analyses: list[DashboardLatestAnalysis] = Field(default_factory=list)
-    current_inventory: dict[str, int] = Field(default_factory=dict)
-    aggregation_basis: dict[str, str] = Field(default_factory=dict)
+    # 자산·검사 범위별 최신 성공 SBOM(및 자산별 최신 수동 import SBOM) 기준의 미조치 CVE 수
+    current_open_cves: int = 0
+    current_affected_assets: int = 0
 
 
 class CollectionJobRead(BaseModel):
@@ -329,44 +153,6 @@ class CheckResultRead(BaseModel):
     raw_metrics: dict[str, Any]
 
 
-class ContractCreate(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
-    customer_id: int = Field(ge=1)
-    contract_no: str = Field(min_length=1, max_length=80)
-    provider: str = Field(min_length=1, max_length=160)
-    start_date: date
-    end_date: date
-    annual_cost: Optional[float] = Field(default=None, ge=0, lt=1000000000000, allow_inf_nan=False)
-    service_level: Optional[str] = Field(default=None, max_length=100)
-    asset_ids: list[int] = Field(default_factory=list)
-
-
-class ContractUpdate(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-    customer_id: Optional[int] = Field(default=None, ge=1)
-    contract_no: Optional[str] = Field(default=None, min_length=1, max_length=80)
-    provider: Optional[str] = Field(default=None, min_length=1, max_length=160)
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
-    annual_cost: Optional[float] = Field(default=None, ge=0, lt=1000000000000, allow_inf_nan=False)
-    service_level: Optional[str] = Field(default=None, max_length=100)
-    asset_ids: Optional[list[int]] = None
-
-    @model_validator(mode="after")
-    def required_values_not_null(self):
-        for name in ("customer_id", "contract_no", "provider", "start_date", "end_date", "asset_ids"):
-            if name in self.model_fields_set and getattr(self, name) is None:
-                raise ValueError(f"{name} 값은 비울 수 없습니다")
-        return self
-
-
-class ContractRead(ContractCreate):
-    id: int
-    customer_name: str
-    risk_level: str
-    days_left: int
-
-
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=80)
     password: str = Field(min_length=8, max_length=200)
@@ -400,19 +186,6 @@ class UserUpdate(BaseModel):
     role: Optional[Literal["ADMIN", "VIEWER"]] = None
     active: Optional[bool] = None
     password: Optional[str] = Field(default=None, min_length=10, max_length=200)
-
-
-class CsvRowError(BaseModel):
-    row: int
-    asset_tag: Optional[str] = None
-    message: str
-
-
-class AssetCsvImportResult(BaseModel):
-    total_rows: int
-    created: int
-    failed: int
-    errors: list[CsvRowError]
 
 
 class SbomDiffItem(BaseModel):
@@ -521,20 +294,6 @@ class VulnerabilityActionPage(BaseModel):
     items: list[VulnerabilityActionRead]
     has_more: bool
     next_before_id: Optional[int]
-
-
-class NotificationRead(BaseModel):
-    id: int
-    channel: str
-    event_type: str
-    status: str
-    response_code: Optional[int]
-    error_message: Optional[str]
-    recipient_label: Optional[str]
-    payload_summary: dict[str, Any]
-    created_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
 
 
 class AuditLogRead(BaseModel):

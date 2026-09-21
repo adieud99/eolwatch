@@ -1,3 +1,0 @@
-asset_tag,name,asset_type,manufacturer,model,serial_number,site_id,site,ip_address,ssh_port,ssh_username,introduced_on,support_end_date,lifecycle_source_url,monitored
-SRV-SEOUL-001,운영 웹 서버,server,Dell,PowerEdge R740,SAMPLE-001,,A랙 10U,10.70.10.21,22,eolwatch,2021-01-01,2027-12-31,https://www.dell.com/support/kbdoc/,true
-NET-SEOUL-001,코어 스위치,network,Cisco,Catalyst 9300,SAMPLE-002,,네트워크 랙,10.70.10.31,22,eolwatch,2022-03-01,,,false

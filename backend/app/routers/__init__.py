@@ -1,16 +1,14 @@
-from . import assets, auth, checks, contracts, dashboard, notifications, organization, products, reports, sboms, software, vulnerabilities
+from . import analyses, analysis_controls, analysis_history, assets, auth, checks, dashboard, sboms, vulnerabilities, vulnerability_work
 
 __all__ = [
+    "analyses",
+    "analysis_controls",
+    "analysis_history",
     "assets",
     "auth",
     "checks",
-    "contracts",
     "dashboard",
-    "notifications",
-    "organization",
-    "products",
-    "reports",
     "sboms",
-    "software",
     "vulnerabilities",
+    "vulnerability_work",
 ]

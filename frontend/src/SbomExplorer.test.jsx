@@ -3,11 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import SbomExplorer from './SbomExplorer'
 
 afterEach(cleanup)
-const item = { id: 2, name: 'jinja2', version: '3.1.4', bom_ref: 'pkg2', purl: 'pkg:pypi/jinja2@3.1.4', supplier: 'Pallets', licenses: ['BSD-3-Clause'], hashes: [], risk_level: 'UNKNOWN', lifecycle_origin: 'unknown' }
+const item = { id: 2, name: 'jinja2', version: '3.1.4', bom_ref: 'pkg2', purl: 'pkg:pypi/jinja2@3.1.4', supplier: 'Pallets', licenses: ['BSD-3-Clause'], hashes: [] }
 const metadata = { id: 12, serial_number: 'urn:sbom:12', component_count: 52, dependency_count: 2, quality_score: 90, quality_details: { checks: { component_names: true, license_information: false } }, asset: { asset_tag: 'APP-1', name: '주문 서비스' } }
 function open(overrides = {}) {
   const request = vi.fn(async (path) => path.endsWith('/detail') ? metadata : path.includes('/dependencies?') ? { items: [{ id: 1, source: { id: 1, name: 'orders', version: '1' }, target: item }], total: 1 } : path.includes('/components/') ? item : { items: [item], total: 52 })
-  const props = { sbomId: 12, canEdit: true, request, download: vi.fn(async () => {}), onChanged: vi.fn(), onClose: vi.fn(), onViewCve: vi.fn(), ...overrides }
+  const props = { sbomId: 12, request, download: vi.fn(async () => {}), onChanged: vi.fn(), onClose: vi.fn(), onViewCve: vi.fn(), ...overrides }
   return { ...render(<SbomExplorer {...props} />), props }
 }
 
@@ -24,27 +24,21 @@ describe('SBOM 상세와 관계 탐색', () => {
     await waitFor(() => expect(props.request).toHaveBeenCalledWith('/sboms/12/component-page?q=pkg%3Apypi%2Fjinja2&limit=50&offset=0', expect.anything()))
   })
 
-  it('구성요소 관계를 열고 개별 지원 정보만 저장한다', async () => {
+  it('구성요소 관계를 열고 관계 방향을 바꿔 다시 조회한다', async () => {
     const view = open()
-    const original = view.props.request.getMockImplementation()
-    view.props.request.mockImplementation(async (path, options) => options?.method === 'PATCH' ? { ...item, risk_level: 'SAFE', lifecycle_origin: 'component', support_end_date: '2099-01-01' } : original(path, options))
     fireEvent.click(await screen.findByRole('button', { name: 'jinja2 3.1.4 상세 보기' }))
     await screen.findByRole('region', { name: '구성요소 상세' })
     await screen.findByRole('button', { name: 'orders 1' })
-    fireEvent.change(screen.getByLabelText('개별 지원종료일'), { target: { value: '2099-01-01' } })
-    fireEvent.change(screen.getByLabelText('개별 공식 근거 URL'), { target: { value: 'https://example.com/support' } })
-    fireEvent.click(screen.getByRole('button', { name: '개별 지원 정보 저장' }))
-    await waitFor(() => expect(view.props.onChanged).toHaveBeenCalled())
-    const patch = view.props.request.mock.calls.find(([, options]) => options?.method === 'PATCH')
-    expect(patch[0]).toBe('/sboms/components/2/lifecycle')
-    expect(JSON.parse(patch[1].body)).toEqual({ support_end_date: '2099-01-01', lifecycle_source_url: 'https://example.com/support' })
+    expect(screen.queryByLabelText('개별 지원종료일')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('관계 방향'), { target: { value: 'incoming' } })
+    await waitFor(() => expect(view.props.request).toHaveBeenCalledWith('/sboms/12/dependencies?component_id=2&direction=incoming&limit=20&offset=0', expect.anything()))
+    expect(view.props.request.mock.calls.some(([, options]) => options?.method === 'PATCH')).toBe(false)
   })
 
-  it('조회자는 메타데이터와 원본·CVE를 확인하지만 지원 정보를 변경하지 못한다', async () => {
-    const { props } = open({ canEdit: false })
+  it('메타데이터와 원본·CVE 이동을 제공한다', async () => {
+    const { props } = open()
     fireEvent.click(await screen.findByRole('button', { name: 'jinja2 3.1.4 상세 보기' }))
     await screen.findByRole('region', { name: '구성요소 상세' })
-    expect(screen.queryByRole('button', { name: '개별 지원 정보 저장' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '이 SBOM의 CVE 보기' }))
     expect(props.onViewCve).toHaveBeenCalledWith(12)
     fireEvent.click(screen.getByRole('button', { name: 'SBOM 원본 JSON' }))

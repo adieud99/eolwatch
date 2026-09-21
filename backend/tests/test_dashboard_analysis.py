@@ -104,6 +104,9 @@ def test_vex_changes_affect_historical_open_count_but_not_run_count_or_history(d
     db.add(link); db.commit()
     before = summary(db)
     assert before.open_cves == 1
+    # The open finding sits on the superseded SBOM, so the current-inventory view is clean.
+    assert before.current_open_cves == 0 and before.current_affected_assets == 0
+    assert before.affected_assets == 1
     assert before.latest_analyses[0].cve_count == 0
     link.vex_status = "FIXED"; db.commit()
     after = summary(db)

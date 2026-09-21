@@ -13,7 +13,7 @@ function open(overrides = {}) {
 describe('실제 프로젝트 분석 입력', () => {
   it('수동 가져오기의 임의 범위는 잘못된 실행 프로파일로 보내지 않고 새 ZIP 입력으로 연다', async () => {
     const { props } = open({ initialAssetId: 2, initialScope: 'uploaded SPDX SBOM', initialProjectName: '실행 불명', initialTargetPath: '/unknown' })
-    expect(screen.getByRole('combobox', { name: /^분석 결과를 연결할 자산/ })).toHaveValue('2')
+    expect(screen.getByRole('combobox', { name: /^(검사 결과를 연결할 대상|검사할 서버)/ })).toHaveValue('2')
     expect(screen.getByLabelText('프로젝트 이름')).toHaveValue('')
     expect(screen.queryByLabelText('서버 분석 방식')).not.toBeInTheDocument()
     expect(screen.getByText(/이전 분석의 실행 입력이 기록되지 않아 새 ZIP 입력/)).toBeInTheDocument()
@@ -22,10 +22,10 @@ describe('실제 프로젝트 분석 입력', () => {
   })
   it('프로젝트에서 넘어온 ZIP 이름과 서버 범위·경로를 입력에 이어받는다', async () => {
     const view = open({ initialAssetId: 2, initialScope: 'source-zip:orders', initialProjectName: 'orders' })
-    expect(screen.getByRole('combobox', { name: /^분석 결과를 연결할 자산/ })).toHaveValue('2')
+    expect(screen.getByRole('combobox', { name: /^(검사 결과를 연결할 대상|검사할 서버)/ })).toHaveValue('2')
     expect(screen.getByLabelText('프로젝트 이름')).toHaveValue('orders')
     view.rerender(<AnalysisTargets {...view.props} initialAssetId={1} initialScope="ssh-python-environment:/opt/orders/.venv" initialProjectName="" initialTargetPath="/opt/orders/.venv" />)
-    expect(screen.getByRole('combobox', { name: /^분석 결과를 연결할 자산/ })).toHaveValue('1')
+    expect(screen.getByRole('combobox', { name: /^(검사 결과를 연결할 대상|검사할 서버)/ })).toHaveValue('1')
     expect(screen.getByLabelText('서버 분석 방식')).toHaveValue('ssh-python-environment')
     expect(screen.getByLabelText('서버 앱 절대 경로')).toHaveValue('/opt/orders/.venv')
     await waitFor(() => expect(view.props.request).toHaveBeenCalledWith('/analyses/schedules', expect.any(Object)))
@@ -35,7 +35,7 @@ describe('실제 프로젝트 분석 입력', () => {
     let resolve
     const request = vi.fn((path, options) => options?.method === 'POST' ? new Promise((done) => { resolve = done }) : Promise.resolve([]))
     const { props } = open({ request })
-    fireEvent.change(screen.getByRole('combobox', { name: /^분석 결과를 연결할 자산/ }), { target: { value: '2' } })
+    fireEvent.change(screen.getByRole('combobox', { name: /^(검사 결과를 연결할 대상|검사할 서버)/ }), { target: { value: '2' } })
     fireEvent.change(screen.getByLabelText('프로젝트 이름'), { target: { value: 'orders' } })
     const file = new File(['zip bytes'], 'orders.zip', { type: 'application/zip' })
     fireEvent.change(screen.getByLabelText('프로젝트 소스 ZIP'), { target: { files: [file] } })
@@ -57,7 +57,7 @@ describe('실제 프로젝트 분석 입력', () => {
     const request = vi.fn(async (path, options) => options?.method === 'POST' ? schedule : [schedule])
     open({ request })
     fireEvent.click(screen.getByRole('button', { name: '서버 앱 경로' }))
-    fireEvent.change(screen.getByRole('combobox', { name: /^분석 결과를 연결할 자산/ }), { target: { value: '1' } })
+    fireEvent.change(screen.getByRole('combobox', { name: /^(검사 결과를 연결할 대상|검사할 서버)/ }), { target: { value: '1' } })
     fireEvent.change(screen.getByLabelText('서버 앱 절대 경로'), { target: { value: '/opt/orders' } })
     fireEvent.change(screen.getByLabelText('정기 분석 주기 (분)'), { target: { value: '60' } })
     fireEvent.click(screen.getByRole('button', { name: '정기 분석 등록' }))
@@ -87,7 +87,7 @@ describe('실제 프로젝트 분석 입력', () => {
     const request = vi.fn((path, options) => options?.method === 'POST' ? new Promise((done) => { resolve = done }) : Promise.resolve([]))
     const { unmount, props } = open({ request })
     fireEvent.click(screen.getByRole('button', { name: '서버 앱 경로' }))
-    fireEvent.change(screen.getByRole('combobox', { name: /^분석 결과를 연결할 자산/ }), { target: { value: '1' } })
+    fireEvent.change(screen.getByRole('combobox', { name: /^(검사 결과를 연결할 대상|검사할 서버)/ }), { target: { value: '1' } })
     fireEvent.change(screen.getByLabelText('서버 앱 절대 경로'), { target: { value: '/opt/orders' } })
     fireEvent.click(screen.getByRole('button', { name: '지금 분석 시작' }))
     await waitFor(() => expect(resolve).toBeDefined())

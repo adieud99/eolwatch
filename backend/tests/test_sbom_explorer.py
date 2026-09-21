@@ -1,14 +1,11 @@
-from datetime import date
-
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 
-from app import models, schemas
+from app import models
 from app.db import Base
-from app.routers.sboms import component_page, dependency_page, get_component, raw_sbom, sbom_detail, update_component_lifecycle
-from app.routers.dashboard import summary
+from app.routers.sboms import component_page, dependency_page, get_component, raw_sbom, sbom_detail
 
 
 @pytest.fixture
@@ -17,7 +14,7 @@ def db():
     Base.metadata.create_all(engine)
     with Session(engine) as session:
         asset = models.Asset(asset_tag="EXPLORER-1", name="실제 앱 서버", asset_type="server")
-        product = models.ProductRelease(name="shared", version="1.0", support_end_date=date(2000, 1, 1), lifecycle_source_url="https://example.com/support")
+        product = models.ProductRelease(name="shared", version="1.0", purl="pkg:pypi/shared@1.0")
         document = models.SbomDocument(serial_number="explorer-1", spec_version="2.3", bom_format="SPDX", asset=asset, component_count=3, dependency_count=3, raw_document={"original": "unchanged"}, quality_details={"checks": {"component_names": True}})
         other = models.SbomDocument(serial_number="explorer-2", spec_version="2.3", raw_document={})
         session.add_all([document, other, product]); session.flush()
@@ -67,22 +64,15 @@ def test_dependency_direction_preserves_missing_refs_and_cycles_without_cross_sb
     with pytest.raises(HTTPException): get_component(other_id, 2, session)
 
 
-def test_component_lifecycle_inherits_product_and_override_does_not_change_product_or_raw(db):
+def test_component_exposes_shared_product_identity_without_lifecycle_fields(db):
     session, sbom_id, _, _ = db
-    inherited = get_component(sbom_id, 2, session)
-    assert inherited.lifecycle_origin == "product" and inherited.risk_level == "EXPIRED"
-    updated = update_component_lifecycle(2, schemas.ComponentLifecycleUpdate(support_end_date="2099-01-01", lifecycle_source_url="https://example.com/component"), session)
-    assert updated.lifecycle_origin == "component" and updated.risk_level == "SAFE"
-    assert summary(session).lifecycle_risk["EXPIRED"] == 0
-    assert session.get(models.Component, 2).product_release.support_end_date == date(2000, 1, 1)
+    item = get_component(sbom_id, 2, session)
+    assert item.product_release_id == session.get(models.Component, 2).product_release_id
+    assert item.purl == "pkg:pypi/shared@1.0"
+    payload = item.model_dump()
+    assert not {"support_end_date", "lifecycle_source_url", "risk_level", "days_left", "lifecycle_origin"} & payload.keys()
+    assert get_component(sbom_id, 1, session).product_release_id is None
     assert session.get(models.SbomDocument, sbom_id).raw_document == {"original": "unchanged"}
-    restored = update_component_lifecycle(2, schemas.ComponentLifecycleUpdate(support_end_date=None, lifecycle_source_url=None), session)
-    assert restored.lifecycle_origin == "product" and restored.support_end_date == date(2000, 1, 1)
-    dashboard = summary(session)
-    assert dashboard.lifecycle_risk["EXPIRED"] == 1
-    urgent = next(item for item in dashboard.urgent_items if item.get("component_id") == 2)
-    assert urgent["date_source"] == "product" and urgent["end_date"] == "2000-01-01"
-    assert urgent["sbom_id"] == sbom_id
 
 
 def test_component_details_preserve_license_hashes_and_original_download(db):

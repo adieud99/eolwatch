@@ -44,68 +44,36 @@ def test_authentication_and_roles():
     with TestClient(app) as viewer_client:
         viewer_client.headers.update(login_headers(viewer_client, "viewer", "Viewer!2026"))
         assert viewer_client.get("/api/assets").status_code == 200
-        denied = viewer_client.post("/api/customers", json={"customer_code": "DENIED", "name": "거부"})
+        denied = viewer_client.post("/api/assets", json={"asset_tag": "DENIED", "name": "거부", "asset_type": "server"})
         assert denied.status_code == 403
 
 
 def test_asset_sbom_and_dashboard_flow():
     with TestClient(app) as client:
         client.headers.update(login_headers(client))
-        customer_response = client.post("/api/customers", json={"customer_code": "CUST-01", "name": "테스트 고객사"})
-        assert customer_response.status_code == 201
-        site_response = client.post(
-            "/api/sites",
-            json={"customer_id": customer_response.json()["id"], "site_code": "SEOUL", "name": "서울 전산실"},
-        )
-        assert site_response.status_code == 201
-
         asset_response = client.post(
             "/api/assets",
             json={
                 "asset_tag": "TEST-SRV-001",
                 "name": "테스트 서버",
                 "asset_type": "server",
-                "site_id": site_response.json()["id"],
-                "support_end_date": "2026-12-31",
-                "lifecycle_source_url": "https://example.com/lifecycle",
+                "ip_address": "10.77.0.21",
+                "ssh_username": "eolwatch",
                 "monitored": True,
             },
         )
-        assert asset_response.status_code == 201
+        assert asset_response.status_code == 201, asset_response.text
         asset = asset_response.json()
-        assert asset["risk_level"] in {"CRITICAL", "WARN", "EXPIRED"}
+        assert asset["ssh_port"] == 22 and asset["sbom_count"] == 0 and asset["vulnerability_count"] == 0
+        assert "support_end_date" not in asset and "risk_level" not in asset
 
-        contract_response = client.post(
-            "/api/contracts",
-            json={
-                "customer_id": customer_response.json()["id"],
-                "contract_no": "MA-2026-001",
-                "provider": "테스트 유지보수사",
-                "start_date": "2026-01-01",
-                "end_date": "2026-12-31",
-                "annual_cost": 12000000,
-                "service_level": "24x7",
-                "asset_ids": [asset["id"]],
-            },
-        )
-        assert contract_response.status_code == 201, contract_response.text
-        assert contract_response.json()["asset_ids"] == [asset["id"]]
-
-        software_response = client.post(
-            "/api/software",
-            json={
-                "name": "Ubuntu Server",
-                "vendor": "Canonical",
-                "version": "22.04",
-                "purl": "pkg:generic/ubuntu@22.04",
-                "support_end_date": "2027-04-30",
-                "lifecycle_source_url": "https://example.com/ubuntu-lifecycle",
-                "asset_id": asset["id"],
-                "environment": "production",
-            },
-        )
-        assert software_response.status_code == 201, software_response.text
-        assert software_response.json()["asset_ids"] == [asset["id"]]
+        rejected = client.post("/api/assets", json={"asset_tag": "TEST-SRV-001", "name": "중복", "asset_type": "server"})
+        assert rejected.status_code == 409
+        unknown_field = client.patch(f"/api/assets/{asset['id']}", json={"manufacturer": "Demo"})
+        assert unknown_field.status_code == 422
+        renamed = client.patch(f"/api/assets/{asset['id']}", json={"name": "테스트 서버 (수정)", "ssh_port": 2222})
+        assert renamed.status_code == 200, renamed.text
+        assert renamed.json()["name"] == "테스트 서버 (수정)" and renamed.json()["ssh_port"] == 2222
 
         sample_path = Path(__file__).parents[2] / "samples" / "cyclonedx-example.json"
         document = json.loads(sample_path.read_text(encoding="utf-8"))
@@ -115,23 +83,32 @@ def test_asset_sbom_and_dashboard_flow():
         assert sbom["component_count"] == 2
         assert sbom["dependency_count"] == 2
         assert sbom["quality_score"] == 100.0
+        assert "software_product_id" not in sbom
 
         components = client.get(f"/api/sboms/{sbom['id']}/components")
         assert components.status_code == 200
         assert {item["name"] for item in components.json()} == {"Ubuntu Server", "PostgreSQL"}
+        assert all(item["product_release_id"] for item in components.json())
+
+        listed = client.get("/api/assets", params={"q": "TEST-SRV"})
+        assert listed.status_code == 200
+        assert [item["asset_tag"] for item in listed.json()] == ["TEST-SRV-001"]
+        assert listed.json()[0]["sbom_count"] == 1
+
+        blocked = client.delete(f"/api/assets/{asset['id']}")
+        assert blocked.status_code == 409
+
+        timeline = client.get(f"/api/assets/{asset['id']}/timeline")
+        assert timeline.status_code == 200
+        assert [event["type"] for event in timeline.json()] == ["SBOM"]
 
         summary = client.get("/api/dashboard/summary")
         assert summary.status_code == 200
         assert summary.json()["assets"] == 1
-        assert summary.json()["software_products"] == 2
         assert summary.json()["components"] == 2
-
-        products = client.get("/api/products?q=PostgreSQL")
-        assert products.status_code == 200
-        assert len(products.json()) == 1
-        impact = client.get(f"/api/products/{products.json()[0]['id']}/impact")
-        assert impact.status_code == 200
-        assert impact.json()["asset_count"] == 1
+        assert summary.json()["sbom_documents"] == 1
+        assert summary.json()["current_open_cves"] == 0
+        assert "software_products" not in summary.json() and "lifecycle_risk" not in summary.json()
 
 
 def test_import_spdx_23_document():
@@ -158,7 +135,7 @@ def test_reject_invalid_spdx_document():
 
 def test_ubuntu_packages_use_spdx_deb_purl():
     context = parse_os_release('ID=ubuntu\nVERSION_ID="24.04"\n', "aarch64\n")
-    asset = type("Asset", (), {"asset_tag": "LAB-WEB-01", "name": "웹 VM", "manufacturer": "VirtualBox"})()
+    asset = type("Asset", (), {"asset_tag": "LAB-WEB-01", "name": "웹 VM"})()
     document = packages_to_spdx(
         asset,
         [{"name": "openssl", "version": "3.0.13-0ubuntu3.5"}],
@@ -194,21 +171,13 @@ def test_reject_invalid_cyclonedx_schema():
         assert response.json()["detail"]["message"].startswith("CycloneDX")
 
 
-def test_csv_import_sbom_diff_reports_and_audit():
+def test_sbom_diff_and_audit_log():
     with TestClient(app) as client:
         client.headers.update(login_headers(client))
-        csv_content = (
-            "asset_tag,name,asset_type,manufacturer,monitored\n"
-            "CSV-SRV-001,CSV 서버,server,Demo,true\n"
-            ",잘못된 행,invalid,,false\n"
-        )
-        imported = client.post(
-            "/api/assets/import-csv",
-            files={"file": ("assets.csv", csv_content.encode("utf-8"), "text/csv")},
-        )
-        assert imported.status_code == 200, imported.text
-        assert imported.json()["created"] == 1
-        assert imported.json()["failed"] == 1
+        created_asset = client.post("/api/assets", json={"asset_tag": "AUDIT-SRV-001", "name": "감사 서버", "asset_type": "server"})
+        assert created_asset.status_code == 201, created_asset.text
+        removed = client.delete(f"/api/assets/{created_asset.json()['id']}")
+        assert removed.status_code == 204
 
         sboms = client.get("/api/sboms").json()
         base = next(item for item in sboms if item["bom_format"] == "CycloneDX")
@@ -224,16 +193,11 @@ def test_csv_import_sbom_diff_reports_and_audit():
         assert diff.status_code == 200
         assert any(item["name"] == "PostgreSQL" for item in diff.json()["changed"])
 
-        lifecycle_pdf = client.get("/api/reports/lifecycle.pdf")
-        assert lifecycle_pdf.status_code == 200
-        assert lifecycle_pdf.headers["content-type"] == "application/pdf"
-        assert lifecycle_pdf.content.startswith(b"%PDF")
-
-        notification = client.post("/api/notifications/risk-summary")
-        assert notification.status_code == 200
-        assert notification.json()["status"] == "SKIPPED"
-        assert "WEBHOOK" in notification.json()["error_message"]
+        assert client.get("/api/reports/lifecycle.pdf").status_code == 404
+        assert client.post("/api/notifications/risk-summary").status_code == 404
+        assert client.get("/api/customers").status_code == 404
 
         logs = client.get("/api/auth/audit-logs")
         assert logs.status_code == 200
-        assert any(item["path"] == "/api/assets/import-csv" for item in logs.json())
+        paths = [item["path"] for item in logs.json()]
+        assert "/api/assets" in paths and f"/api/assets/{created_asset.json()['id']}" in paths

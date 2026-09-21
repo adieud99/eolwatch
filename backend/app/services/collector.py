@@ -136,7 +136,7 @@ def packages_to_spdx(
             "SPDXID": root_ref,
             "name": asset.name,
             "versionInfo": asset.asset_tag,
-            "supplier": f"Organization: {asset.manufacturer or '운영 조직'}",
+            "supplier": "Organization: 운영 조직",
             "downloadLocation": "NOASSERTION",
             "filesAnalyzed": False,
             "licenseConcluded": "NOASSERTION",

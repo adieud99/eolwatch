@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
 import hashlib
+from io import BytesIO
 import os
 from pathlib import Path
 import shutil
@@ -12,7 +13,7 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from sqlalchemy import and_, func, literal, or_, select, union
 from sqlalchemy.orm import Session, defer, joinedload
 
@@ -21,9 +22,13 @@ from ..config import get_settings
 from ..db import get_db
 from ..services.analysis_jobs import enqueue_analysis
 from ..services.analysis_uploads import archive_path, InvalidArchive
+from ..services.comparison_report_pdf import render_comparison_pdf
+from ..services.comparison_reports import build_comparison_report
 from .analyses import read, read_job, read_schedule
 
 router = APIRouter(prefix='/analyses', tags=['analysis history'])
+# 검사 기록의 전후 비교 보고서 내려받기. 기존 프런트 경로(/api/reports/analyses/...)를 유지한다.
+reports_router = APIRouter(prefix='/reports', tags=['analysis history'])
 JobStatus = Literal['ALL', 'QUEUED', 'COLLECTING', 'SCANNING', 'IMPORTING', 'CANCEL_REQUESTED', 'CANCELLED', 'SUCCESS', 'FAILED']
 
 
@@ -268,3 +273,23 @@ def projects(asset_id: Optional[int] = Query(None, gt=0), q: Optional[str] = Que
             'latest_analysis': read(latest_run) if latest_run else None, 'latest_job': read_job(latest_job) if latest_job else None,
             'schedule': read_schedule(schedule) if schedule else None})
     return {'items': items, 'total': total, 'limit': limit, 'offset': offset}
+
+
+@reports_router.get('/analyses/{base_id}/compare/{target_id}.json')
+def download_comparison_json(base_id: int, target_id: int, db: Session = Depends(get_db)):
+    report = build_comparison_report(db, base_id, target_id)
+    return JSONResponse(report, headers={
+        'Content-Disposition': f'attachment; filename="eolwatch-analysis-{base_id}-{target_id}.json"',
+        'Cache-Control': 'no-store',
+    })
+
+
+@reports_router.get('/analyses/{base_id}/compare/{target_id}.pdf')
+def download_comparison_pdf(base_id: int, target_id: int, db: Session = Depends(get_db)):
+    report = build_comparison_report(db, base_id, target_id)
+    return StreamingResponse(
+        BytesIO(render_comparison_pdf(report)),
+        media_type='application/pdf',
+        headers={'Content-Disposition': f'attachment; filename="eolwatch-analysis-{base_id}-{target_id}.pdf"',
+                 'Cache-Control': 'no-store'},
+    )

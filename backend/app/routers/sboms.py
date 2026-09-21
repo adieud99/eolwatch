@@ -10,9 +10,7 @@ from fastapi.responses import JSONResponse
 
 from .. import models, schemas
 from ..db import get_db
-from ..services.risk import lifecycle_risk
 from ..services.sbom import import_sbom as import_sbom_document
-from ..services.component_lifecycle import effective_component_lifecycle
 
 
 router = APIRouter(prefix="/sboms", tags=["sboms"])
@@ -28,16 +26,11 @@ def _document(db, sbom_id):
 
 
 def _read_component(item):
-    end_date, source_url, origin = effective_component_lifecycle(item)
-    risk, days = lifecycle_risk(end_date)
     return schemas.ComponentRead(
         id=item.id, bom_ref=item.bom_ref, component_type=item.component_type,
         group_name=item.group_name, name=item.name, version=item.version,
         supplier=item.supplier, purl=item.purl, cpe=item.cpe, licenses=item.licenses,
-        support_end_date=end_date, lifecycle_source_url=source_url,
-        risk_level=risk, days_left=days, product_release_id=item.product_release_id,
-        hashes=item.hashes or [], lifecycle_origin=origin,
-        override_support_end_date=item.support_end_date,
+        product_release_id=item.product_release_id, hashes=item.hashes or [],
     )
 
 
@@ -74,7 +67,7 @@ def component_page(sbom_id: int, q: str = Query(default="", max_length=200),
             models.Component.cpe, models.Component.supplier,
         )]))
     total = db.scalar(select(func.count(models.Component.id)).where(*filters))
-    items = db.scalars(select(models.Component).options(joinedload(models.Component.product_release))
+    items = db.scalars(select(models.Component)
                        .where(*filters).order_by(models.Component.name, models.Component.id).limit(limit).offset(offset)).all()
     return {"items": [_read_component(item) for item in items], "total": total, "limit": limit, "offset": offset}
 
@@ -108,7 +101,7 @@ def dependency_page(sbom_id: int, component_id: Optional[int] = None,
 
 @router.get("/{sbom_id}/components/{component_id}", response_model=schemas.ComponentRead)
 def get_component(sbom_id: int, component_id: int, db: Session = Depends(get_db)):
-    item = db.scalar(select(models.Component).options(joinedload(models.Component.product_release)).where(
+    item = db.scalar(select(models.Component).where(
         models.Component.id == component_id, models.Component.sbom_id == sbom_id))
     if not item:
         raise HTTPException(status_code=404, detail="이 SBOM의 구성요소가 아닙니다")
@@ -144,11 +137,10 @@ def list_sboms(db: Session = Depends(get_db)):
 def import_sbom(
     document: dict[str, Any] = Body(),
     asset_id: Optional[int] = Query(default=None),
-    software_product_id: Optional[int] = Query(default=None),
     db: Session = Depends(get_db),
 ):
     try:
-        return import_sbom_document(db, document, asset_id, software_product_id)
+        return import_sbom_document(db, document, asset_id)
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="같은 일련번호와 버전의 SBOM이 이미 있습니다")
@@ -259,19 +251,7 @@ def compare_sboms(base_sbom_id: int, target_sbom_id: int, db: Session = Depends(
 @router.get("/{sbom_id}/components", response_model=list[schemas.ComponentRead])
 def list_components(sbom_id: int, q: Optional[str] = None, db: Session = Depends(get_db)):
     _document(db, sbom_id)
-    query = select(models.Component).options(joinedload(models.Component.product_release)).where(models.Component.sbom_id == sbom_id).order_by(models.Component.name, models.Component.id)
+    query = select(models.Component).where(models.Component.sbom_id == sbom_id).order_by(models.Component.name, models.Component.id)
     if q:
         query = query.where(models.Component.name.ilike(f"%{q}%"))
     return [_read_component(item) for item in db.scalars(query).all()]
-
-
-@router.patch("/components/{component_id}/lifecycle", response_model=schemas.ComponentRead)
-def update_component_lifecycle(component_id: int, payload: schemas.ComponentLifecycleUpdate, db: Session = Depends(get_db)):
-    item = db.get(models.Component, component_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="구성요소가 없습니다")
-    item.support_end_date = payload.support_end_date
-    item.lifecycle_source_url = str(payload.lifecycle_source_url) if payload.support_end_date and payload.lifecycle_source_url else None
-    db.commit()
-    db.refresh(item)
-    return _read_component(item)

@@ -7,8 +7,7 @@ from . import models
 from .config import get_settings
 from .db import Base, SessionLocal, engine
 from .middleware import authenticate_and_audit
-from .routers import analyses, assets, auth, checks, contracts, dashboard, notifications, organization, products, reports, sboms, software, vulnerabilities, vulnerability_work
-from .routers import analysis_controls, analysis_history, lifecycle_catalog
+from .routers import analyses, analysis_controls, analysis_history, assets, auth, checks, dashboard, sboms, vulnerabilities, vulnerability_work
 from .services.auth import ensure_admin
 
 
@@ -25,7 +24,7 @@ settings = get_settings()
 app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
-    description="SBOM·취약점 분석 도구의 결과를 인프라 자산에 연결하고 CVE 조치를 추적하는 운영 API",
+    description="소스 ZIP·SSH 서버 취약점 검사 결과를 저장하고 CVE 조치를 추적하는 운영 API",
     lifespan=lifespan,
 )
 app.add_middleware(
@@ -39,21 +38,15 @@ app.middleware("http")(authenticate_and_audit)
 
 app.include_router(auth.router, prefix="/api")
 app.include_router(assets.router, prefix="/api")
-app.include_router(software.router, prefix="/api")
-app.include_router(organization.router, prefix="/api")
-app.include_router(products.router, prefix="/api")
 app.include_router(checks.router, prefix="/api")
-app.include_router(contracts.router, prefix="/api")
 app.include_router(sboms.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
 app.include_router(vulnerabilities.router, prefix="/api")
 app.include_router(vulnerability_work.router, prefix="/api")
 app.include_router(analysis_controls.router, prefix="/api")
 app.include_router(analysis_history.router, prefix="/api")
-app.include_router(lifecycle_catalog.router, prefix="/api")
+app.include_router(analysis_history.reports_router, prefix="/api")
 app.include_router(analyses.router, prefix="/api")
-app.include_router(notifications.router, prefix="/api")
-app.include_router(reports.router, prefix="/api")
 
 
 @app.get("/health", tags=["system"])

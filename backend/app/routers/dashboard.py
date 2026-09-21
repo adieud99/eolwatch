@@ -3,16 +3,37 @@ from __future__ import annotations
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select, union
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..db import get_db
-from ..services.lifecycle_overview import build_lifecycle_overview
 from ..models import utcnow
 
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+OPEN_STATUSES = ("AFFECTED", "UNDER_INVESTIGATION")
+
+
+def current_sbom_ids():
+    """Latest successful run per asset/scope plus a latest manual-import slot.
+
+    Unassigned documents cannot be assumed to be the same project, so each
+    document remains independent. A failed/new pending job never replaces a run.
+    """
+    document = models.SbomDocument
+    unassigned = case((document.asset_id.is_(None), document.id), else_=0)
+    runs = select(models.AnalysisRun.sbom_id.label("sbom_id"), func.row_number().over(
+        partition_by=(document.asset_id, unassigned, models.AnalysisRun.scan_scope),
+        order_by=(models.AnalysisRun.imported_at.desc(), models.AnalysisRun.id.desc()),
+    ).label("position")).join(document, models.AnalysisRun.sbom_id == document.id).subquery()
+    has_run = select(models.AnalysisRun.id).where(models.AnalysisRun.sbom_id == document.id).exists()
+    manual = select(document.id.label("sbom_id"), func.row_number().over(
+        partition_by=(document.asset_id, unassigned),
+        order_by=(document.imported_at.desc(), document.id.desc()),
+    ).label("position")).where(~has_run).subquery()
+    return union(select(runs.c.sbom_id).where(runs.c.position == 1),
+                 select(manual.c.sbom_id).where(manual.c.position == 1))
 
 
 def latest_analysis_overview(db: Session) -> list[schemas.DashboardLatestAnalysis]:
@@ -61,16 +82,12 @@ def latest_analysis_overview(db: Session) -> list[schemas.DashboardLatestAnalysi
 
 @router.get("/summary", response_model=schemas.DashboardSummary)
 def summary(db: Session = Depends(get_db)):
-    overview = build_lifecycle_overview(db)
-    urgent = [item for item in overview['items'] if item['risk_level'] in {'EXPIRED', 'CRITICAL', 'WARN'}]
-
     sbom_count = db.scalar(select(func.count(models.SbomDocument.id))) or 0
     average_quality = db.scalar(select(func.avg(models.SbomDocument.quality_score))) or 0
     low_quality = db.scalar(select(func.count(models.SbomDocument.id)).where(models.SbomDocument.quality_score < 70)) or 0
-    open_statuses = {"AFFECTED", "UNDER_INVESTIGATION"}
     open_cves = db.scalar(
         select(func.count(func.distinct(models.ComponentVulnerability.vulnerability_id))).where(
-            models.ComponentVulnerability.vex_status.in_(open_statuses)
+            models.ComponentVulnerability.vex_status.in_(OPEN_STATUSES)
         )
     ) or 0
     affected_assets = db.scalar(
@@ -78,7 +95,7 @@ def summary(db: Session = Depends(get_db)):
         .join(models.Component, models.Component.sbom_id == models.SbomDocument.id)
         .join(models.ComponentVulnerability, models.ComponentVulnerability.component_id == models.Component.id)
         .where(
-            models.ComponentVulnerability.vex_status.in_(open_statuses),
+            models.ComponentVulnerability.vex_status.in_(OPEN_STATUSES),
             models.SbomDocument.asset_id.is_not(None),
         )
     ) or 0
@@ -89,18 +106,29 @@ def summary(db: Session = Depends(get_db)):
         )
     ) or 0
 
+    selected = current_sbom_ids()
+    current_open_links = select(models.ComponentVulnerability.vulnerability_id).join(
+        models.Component, models.ComponentVulnerability.component_id == models.Component.id
+    ).where(models.Component.sbom_id.in_(selected), models.ComponentVulnerability.vex_status.in_(OPEN_STATUSES))
+    current_open_cves = db.scalar(select(func.count()).select_from(current_open_links.distinct().subquery())) or 0
+    current_affected_assets = db.scalar(
+        select(func.count(func.distinct(models.SbomDocument.asset_id)))
+        .join(models.Component, models.Component.sbom_id == models.SbomDocument.id)
+        .join(models.ComponentVulnerability, models.ComponentVulnerability.component_id == models.Component.id)
+        .where(models.SbomDocument.id.in_(selected), models.SbomDocument.asset_id.is_not(None),
+               models.ComponentVulnerability.vex_status.in_(OPEN_STATUSES))
+    ) or 0
+
     return schemas.DashboardSummary(
         assets=db.scalar(select(func.count(models.Asset.id))) or 0,
-        software_products=db.scalar(select(func.count(models.SoftwareProduct.id)).where(models.SoftwareProduct.product_type != "HARDWARE_MODEL")) or 0,
         sbom_documents=sbom_count,
         components=db.scalar(select(func.count(models.Component.id))) or 0,
         dependencies=db.scalar(select(func.count(models.DependencyEdge.id))) or 0,
         open_cves=open_cves,
         affected_assets=affected_assets,
         failed_checks_24h=failed_checks_24h,
-        lifecycle_risk=overview['risk_counts'],
         sbom_quality={"average_score": round(float(average_quality), 1), "below_70": low_quality},
-        urgent_items=urgent[:20],
         latest_analyses=latest_analysis_overview(db),
-        current_inventory=overview['current_inventory'], aggregation_basis=overview['aggregation_basis'],
+        current_open_cves=current_open_cves,
+        current_affected_assets=current_affected_assets,
     )

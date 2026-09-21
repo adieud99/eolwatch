@@ -1,6 +1,4 @@
-"""Package identity must never transfer support dates across unrelated releases."""
-from datetime import date
-
+"""Package identity must never merge unrelated releases into one product record."""
 from fastapi import HTTPException
 import pytest
 from sqlalchemy import create_engine, select
@@ -25,14 +23,13 @@ def package(**values):
             "purl": "pkg:pypi/identity-demo@1.0", **values}
 
 
-def test_versionless_purl_keeps_two_releases_and_dates_separate(db):
+def test_versionless_purl_keeps_two_releases_separate(db):
     old = models.ProductRelease(product_type="LIBRARY", vendor="Vendor", name="identity-demo", version="1.0",
-                                purl="pkg:pypi/identity-demo", support_end_date=date(2025, 1, 1))
+                                purl="pkg:pypi/identity-demo")
     db.add(old); db.flush()
     new = _normalize_product(db, package(version="2.0", purl="pkg:pypi/identity-demo"))
     assert new.id != old.id
     assert new.version == "2.0" and new.purl == "pkg:pypi/identity-demo@2.0"
-    assert new.support_end_date is None
     assert _normalize_product(db, package(purl="pkg:pypi/identity-demo")).id == old.id
 
 

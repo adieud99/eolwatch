@@ -19,8 +19,6 @@ class Settings(BaseSettings):
     access_token_minutes: int = 480
     admin_username: str = "admin"
     admin_password: str = "Eolwatch!2026"
-    teams_webhook_url: str = ""
-    teams_recipient_label: str = "EOLWatch 운영 채널"
     osv_api_url: str = "https://api.osv.dev/v1/querybatch"
     public_base_url: str = "http://localhost:8080"
     demo_target_ips: str = ""
