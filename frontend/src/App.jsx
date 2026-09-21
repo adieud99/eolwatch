@@ -93,9 +93,9 @@ function Login({ onLogin }) {
   return (
     <main className="login-page">
       <section className="login-card">
-        <div className="brand login-brand"><span className="brand-mark">E</span><div><strong>EOLWatch</strong><small>Dev &amp; Infra Vulnerability Scan</small></div></div>
-        <span className="eyebrow">SECURE ACCESS</span><h1>개발·인프라 취약점 검사</h1>
-        <p>승인된 운영 계정으로 로그인하세요.</p>
+        <div className="brand login-brand"><strong>EOLWatch</strong></div>
+        <h1>개발·인프라 취약점 검사</h1>
+        <p>운영 계정으로 로그인하세요.</p>
         <form className="vertical-form" onSubmit={submit}>
           <label>아이디<input name="username" autoComplete="username" required /></label>
           <label>비밀번호<input name="password" type="password" autoComplete="current-password" required minLength="8" /></label>
@@ -716,8 +716,7 @@ export default function App() {
         </div>
       </header>
       <main>
-        {tab === 'overview' && !loading && <section className="hero"><div><h2>개발 소스와 인프라의<br />취약점을 한눈에</h2><p>CVE 검사부터 기록까지, EOLWatch가 관리합니다.</p></div></section>}
-        <div className="page-head"><div><span className="eyebrow">{tab === 'dev' ? 'DEV VULNERABILITY SCAN' : tab === 'infra' ? 'INFRA VULNERABILITY SCAN' : 'DEV & INFRA VULNERABILITY SCAN'}</span><h1>{tab === 'history' ? `검사 기록 · ${historyTitles[historyView]}` : tabTitles[tab]}</h1><small className="today">기준일: {new Intl.DateTimeFormat('ko-KR', { dateStyle: 'long' }).format(new Date())}</small></div></div>
+        <div className="page-head"><h1>{tab === 'history' ? `검사 기록 · ${historyTitles[historyView]}` : tabTitles[tab]}</h1><small className="today">기준일 {new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()).replace(/\. /g, '.').replace(/\.$/, '')}</small></div>
         {error && <div className="alert error">{error}</div>}
         {message && <div className="alert success">{message}</div>}
         {tab === 'history' && <div className="analysis-input-tabs" role="tablist" aria-label="검사 기록 종류">{historyViews.map(([value, label]) => <button key={value} className="secondary" role="tab" aria-selected={historyView === value} aria-pressed={historyView === value} onClick={() => setHistoryView(value)}>{label}</button>)}</div>}
@@ -735,7 +734,7 @@ export default function App() {
           )
           : <Admin auditLogs={auditLogs} users={users} onChanged={load} canEdit={canEdit} />}
       </main>
-      <footer className="site-footer"><strong>EOLWatch</strong><p>개발 소스 및 운영 서버의 취약점(CVE)을 검사하고 기록하는 B2B 보안 검사 도구입니다.</p></footer>
+      <footer className="site-footer"><span>EOLWatch 내부 검사 시스템</span><span>한국폴리텍대학 광명융합기술교육원 · 데이터분석과 김연동</span></footer>
     </div>
   )
 }
