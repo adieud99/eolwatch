@@ -55,7 +55,7 @@ python3 scripts/package-project-source.py
 
 ## 현재 확인한 결과
 
-- 재범위화 후 테스트: 백엔드 **348 passed / 2 skipped**, 프런트엔드 **100 passed** (2026-09-21)
+- 재범위화 후 테스트: 백엔드 **363 passed** (격리 컨테이너), 프런트엔드 **102 passed** (2026-09-21)
 - 개발 검사: EOLWatch 자체 소스 ZIP의 직접 의존성 보완 후 같은 범위 CVE **9건 → 0건** (미검출 8건, pytest 운영 의존성 제거 1건) — [검사 #5 → #10 PDF](reports/eolwatch-source-analysis-5-10.pdf)
 - 인프라 검사: `LAB-VM-01` 데모 앱의 Jinja2 **3.1.4 → 3.1.6** 업데이트 후 재검사, 검사 **#3 → #4**에서 CVE **3건 → 0건** — [비교 PDF](reports/eolwatch-analysis-3-4.pdf)
 - 실제 Ubuntu 설치 패키지 669개 수집·검사, 서버별 CVE 조회
