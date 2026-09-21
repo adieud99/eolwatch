@@ -382,7 +382,10 @@ def _run_command(client: paramiko.SSHClient, name: str, command: str) -> str:
     error = stderr.read().decode("utf-8", errors="replace").strip()
     output = stdout.read().decode("utf-8", errors="replace")
     if exit_code != 0:
-        raise CollectionFailure("COMMAND", f"{name.upper()}_EXIT_{exit_code}", error or f"{name} 명령이 실패했습니다")
+        hint = (error or output).strip().splitlines()
+        detail = hint[0][:200] if hint else ""
+        raise CollectionFailure("COMMAND", f"{name.upper()}_EXIT_{exit_code}",
+                                f"{name} 명령이 실패했습니다" + (f". 서버 응답: {detail}" if detail else ""))
     return output
 
 

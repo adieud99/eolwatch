@@ -1,3 +1,4 @@
+import pytest
 from datetime import datetime, timezone
 
 from app.models import Asset
@@ -77,3 +78,17 @@ def test_server_info_parsers_cover_hardware_cloud_and_network():
 
     empty = build_server_info({}, {})
     assert empty["platform"] == "unknown" and empty["cpu_cores"] is None and empty["disks"] == [] and empty["services"] == []
+
+
+def test_command_failure_reports_the_servers_first_line():
+    from types import SimpleNamespace
+    from app.services.collector import CollectionFailure, _run_command
+    class Chan:
+        def recv_exit_status(self): return 142
+    class Stream:
+        def __init__(self, data): self.data = data; self.channel = Chan()
+        def read(self): return self.data
+    client = SimpleNamespace(exec_command=lambda *a, **k: (None, Stream(b'Please login as the user "ubuntu" rather than the user "root".\n'), Stream(b"")))
+    with pytest.raises(CollectionFailure) as failure:
+        _run_command(client, "uptime", "cut -d. -f1 /proc/uptime")
+    assert failure.value.code == "UPTIME_EXIT_142" and 'login as the user "ubuntu"' in failure.value.message
