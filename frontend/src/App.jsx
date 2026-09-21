@@ -42,7 +42,7 @@ function ServerInfoCard({ info }) {
   </dl>
 }
 
-const tabTitles = { overview: '개요', dev: '개발 검사 · 소스 ZIP · Git', infra: '인프라 검사 · 서버', history: '검사 기록', admin: '관리' }
+const tabTitles = { overview: '개요', dev: '개발 검사', infra: '인프라 검사', history: '검사 기록', admin: '관리' }
 const historyTitles = { projects: '검사 이력', cve: 'CVE 결과·조치', work: '조치 작업목록', sbom: '의존성 목록', comparison: '검사 전후 비교' }
 
 async function api(path, options) {
@@ -702,19 +702,22 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <aside>
-        <div className="brand"><span className="brand-mark">E</span><div><strong>EOLWatch</strong><small>Dev &amp; Infra Vulnerability Scan</small></div></div>
-        <nav>
-          <button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>개요</button>
-          <button className={tab === 'dev' ? 'active' : ''} onClick={() => setTab('dev')}>개발 검사</button>
-          <button className={tab === 'infra' ? 'active' : ''} onClick={() => setTab('infra')}>인프라 검사</button>
-          <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}>검사 기록</button>
-          <button className={tab === 'admin' ? 'active' : ''} onClick={() => setTab('admin')}>관리</button>
-        </nav>
-        <div className="standard-note"><b>{user.username}</b><p>{canEdit ? '관리자' : '조회자'} 권한으로 접속했습니다.</p><button className="logout" onClick={logout}>로그아웃</button></div>
-      </aside>
+      <header className="topbar">
+        <div className="topbar-inner">
+          <div className="brand"><strong>EOLWatch</strong></div>
+          <nav>
+            <button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>개요</button>
+            <button className={tab === 'dev' ? 'active' : ''} onClick={() => setTab('dev')}>개발 검사</button>
+            <button className={tab === 'infra' ? 'active' : ''} onClick={() => setTab('infra')}>인프라 검사</button>
+            <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}>검사 기록</button>
+            <button className={tab === 'admin' ? 'active' : ''} onClick={() => setTab('admin')}>관리</button>
+          </nav>
+          <div className="standard-note"><b>{user.username}</b><p>{canEdit ? '관리자' : '조회자'} 권한으로 접속했습니다.</p><button className="logout" onClick={logout}>로그아웃</button></div>
+        </div>
+      </header>
       <main>
-        <header><div><span className="eyebrow">DEV &amp; INFRA VULNERABILITY SCAN</span><h1>{tab === 'history' ? `검사 기록 · ${historyTitles[historyView]}` : tabTitles[tab]}</h1></div><div className="today"><small>기준일</small><strong>{new Intl.DateTimeFormat('ko-KR', { dateStyle: 'long' }).format(new Date())}</strong></div></header>
+        {tab === 'overview' && !loading && <section className="hero"><div><h2>개발 소스와 인프라의<br />취약점을 한눈에</h2><p>CVE 검사부터 기록까지, EOLWatch가 관리합니다.</p></div></section>}
+        <div className="page-head"><div><span className="eyebrow">{tab === 'dev' ? 'DEV VULNERABILITY SCAN' : tab === 'infra' ? 'INFRA VULNERABILITY SCAN' : 'DEV & INFRA VULNERABILITY SCAN'}</span><h1>{tab === 'history' ? `검사 기록 · ${historyTitles[historyView]}` : tabTitles[tab]}</h1><small className="today">기준일: {new Intl.DateTimeFormat('ko-KR', { dateStyle: 'long' }).format(new Date())}</small></div></div>
         {error && <div className="alert error">{error}</div>}
         {message && <div className="alert success">{message}</div>}
         {tab === 'history' && <div className="analysis-input-tabs" role="tablist" aria-label="검사 기록 종류">{historyViews.map(([value, label]) => <button key={value} className="secondary" role="tab" aria-selected={historyView === value} aria-pressed={historyView === value} onClick={() => setHistoryView(value)}>{label}</button>)}</div>}
@@ -732,6 +735,7 @@ export default function App() {
           )
           : <Admin auditLogs={auditLogs} users={users} onChanged={load} canEdit={canEdit} />}
       </main>
+      <footer className="site-footer"><strong>EOLWatch</strong><p>개발 소스 및 운영 서버의 취약점(CVE)을 검사하고 기록하는 B2B 보안 검사 도구입니다.</p></footer>
     </div>
   )
 }

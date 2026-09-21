@@ -814,7 +814,7 @@ describe('프로젝트와 자산의 결과 문맥 연결', () => {
     fireEvent.click(screen.getByRole('button', { name: /인프라 검사/ }))
     expect(reads.every(([, options]) => options.signal.aborted)).toBe(true)
     await act(async () => finish.forEach((resolve) => resolve()))
-    expect(screen.getByRole('heading', { name: '인프라 검사 · 서버' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '인프라 검사' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '검사 기록 · 검사 전후 비교' })).not.toBeInTheDocument()
   })
 
