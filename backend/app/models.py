@@ -47,6 +47,7 @@ class Asset(Base):
     ssh_username: Mapped[Optional[str]] = mapped_column(String(80))
     ssh_auth: Mapped[str] = mapped_column(String(16), default="key", server_default="key")
     ssh_password_encrypted: Mapped[Optional[str]] = mapped_column(Text)
+    ssh_private_key_encrypted: Mapped[Optional[str]] = mapped_column(Text)
     ssh_host_key: Mapped[Optional[str]] = mapped_column(Text)
     monitored: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

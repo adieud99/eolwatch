@@ -191,7 +191,7 @@ function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendin
   const [open, setOpen] = useState(false)
   const [error, setError] = useState('')
   const [scanScopes, setScanScopes] = useState({})
-  const [authMode, setAuthMode] = useState('key')
+  const [authMode, setAuthMode] = useState('password')
   async function submit(event) {
     const form = event.currentTarget
     event.preventDefault()
@@ -201,13 +201,15 @@ function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendin
     data.ip_address = address.host || null
     data.ssh_port = Number(data.ssh_port) || address.port || 22
     if (!data.ssh_username) data.ssh_username = null
-    if (data.ssh_auth !== 'password' || !data.ssh_password) delete data.ssh_password
+    if (!data.ssh_password) delete data.ssh_password
+    if (data.ssh_auth !== 'private_key' || !data.ssh_private_key) delete data.ssh_private_key
+    if (data.ssh_auth === 'key') delete data.ssh_password
     data.monitored = Boolean(data.monitored)
     try {
       await api('/assets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
       form.reset()
       setOpen(false)
-      onChanged('서버를 등록했습니다.'); setAuthMode('key')
+      onChanged('서버를 등록했습니다.'); setAuthMode('password')
     } catch (reason) { setError(reason.message) }
   }
   // Targets that only group development scans (no connection details) belong to 개발 검사, not here.
@@ -235,10 +237,11 @@ function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendin
           <label>서버 주소 (IP 또는 도메인)<input name="ip_address" placeholder="10.0.1.11 또는 db01.example.com" /></label>
           <label>SSH 포트<input name="ssh_port" type="number" min="1" max="65535" defaultValue="22" /></label>
           <label>SSH 계정<input name="ssh_username" placeholder="eolwatch" /></label>
-          <label>인증 방식<select name="ssh_auth" value={authMode} onChange={(event) => setAuthMode(event.target.value)}><option value="key">SSH 키 (관리 서버 키)</option><option value="password">비밀번호</option></select></label>
-          {authMode === 'password' && <label>SSH 비밀번호<input name="ssh_password" type="password" autoComplete="new-password" required /></label>}
+          <label>{authMode === 'private_key' ? '키 암호 (있을 때만)' : 'SSH 비밀번호'}<input name="ssh_password" type="password" autoComplete="new-password" disabled={authMode === 'key'} required={authMode === 'password'} placeholder={authMode === 'key' ? '관리 서버 키 사용 시 불필요' : ''} /></label>
+          <label>인증 방식<select name="ssh_auth" value={authMode} onChange={(event) => setAuthMode(event.target.value)}><option value="password">비밀번호</option><option value="private_key">개인키 붙여넣기</option><option value="key">관리 서버 키</option></select></label>
           <label className="checkbox"><input type="checkbox" name="monitored" defaultChecked /> 검사 대상으로 사용</label>
-          <p className="subtle" style={{ gridColumn: '1 / -1', margin: 0 }}>비밀번호는 암호화해 저장하고 접속에만 씁니다. 처음 접속할 때 서버의 호스트 키를 기억해 두고 이후 바뀌면 접속을 막습니다.</p>
+          {authMode === 'private_key' && <label style={{ gridColumn: '1 / -1' }}>SSH 개인키 (파일 내용 전체)<textarea name="ssh_private_key" rows={6} required spellCheck={false} placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;...&#10;-----END OPENSSH PRIVATE KEY-----" /></label>}
+          <p className="subtle" style={{ gridColumn: '1 / -1', margin: 0 }}>비밀번호와 개인키는 암호화해 저장하고 접속에만 씁니다. 처음 접속할 때 서버의 호스트 키를 기억해 두고 이후 바뀌면 접속을 막습니다. 관리 서버 키는 관리 서버에 키 파일과 known_hosts가 있을 때만 쓸 수 있습니다.</p>
           {error && <p className="form-error">{error}</p>}
           <button className="primary submit" type="submit">저장</button>
         </form>
@@ -258,7 +261,7 @@ function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendin
                 <td><code>{asset.asset_tag}</code></td>
                 <td><strong>{asset.name}</strong><div className="action-row cell-actions"><button className="table-button" aria-label={`${asset.asset_tag} 서버 ${canEdit ? '수정' : '상세'}`} onClick={() => setEditing(asset)}>{canEdit ? '수정' : '상세'}</button><button className="table-button" aria-label={`${asset.asset_tag} 검사 기록`} onClick={() => onViewProjects(asset.id)}>검사 기록</button></div></td>
                 <td>{typeText[asset.asset_type] || asset.asset_type}</td>
-                <td>{asset.ip_address ? <><strong>{asset.ip_address}:{asset.ssh_port}</strong><small>{asset.ssh_username || 'SSH 계정 미입력'} · {asset.ssh_auth === 'password' ? '비밀번호' : 'SSH 키'}</small></> : <small>주소 미입력</small>}</td>
+                <td>{asset.ip_address ? <><strong>{asset.ip_address}:{asset.ssh_port}</strong><small>{asset.ssh_username || 'SSH 계정 미입력'} · {asset.ssh_auth === 'password' ? '비밀번호' : asset.ssh_auth === 'private_key' ? '개인키' : '관리 서버 키'}</small></> : <small>주소 미입력</small>}</td>
                 <td>{info ? <><strong>{info.os_name || 'OS 미확인'}</strong><small>{[info.cpu_cores ? `${info.cpu_cores}코어` : null, gigabytes(info.memory_total_mb), platformText[info.platform] || info.platform].filter(Boolean).join(' · ')}</small>{info.cloud && <small>{info.cloud.instance_id} · {info.cloud.instance_type}</small>}</> : <small>SSH 점검 후 표시</small>}</td>
                 <td>SBOM {asset.sbom_count ?? 0}<small>CVE {asset.vulnerability_count ?? 0}건</small></td>
                 <td><label>검사 범위<select aria-label={`${asset.asset_tag} 검사 범위`} value={scanScopes[asset.id] || 'ubuntu-dpkg-installed'} disabled={!canEdit || unavailable || pending || Boolean(activeJob)} onChange={(event) => setScanScopes((current) => ({ ...current, [asset.id]: event.target.value }))}>{Object.entries(analysisScopeText).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><div className="action-row"><button className="table-button" disabled={!canEdit || !asset.ip_address || !asset.ssh_username} onClick={async () => {
@@ -429,7 +432,10 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
   const [cveRevision, setCveRevision] = useState(0)
   const [cveRead, setCveRead] = useState(null)
   const [selectedFinding, setSelectedFinding] = useState(null)
+  const [bundle, setBundle] = useState(null)
   const scanRequest = useRef(null)
+  const bundleRequest = useRef(null)
+  const cveSection = useRef(null)
   const pageSize = 100
   const currentPage = page.sbomId === sbomId ? page.number : 0
   const cveKey = `${sbomId}:${currentPage}:${cveRevision}`
@@ -464,8 +470,9 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
     return () => { scanRequest.current?.abort(); scanRequest.current = null }
   }, [sbomId])
 
-  function selectSbom(value) {
+  function selectSbom(value, scroll = false) {
     onSelectSbom(value); setPage({ sbomId: value, number: 0 }); setSelectedFinding(null)
+    if (scroll) setTimeout(() => cveSection.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }), 50)
   }
   useEffect(() => { setSelectedFinding(null) }, [sbomId, currentPage])
 
@@ -482,10 +489,22 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
     } catch (reason) { if (!controller.signal.aborted) onChanged(reason.message, true, controller.signal) }
     finally { if (!controller.signal.aborted) { scanRequest.current = null; setBusy(false) } }
   }
+  async function viewBundle(run) {
+    bundleRequest.current?.abort()
+    const controller = new AbortController(); bundleRequest.current = controller
+    setBundle({ run, loading: true })
+    try {
+      const data = await api(`/analyses/${run.id}/bundle`, { signal: controller.signal })
+      if (!controller.signal.aborted) setBundle({ run, data })
+    } catch (reason) { if (!controller.signal.aborted) setBundle({ run, error: reason.message }) }
+  }
   async function downloadBundle(run) {
     try { await download(`/analyses/${run.id}/bundle`, `eolwatch-analysis-${run.id}.json`) }
     catch (reason) { onChanged(reason.message, true) }
   }
+  useEffect(() => () => bundleRequest.current?.abort(), [])
+  const bundleText = bundle?.data ? JSON.stringify(bundle.data, null, 2) : ''
+  const bundleShown = bundleText.length > 200000 ? bundleText.slice(0, 200000) : bundleText
 
   return <>
     <section className="panel full-panel compare-panel">
@@ -496,13 +515,17 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
           <td><strong>{run.asset_tag} · {run.asset_name}</strong><small>{analysisScopeText[run.scan_scope] || scopeLabel(run.scan_scope)}</small></td>
           <td><strong>{run.scanner} {run.scanner_version}</strong><small>SBOM 생성: {run.generator || '미상'}</small>{(run.database_info?.built || run.database_info?.status?.built) && <small>DB 기준: {new Date(run.database_info.built || run.database_info.status.built).toLocaleString('ko-KR')}</small>}</td>
           <td><strong>CVE {run.cve_count}개 · 구성요소 연결 {run.link_count}건</strong><small>구성요소 {run.component_count}개 · 전체 탐지 {run.match_count}건 · CVE 외 {run.ignored_non_cve}건</small></td>
-          <td><div className="action-row"><button className="table-button" aria-label={`검사 ${run.id} CVE 보기`} onClick={() => selectSbom(String(run.sbom_id))}>CVE 보기</button><button className="table-button" aria-label={`검사 ${run.id} 원본 다운로드`} onClick={() => downloadBundle(run)}>원본 JSON</button></div></td>
+          <td><div className="action-row"><button className="table-button" aria-label={`검사 ${run.id} CVE 보기`} onClick={() => selectSbom(String(run.sbom_id), true)}>CVE 보기</button><button className="table-button" aria-label={`검사 ${run.id} 원본 보기`} aria-pressed={bundle?.run?.id === run.id} onClick={() => viewBundle(run)}>원본 보기</button></div></td>
         </tr>)}{!analyses.length && <tr><td colSpan="5" className="empty">저장된 검사 결과가 없습니다.</td></tr>}</tbody>
       </table></div>
     </section>
-    <AnalysisComparison analyses={analyses} />
-    {sbomId && <AiSummaryPanel kind="analysis" targetId={analyses.find((run) => String(run.sbom_id) === String(sbomId))?.id} canEdit={canEdit} title="AI 요약 · 검사 결과" />}
-    <section className="panel full-panel compare-panel">
+    {bundle && <section className="panel compare-panel" aria-label="검사 원본">
+      <div className="panel-heading"><div><span className="eyebrow">RAW RESULT</span><h2>검사 #{bundle.run.id} 원본 JSON</h2><small>{bundle.run.asset_tag} · {analysisScopeText[bundle.run.scan_scope] || scopeLabel(bundle.run.scan_scope)} · Syft SBOM(SPDX 2.3)과 Grype 보고서가 그대로 담겨 있습니다.{bundle.data ? ` 구성요소 ${bundle.data.sbom?.packages?.length ?? '-'}개 · 탐지 ${bundle.data.report?.matches?.length ?? '-'}건` : ''}</small></div><div className="action-row"><button className="primary" disabled={!bundle.data} onClick={() => downloadBundle(bundle.run)}>JSON 다운로드</button><button className="secondary" onClick={() => { bundleRequest.current?.abort(); setBundle(null) }}>닫기</button></div></div>
+      {bundle.loading && <p role="status">원본을 불러오는 중…</p>}
+      {bundle.error && <p className="form-error" role="alert">원본을 불러오지 못했습니다: {bundle.error}</p>}
+      {bundle.data && <><pre className="json-view" aria-label="원본 JSON 내용">{bundleShown}</pre>{bundleText.length > bundleShown.length && <p className="subtle">내용이 길어 앞부분만 표시합니다. 전체는 JSON 다운로드로 받으세요.</p>}</>}
+    </section>}
+    <section ref={cveSection} className="panel full-panel compare-panel">
     <div className="panel-heading">
       <div><span className="eyebrow">CVE · VEX</span><h2>CVE 조치 현황</h2><small>선택한 검사 결과의 CVE 목록입니다. 조치 상태는 담당자가 확인한 뒤 직접 기록합니다.</small></div>
       <div className="action-row"><label>확인할 SBOM<select value={sbomId} onChange={(event) => selectSbom(event.target.value)}><option value="">SBOM 선택</option>{sboms.map((item) => <option value={item.id} key={item.id}>#{item.id} · {analyses.find((run) => run.sbom_id === item.id)?.asset_tag || 'SBOM'} · 구성요소 {item.component_count}</option>)}</select></label>{canEdit && <button className="primary" disabled={!sbomId || busy} onClick={scan}>{busy ? '조회 중…' : 'OSV 조회'}</button>}</div>
@@ -519,6 +542,8 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
       <div className="action-row"><button className="table-button" disabled={currentPage === 0} onClick={() => setPage({ sbomId, number: currentPage - 1 })}>이전 페이지</button><span className="subtle">{currentPage + 1} / {pageCount} 페이지</span><button className="table-button" disabled={currentPage + 1 >= pageCount} onClick={() => setPage({ sbomId, number: currentPage + 1 })}>다음 페이지</button></div>
     </div>}
   </section>
+    {sbomId && <AiSummaryPanel kind="analysis" targetId={analyses.find((run) => String(run.sbom_id) === String(sbomId))?.id} canEdit={canEdit} title="AI 요약 · 검사 결과" />}
+    <AnalysisComparison analyses={analyses} />
   </>
 }
 

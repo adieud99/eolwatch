@@ -24,6 +24,7 @@ export default function AssetEditor({ asset, canEdit, request, onSaved, onClose,
   const [confirmation, setConfirmation] = useState('')
   const [purge, setPurge] = useState(false)
   const [password, setPassword] = useState('')
+  const [privateKey, setPrivateKey] = useState('')
   const [resetHostKey, setResetHostKey] = useState(false)
   const busy = useRef(false)
   const mutation = useRef(null)
@@ -32,7 +33,7 @@ export default function AssetEditor({ asset, canEdit, request, onSaved, onClose,
 
   useEffect(() => {
     const controller = new AbortController()
-    setReady(false); setLoading(true); setPending(false); setError(''); setDeleteOpen(false); setConfirmation(''); setPurge(false); setPassword(''); setResetHostKey(false)
+    setReady(false); setLoading(true); setPending(false); setError(''); setDeleteOpen(false); setConfirmation(''); setPurge(false); setPassword(''); setPrivateKey(''); setResetHostKey(false)
     request(`/assets/${asset.id}`, { signal: controller.signal }).then((fresh) => {
       if (!controller.signal.aborted) { setCurrent(fresh); setDraft(draftOf(fresh)); setReady(true) }
     }).catch((err) => { if (!controller.signal.aborted) setError(`서버 정보를 불러오지 못했습니다. ${err.message}`) })
@@ -58,8 +59,10 @@ export default function AssetEditor({ asset, canEdit, request, onSaved, onClose,
     const cleaned = { ...draft, ip_address: address.host, ssh_port: address.port && (String(draft.ssh_port) === '' || Number(draft.ssh_port) === current.ssh_port) ? address.port : draft.ssh_port }
     const values = Object.fromEntries(editable.map((key) => [key, normalize(key, cleaned[key])]).filter(([key, value]) => value !== normalize(key, current[key] ?? (key === 'monitored' ? false : key === 'ssh_auth' ? 'key' : ''))))
     if (password) values.ssh_password = password
+    if (privateKey.trim() && cleaned.ssh_auth === 'private_key') values.ssh_private_key = privateKey.trim()
     if (resetHostKey) values.reset_host_key = true
     if (cleaned.ssh_auth === 'password' && !password && !current.has_password) { setError('비밀번호 인증을 고르면 SSH 비밀번호를 입력해야 합니다.'); return }
+    if (cleaned.ssh_auth === 'private_key' && !privateKey.trim() && !current.has_private_key) { setError('개인키 인증을 고르면 개인키 내용을 붙여넣어야 합니다.'); return }
     if (!Object.keys(values).length) { setError('바뀐 내용이 없습니다.'); return }
     busy.current = true; setPending(true); setError('')
     const controller = new AbortController(); mutation.current = controller
@@ -88,7 +91,7 @@ export default function AssetEditor({ asset, canEdit, request, onSaved, onClose,
     {error && <p role="alert" className="form-error">{error}</p>}
     {!ready && !loading && <button type="button" className="secondary" onClick={() => setRetry((value) => value + 1)}>서버 정보 다시 불러오기</button>}
     <nav className="asset-detail-tabs" aria-label="서버 상세 탭"><button type="button" className={detailTab === 'overview' ? 'active' : ''} onClick={() => setDetailTab('overview')}>기본 정보</button><button type="button" className={detailTab === 'sbom' ? 'active' : ''} onClick={() => setDetailTab('sbom')}>의존성 목록 ({sboms.length})</button><button type="button" className={detailTab === 'timeline' ? 'active' : ''} onClick={() => setDetailTab('timeline')}>타임라인 ({timeline.length})</button></nav>
-    {detailTab === 'overview' && !canEdit && <dl className="asset-editor-read"><dt>서버 이름</dt><dd>{current.name}</dd><dt>유형</dt><dd>{types[current.asset_type] || current.asset_type}</dd>{textFields.map(([key, label]) => <div key={key}><dt>{label}</dt><dd>{current[key] || '미입력'}</dd></div>)}<dt>SSH 포트</dt><dd>{current.ssh_port}</dd><dt>인증 방식</dt><dd>{current.ssh_auth === 'password' ? '비밀번호' : 'SSH 키'}</dd><dt>호스트 키</dt><dd>{current.ssh_host_key_fingerprint || '아직 접속 전'}</dd><dt>검사 대상</dt><dd>{current.monitored ? '사용' : '해제'}</dd></dl>}
+    {detailTab === 'overview' && !canEdit && <dl className="asset-editor-read"><dt>서버 이름</dt><dd>{current.name}</dd><dt>유형</dt><dd>{types[current.asset_type] || current.asset_type}</dd>{textFields.map(([key, label]) => <div key={key}><dt>{label}</dt><dd>{current[key] || '미입력'}</dd></div>)}<dt>SSH 포트</dt><dd>{current.ssh_port}</dd><dt>인증 방식</dt><dd>{current.ssh_auth === 'password' ? '비밀번호' : current.ssh_auth === 'private_key' ? '개인키' : '관리 서버 키'}</dd><dt>호스트 키</dt><dd>{current.ssh_host_key_fingerprint || '아직 접속 전'}</dd><dt>검사 대상</dt><dd>{current.monitored ? '사용' : '해제'}</dd></dl>}
     {detailTab === 'overview' && <div className="asset-summary"><strong>{current.name}</strong><span>{types[current.asset_type] || current.asset_type} · {current.ip_address ? `${current.ip_address}:${current.ssh_port}` : 'IP 미입력'}</span><span>SBOM {current.sbom_count ?? sboms.length}건 · CVE {current.vulnerability_count ?? 0}건</span><div className="action-row"><button type="button" className="table-button" onClick={() => onViewCve?.(asset.id)}>CVE 조치 보기</button><button type="button" className="table-button" disabled={!sboms.length} onClick={() => onViewSbom?.(sboms[0]?.id)}>의존성 목록 보기</button></div></div>}
     {detailTab === 'sbom' && <section className="asset-related"><h4>의존성 목록 (SBOM)</h4>{sboms.length ? <ul>{sboms.map((item) => <li key={item.id}><strong>SBOM #{item.id}</strong><span>{item.bom_format} {item.spec_version} · 구성요소 {item.component_count}개 · 의존관계 {item.dependency_count}개</span><small>{item.imported_at ? new Date(item.imported_at).toLocaleString('ko-KR') : '저장 시각 미기록'}</small><button type="button" className="table-button" onClick={() => onViewSbom?.(item.id)}>목록 보기</button></li>)}</ul> : <p>연결된 의존성 목록이 없습니다.</p>}</section>}
     {canEdit && !deleteOpen && <form onSubmit={save}>
@@ -98,9 +101,10 @@ export default function AssetEditor({ asset, canEdit, request, onSaved, onClose,
         <label>유형<select value={draft.asset_type} onChange={(e) => change('asset_type', e.target.value)}>{Object.entries(types).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         {textFields.map(([key, label]) => <label key={key}>{label}<input value={draft[key]} maxLength={key === 'ssh_username' ? 80 : 64} onChange={(e) => change(key, e.target.value)} /></label>)}
         <label>SSH 포트<input type="number" min="1" max="65535" step="1" required value={draft.ssh_port} onChange={(e) => change('ssh_port', e.target.value)} /></label>
-        <label>인증 방식<select value={draft.ssh_auth} onChange={(e) => change('ssh_auth', e.target.value)}><option value="key">SSH 키 (관리 서버 키)</option><option value="password">비밀번호</option></select></label>
-        {draft.ssh_auth === 'password' && <label>SSH 비밀번호<input type="password" autoComplete="new-password" value={password} placeholder={current.has_password ? '저장된 비밀번호 있음 · 바꾸려면 입력' : '접속 비밀번호'} onChange={(e) => { setPassword(e.target.value); setError('') }} /></label>}
-        {draft.ssh_auth === 'password' && <div className="asset-editor-wide"><span className="subtle">호스트 키: {current.ssh_host_key_fingerprint || '아직 접속 전 · 처음 접속 때 기억합니다'}</span>{current.ssh_host_key_fingerprint && <label className="asset-editor-check"><input type="checkbox" checked={resetHostKey} onChange={(e) => setResetHostKey(e.target.checked)} />호스트 키 초기화 (서버를 재설치했을 때)</label>}</div>}
+        <label>{draft.ssh_auth === 'private_key' ? '키 암호 (있을 때만)' : 'SSH 비밀번호'}<input type="password" autoComplete="new-password" disabled={draft.ssh_auth === 'key'} value={password} placeholder={draft.ssh_auth === 'key' ? '관리 서버 키 사용 시 불필요' : current.has_password ? '저장된 값 있음 · 바꾸려면 입력' : draft.ssh_auth === 'private_key' ? '키에 암호가 없으면 비움' : '접속 비밀번호'} onChange={(e) => { setPassword(e.target.value); setError('') }} /></label>
+        <label>인증 방식<select value={draft.ssh_auth} onChange={(e) => change('ssh_auth', e.target.value)}><option value="password">비밀번호</option><option value="private_key">개인키 붙여넣기</option><option value="key">관리 서버 키</option></select></label>
+        {draft.ssh_auth === 'private_key' && <label className="asset-editor-wide">SSH 개인키 (파일 내용 전체)<textarea rows={6} spellCheck={false} value={privateKey} placeholder={current.has_private_key ? '저장된 개인키 있음 · 바꾸려면 붙여넣기' : '-----BEGIN OPENSSH PRIVATE KEY----- ...'} onChange={(e) => { setPrivateKey(e.target.value); setError('') }} /></label>}
+        {draft.ssh_auth !== 'key' && <div className="asset-editor-wide"><span className="subtle">호스트 키: {current.ssh_host_key_fingerprint || '아직 접속 전 · 처음 접속 때 기억합니다'}</span>{current.ssh_host_key_fingerprint && <label className="asset-editor-check"><input type="checkbox" checked={resetHostKey} onChange={(e) => setResetHostKey(e.target.checked)} />호스트 키 초기화 (서버를 재설치했을 때)</label>}</div>}
         <label className="asset-editor-check"><input type="checkbox" checked={draft.monitored} onChange={(e) => change('monitored', e.target.checked)} />검사 대상으로 사용</label>
       </fieldset>
       <div className="asset-editor-heading"><button type="submit" className="primary" disabled={!ready || pending}>{pending ? '저장 중…' : '서버 변경 저장'}</button><button type="button" className="secondary" disabled={!ready || pending} onClick={() => { setDeleteOpen(true); setError('') }}>서버 삭제…</button></div>

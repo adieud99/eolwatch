@@ -34,10 +34,11 @@ def _asset_read(db: Session, asset: models.Asset) -> schemas.AssetRead:
         level = str(severity or "UNKNOWN").upper()
         vulnerability_counts[level if level in vulnerability_counts else "UNKNOWN"] += 1
     values = {column.name: getattr(asset, column.name) for column in models.Asset.__table__.columns
-              if column.name not in ("ssh_password_encrypted", "ssh_host_key")}
+              if column.name not in ("ssh_password_encrypted", "ssh_private_key_encrypted", "ssh_host_key")}
     return schemas.AssetRead(
         **values,
         has_password=bool(asset.ssh_password_encrypted),
+        has_private_key=bool(asset.ssh_private_key_encrypted),
         ssh_host_key_fingerprint=ssh_auth.host_key_fingerprint(asset.ssh_host_key),
         sbom_count=sbom_count,
         vulnerability_counts=vulnerability_counts,
@@ -69,11 +70,9 @@ def list_assets(
 def create_asset(payload: schemas.AssetCreate, db: Session = Depends(get_db)):
     values = payload.model_dump()
     password = values.pop("ssh_password", None)
-    if values.get("ssh_auth") == "password" and not password:
-        raise HTTPException(status_code=422, detail="비밀번호 인증을 고르면 SSH 비밀번호를 입력해야 합니다")
+    private_key = values.pop("ssh_private_key", None)
     asset = models.Asset(**values)
-    if password and asset.ssh_auth == "password":
-        asset.ssh_password_encrypted = ssh_auth.encrypt_password(password)
+    _apply_credentials(asset, password, private_key)
     db.add(asset)
     try:
         db.commit()
@@ -124,10 +123,11 @@ def update_asset(asset_id: int, payload: schemas.AssetUpdate, db: Session = Depe
         raise HTTPException(status_code=404, detail="자산이 없습니다")
     values = payload.model_dump(exclude_unset=True)
     password = values.pop("ssh_password", None)
+    private_key = values.pop("ssh_private_key", None)
     reset_host_key = values.pop("reset_host_key", None)
     connection_fields = {"ip_address", "ssh_port", "ssh_username", "monitored", "asset_tag", "name", "ssh_auth"}
     changed_fields = {key for key, value in values.items() if value != getattr(asset, key)}
-    if password or reset_host_key:
+    if password or private_key or reset_host_key:
         changed_fields.add("ssh_auth")
     if changed_fields & connection_fields:
         active_analysis = db.scalar(select(models.AnalysisJob.id).where(models.AnalysisJob.asset_id == asset_id, models.AnalysisJob.active_asset_id.is_not(None)).limit(1))
@@ -136,12 +136,7 @@ def update_asset(asset_id: int, payload: schemas.AssetUpdate, db: Session = Depe
             raise HTTPException(status_code=409, detail="분석 또는 SSH 점검 중에는 자산 식별정보와 연결 설정을 변경할 수 없습니다")
     for key, value in values.items():
         setattr(asset, key, value)
-    if password:
-        asset.ssh_password_encrypted = ssh_auth.encrypt_password(password)
-    if asset.ssh_auth == "password" and not asset.ssh_password_encrypted:
-        raise HTTPException(status_code=422, detail="비밀번호 인증을 고르면 SSH 비밀번호를 입력해야 합니다")
-    if asset.ssh_auth != "password":
-        asset.ssh_password_encrypted = None
+    _apply_credentials(asset, password, private_key)
     if reset_host_key or ("ip_address" in changed_fields) or ("ssh_port" in changed_fields):
         asset.ssh_host_key = None
     try:
@@ -174,6 +169,34 @@ def delete_asset(asset_id: int, purge: bool = Query(False), db: Session = Depend
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="대상에 연결된 이력이 있어 삭제할 수 없습니다")
+
+
+def _apply_credentials(asset: models.Asset, password, private_key) -> None:
+    """Store what the chosen auth mode needs, drop what it does not, and validate before saving."""
+    if password:
+        asset.ssh_password_encrypted = ssh_auth.encrypt_password(password)
+    if private_key:
+        try:
+            ssh_auth.load_private_key(private_key, password or ssh_auth.decrypt_password(asset.ssh_password_encrypted))
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        asset.ssh_private_key_encrypted = ssh_auth.encrypt_password(private_key.strip())
+    if asset.ssh_auth == "password":
+        asset.ssh_private_key_encrypted = None
+        if not asset.ssh_password_encrypted:
+            raise HTTPException(status_code=422, detail="비밀번호 인증을 고르면 SSH 비밀번호를 입력해야 합니다")
+    elif asset.ssh_auth == "private_key":
+        if not asset.ssh_private_key_encrypted:
+            raise HTTPException(status_code=422, detail="개인키 인증을 고르면 개인키 내용을 붙여넣어야 합니다")
+        if not private_key and password:
+            # a new passphrase for the stored key must still open it
+            try:
+                ssh_auth.load_private_key(ssh_auth.decrypt_password(asset.ssh_private_key_encrypted) or "", password)
+            except ValueError as error:
+                raise HTTPException(status_code=422, detail=str(error)) from error
+    else:
+        asset.ssh_password_encrypted = None
+        asset.ssh_private_key_encrypted = None
 
 
 def _purge_history(db: Session, asset_id: int) -> None:

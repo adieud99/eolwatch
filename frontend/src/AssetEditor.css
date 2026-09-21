@@ -31,3 +31,6 @@
 .asset-timeline li span { color: var(--ink); font-size: .9rem; }
 @media (max-width: 680px) { .asset-editor-grid { grid-template-columns: 1fr; } }
 .asset-editor-wide { grid-column: 1 / -1; display: grid; gap: .5rem; }
+
+.asset-editor textarea { width: 100%; font-family: var(--mono); font-size: 12px; line-height: 1.5; border: 1px solid #cfcfcf; border-radius: 6px; padding: 8px 10px; }
+.asset-form textarea { font-family: var(--mono); font-size: 12px; }

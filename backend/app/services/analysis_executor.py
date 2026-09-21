@@ -290,10 +290,14 @@ def _tools(settings, run: _Run):
 def _connect(asset: dict, settings):
     if not asset.get("ip_address") or not asset.get("ssh_username"):
         raise AnalysisExecutionError("TARGET_NOT_CONFIGURED", "대상 자산의 IP 주소와 SSH 계정을 설정하세요.")
-    password_mode = ssh_auth.auth_mode(asset) == ssh_auth.AUTH_PASSWORD
-    if password_mode:
+    mode = ssh_auth.auth_mode(asset)
+    password_mode = mode in ssh_auth.TARGET_AUTH_MODES
+    if mode == ssh_auth.AUTH_PASSWORD:
         if not ssh_auth.decrypt_password(asset.get("ssh_password_encrypted")):
             raise AnalysisExecutionError("SSH_PASSWORD_MISSING", "이 서버의 SSH 비밀번호가 저장되어 있지 않습니다.")
+    elif mode == ssh_auth.AUTH_PRIVATE_KEY:
+        if not ssh_auth.decrypt_password(asset.get("ssh_private_key_encrypted")):
+            raise AnalysisExecutionError("SSH_PRIVATE_KEY_MISSING", "이 서버의 SSH 개인키가 저장되어 있지 않습니다.")
     else:
         if not settings.ssh_private_key_path or not Path(settings.ssh_private_key_path).is_file():
             raise AnalysisExecutionError("SSH_KEY_MISSING", "관리 서버의 SSH 개인키가 설정되지 않았습니다.")
@@ -308,13 +312,17 @@ def _connect(asset: dict, settings):
             client.load_host_keys(settings.ssh_known_hosts_path)
             client.set_missing_host_key_policy(paramiko.RejectPolicy())
         timeout = settings.ssh_connect_timeout_seconds
-        client.connect(**ssh_auth.connect_kwargs(asset, timeout), channel_timeout=timeout)
+        try:
+            kwargs = ssh_auth.connect_kwargs(asset, timeout)
+        except ValueError as error:
+            raise AnalysisExecutionError("SSH_PRIVATE_KEY_INVALID", str(error)) from error
+        client.connect(**kwargs, channel_timeout=timeout)
         client.get_transport().set_keepalive(15)
         client.eolwatch_learned_host_key = pinned.learned
         return client
     except paramiko.AuthenticationException as error:
         client.close()
-        raise AnalysisExecutionError("SSH_AUTHENTICATION", "대상 서버의 SSH 비밀번호 인증에 실패했습니다." if password_mode else "대상 서버의 SSH 키 인증에 실패했습니다.") from error
+        raise AnalysisExecutionError("SSH_AUTHENTICATION", "대상 서버의 SSH 비밀번호 인증에 실패했습니다." if mode == ssh_auth.AUTH_PASSWORD else "대상 서버의 SSH 키 인증에 실패했습니다.") from error
     except paramiko.BadHostKeyException as error:
         client.close()
         raise AnalysisExecutionError("SSH_HOST_KEY", "대상 서버의 SSH 호스트 키가 등록된 키와 다릅니다.") from error

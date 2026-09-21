@@ -215,3 +215,5 @@ td > label + .action-row, td > .action-row + small, td > label + small { margin-
 td label { margin-bottom: 8px; }
 td strong + small, td strong + .job, td .job + small { margin-top: 5px; }
 th, td { line-height: 1.5; }
+
+.json-view { max-height: 520px; overflow: auto; margin: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 6px; background: #fafafa; font-family: var(--mono); font-size: 12px; line-height: 1.55; white-space: pre; }

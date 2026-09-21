@@ -96,3 +96,36 @@ def test_connect_kwargs_and_executor_use_password_without_management_key(tmp_pat
     with pytest.raises(executor.AnalysisExecutionError) as failure:
         executor._connect({"ip_address": "10.0.0.11", "ssh_username": "ops", "ssh_auth": "key"}, settings)
     assert failure.value.code == "SSH_KEY_MISSING"
+
+
+def test_pasted_private_key_is_validated_encrypted_and_used_for_connect(client, monkeypatch):
+    import io
+    key = paramiko.ECDSAKey.generate()
+    buffer = io.StringIO(); key.write_private_key(buffer); pem = buffer.getvalue()
+    bad = client.post("/api/assets", json={"asset_tag": "PK-0", "name": "x", "asset_type": "server", "ssh_auth": "private_key", "ssh_private_key": "not a key"})
+    assert bad.status_code == 422 and "PRIVATE KEY" in bad.text
+    created = client.post("/api/assets", json={"asset_tag": "PK-1", "name": "키 서버", "asset_type": "server", "ip_address": "10.0.0.12",
+                                               "ssh_username": "ops", "ssh_auth": "private_key", "ssh_private_key": pem, "monitored": True})
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["has_private_key"] is True and body["has_password"] is False
+    assert "PRIVATE KEY" not in created.text and "ssh_private_key" not in body
+    with SessionLocal() as db:
+        asset = db.get(models.Asset, body["id"])
+        assert asset.ssh_private_key_encrypted and "PRIVATE KEY" not in asset.ssh_private_key_encrypted
+        kwargs = ssh_auth.connect_kwargs(asset, 5)
+    assert kwargs["pkey"].get_base64() == key.get_base64() and "password" not in kwargs and "key_filename" not in kwargs
+    # a job snapshot carries only the encrypted blob and still connects with the key
+    snapshot = {"ip_address": "10.0.0.12", "ssh_username": "ops", "ssh_auth": "private_key", "ssh_private_key_encrypted": asset.ssh_private_key_encrypted, "ssh_host_key": None}
+    captured = {}
+    class FakeClient:
+        def set_missing_host_key_policy(self, policy): captured["policy"] = policy
+        def connect(self, **kw): captured["connect"] = kw
+        def get_transport(self): return SimpleNamespace(set_keepalive=lambda *_: None)
+        def close(self): pass
+    monkeypatch.setattr(executor.paramiko, "SSHClient", FakeClient)
+    executor._connect(snapshot, SimpleNamespace(ssh_private_key_path="", ssh_known_hosts_path="", ssh_strict_host_key=True, ssh_connect_timeout_seconds=5))
+    assert captured["connect"]["pkey"].get_base64() == key.get_base64()
+    # switching to password mode drops the stored key
+    switched = client.patch(f"/api/assets/{body['id']}", json={"ssh_auth": "password", "ssh_password": "pw"})
+    assert switched.status_code == 200 and switched.json()["has_private_key"] is False and switched.json()["has_password"] is True

@@ -45,12 +45,13 @@ class AssetBase(BaseModel):
         return validate_address(value)
     ssh_port: int = Field(default=22, ge=1, le=65535)
     ssh_username: Optional[str] = Field(default=None, max_length=80)
-    ssh_auth: Literal["key", "password"] = "key"
+    ssh_auth: Literal["key", "password", "private_key"] = "key"
     monitored: bool = False
 
 
 class AssetCreate(AssetBase):
     ssh_password: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    ssh_private_key: Optional[str] = Field(default=None, min_length=1, max_length=16000)
 
 
 class AssetUpdate(BaseModel):
@@ -66,8 +67,9 @@ class AssetUpdate(BaseModel):
         return validate_address(value)
     ssh_port: Optional[int] = Field(default=None, ge=1, le=65535)
     ssh_username: Optional[str] = Field(default=None, max_length=80)
-    ssh_auth: Optional[Literal["key", "password"]] = None
+    ssh_auth: Optional[Literal["key", "password", "private_key"]] = None
     ssh_password: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    ssh_private_key: Optional[str] = Field(default=None, min_length=1, max_length=16000)
     reset_host_key: Optional[bool] = None
     monitored: Optional[bool] = None
 
@@ -82,6 +84,7 @@ class AssetUpdate(BaseModel):
 class AssetRead(AssetBase):
     id: int
     has_password: bool = False
+    has_private_key: bool = False
     ssh_host_key_fingerprint: Optional[str] = None
     sbom_count: int = 0
     vulnerability_counts: dict[str, int] = Field(default_factory=dict)

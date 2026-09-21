@@ -52,7 +52,7 @@ describe('EOLWatch 인증 화면', () => {
 describe('등록 완료 후 폼 초기화와 목록 갱신', () => {
   afterEach(() => { cleanup(); vi.unstubAllGlobals() })
   it.each([
-    { kind: '서버', nav: /인프라 검사/, open: '+ 서버 등록', path: '/api/assets', fields: { '서버 번호': 'VERIFY-ASSET', '서버 이름': '검증 서버' }, submit: '저장', message: '서버를 등록했습니다.', row: '검증 서버', closedLabel: '서버 이름' },
+    { kind: '서버', nav: /인프라 검사/, open: '+ 서버 등록', path: '/api/assets', fields: { '서버 번호': 'VERIFY-ASSET', '서버 이름': '검증 서버', 'SSH 비밀번호': 'pw' }, submit: '저장', message: '서버를 등록했습니다.', row: '검증 서버', closedLabel: '서버 이름' },
     { kind: '사용자', nav: /관리/, path: '/api/auth/users', fields: { '아이디': 'verify-viewer', '초기 비밀번호': 'VerifyOnly!2026' }, submit: '계정 생성', message: '사용자 계정을 만들었습니다.', row: 'verify-viewer', resetLabel: '아이디' },
   ])('$kind 등록의 비동기 응답 뒤 폼을 초기화하고 새 항목을 표시한다', async (scenario) => {
     localStorage.clear()
@@ -489,7 +489,7 @@ describe('SBOM 취약점 분석 흐름', () => {
     expect(screen.getByLabelText(`${newFinding.cve_id} current-package 조치 상태`)).toHaveTextContent('영향 있음')
     expect(screen.getByRole('button', { name: `${newFinding.cve_id} current-package 조치 이력` })).toBeEnabled()
     expect(within(screen.getByRole('table', { name: '선택한 SBOM의 CVE' })).queryByRole('combobox')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '검사 20 원본 다운로드' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '검사 20 원본 보기' })).toBeEnabled()
     expect(fetch.mock.calls.every(([, options]) => !options.method)).toBe(true)
   })
 
@@ -1055,5 +1055,38 @@ describe('서버 분석 전후 비교', () => {
     expect(signal.aborted).toBe(true)
     await act(async () => { resolveComparison(response(comparison)) })
     expect(screen.queryByRole('table', { name: '검사 전후 CVE 비교' })).not.toBeInTheDocument()
+  })
+})
+
+describe('검사 원본 보기', () => {
+  afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+  it('원본 보기는 먼저 화면에 JSON을 보여주고 거기서 다운로드한다', async () => {
+    localStorage.setItem('eolwatch_token', 'token'); localStorage.setItem('eolwatch_user', JSON.stringify({ id: 1, username: 'viewer', role: 'VIEWER' }))
+    const run = { id: 20, sbom_id: 12, asset_id: 7, asset_tag: 'VM-001', asset_name: '서버', scan_scope: 'source-zip:orders', imported_at: '2026-09-15T06:00:00Z', cve_count: 1, component_count: 2, scanner: 'Grype', scanner_version: '0.118.0', link_count: 1, match_count: 1, ignored_non_cve: 0 }
+    const bundle = { sbom: { spdxVersion: 'SPDX-2.3', packages: [{ name: 'a' }, { name: 'b' }] }, report: { matches: [{ vulnerability: { id: 'CVE-2025-1' } }] }, scan_scope: run.scan_scope }
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      const json = (body) => ({ ok: true, status: 200, json: async () => body, blob: async () => new Blob([JSON.stringify(body)]) })
+      if (url === '/api/dashboard/summary') return json({ assets: 1, sbom_documents: 1, components: 2, open_cves: 1, affected_assets: 1, failed_checks_24h: 0, sbom_quality: { average_score: 90 }, latest_analyses: [] })
+      if (url === '/api/analyses') return json([run])
+      if (url === '/api/sboms') return json([{ id: 12, component_count: 2 }])
+      if (url === '/api/analyses/20/bundle') return json(bundle)
+      if (url.startsWith('/api/vulnerability-work?')) return json({ items: [], total: 0, limit: 100, offset: 0 })
+      if (url.startsWith('/api/ai/')) return json({ enabled: false, provider: 'ollama', model: 'qwen2.5:7b' })
+      return json([])
+    }))
+    vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() })
+    render(<App />)
+    await screen.findByText('검사 대상')
+    openHistoryView('CVE 결과·조치')
+    fireEvent.click(await screen.findByRole('button', { name: '검사 20 원본 보기' }))
+    const viewer = await screen.findByRole('region', { name: '검사 원본' })
+    await within(viewer).findByLabelText('원본 JSON 내용')
+    expect(within(viewer).getByText(/구성요소 2개 · 탐지 1건/)).toBeInTheDocument()
+    expect(within(viewer).getByLabelText('원본 JSON 내용')).toHaveTextContent('CVE-2025-1')
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/analyses/20/bundle')).toHaveLength(1)
+    fireEvent.click(within(viewer).getByRole('button', { name: 'JSON 다운로드' }))
+    await waitFor(() => expect(fetch.mock.calls.filter(([url]) => url === '/api/analyses/20/bundle')).toHaveLength(2))
+    fireEvent.click(within(viewer).getByRole('button', { name: '닫기' }))
+    expect(screen.queryByRole('region', { name: '검사 원본' })).not.toBeInTheDocument()
   })
 })

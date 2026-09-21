@@ -23,7 +23,7 @@ from .analysis_profiles import (DEFAULT_SCAN_SCOPE, GIT_SCAN_SCOPE, PATH_SCAN_SC
 logger = logging.getLogger(__name__)
 RUNNING = ('COLLECTING', 'SCANNING', 'IMPORTING')
 ACTIVE = ('QUEUED', *RUNNING, 'CANCEL_REQUESTED')
-SNAPSHOT_FIELDS = ('id', 'asset_tag', 'name', 'ip_address', 'ssh_port', 'ssh_username', 'ssh_auth', 'ssh_password_encrypted', 'ssh_host_key')
+SNAPSHOT_FIELDS = ('id', 'asset_tag', 'name', 'ip_address', 'ssh_port', 'ssh_username', 'ssh_auth', 'ssh_password_encrypted', 'ssh_private_key_encrypted', 'ssh_host_key')
 TARGET_FIELDS = ('ip_address', 'ssh_port', 'ssh_username', 'ssh_auth')
 
 
