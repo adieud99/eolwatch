@@ -7,7 +7,7 @@ packages an `apt upgrade` would actually change, so runs and lists expose the sp
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from sqlalchemy import String, and_, case, cast, func, or_, select
 from sqlalchemy.orm import Session
@@ -22,6 +22,11 @@ HAS_FIX = and_(link.fixed_versions.isnot(None), cast(link.fixed_versions, String
 # Ubuntu/Debian binary packages built from the kernel source carry upstream=linux… in their PURL.
 IS_KERNEL = or_(component.purl.like("%upstream=linux%"), component.name.like("linux-image%"), component.name.like("linux-modules%"),
                 component.name.like("linux-headers%"), component.name == "bpftool")
+
+
+def is_kernel_package(name: str, purl: Optional[str]) -> bool:
+    """Python twin of IS_KERNEL for the importer."""
+    return bool((purl and "upstream=linux" in purl) or name.startswith(("linux-image", "linux-modules", "linux-headers")) or name == "bpftool")
 
 
 def breakdown(db: Session, run_ids: list[int]) -> dict[int, dict[str, int]]:

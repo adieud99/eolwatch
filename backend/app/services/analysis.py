@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
+from .cve_breakdown import is_kernel_package
 from .package_updates import fix_check
 from .sbom import import_spdx, validate_spdx_schema
 
@@ -180,7 +181,8 @@ def import_analysis(db: Session, payload: schemas.AnalysisImport, *, commit: boo
                 link.fixed_versions = sorted(set(link.fixed_versions) | set(versions))
                 # Multiple fixed branches are alternatives, not a single recommended upgrade.
                 link.fixed_version = link.fixed_versions[0] if len(link.fixed_versions) == 1 else None
-                link.fix_check = fix_check(component.name, link.fixed_versions, payload.package_updates)
+                # apt/dnf upgrade the kernel through its meta package (linux-aws), never the versioned binary, so no verdict there.
+                link.fix_check = None if is_kernel_package(component.name, component.purl) else fix_check(component.name, link.fixed_versions, payload.package_updates)
                 seen.add(key)
     run.cve_count, run.link_count = len(cves), len(seen)
     if commit:

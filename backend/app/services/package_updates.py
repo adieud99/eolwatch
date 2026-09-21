@@ -23,6 +23,7 @@ NO_UPDATE_FOUND = "NO_UPDATE_FOUND"
 
 # Read-only except for refreshing the package index (what unattended-upgrades does daily); needs no root otherwise.
 REMOTE_COMMAND = (
+    "export LC_ALL=C LANG=C; "  # apt/dnf translate their output; the parser expects English
     "if command -v apt-get >/dev/null 2>&1; then "
     "  echo MANAGER=apt; "
     "  if sudo -n apt-get update -qq >/dev/null 2>&1; then echo REFRESHED=yes; else echo REFRESHED=no; fi; "

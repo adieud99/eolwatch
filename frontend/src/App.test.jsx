@@ -205,6 +205,18 @@ describe('웹에서 서버 취약점 분석 실행', () => {
     expect(fetch.mock.calls.filter(([url]) => url === '/api/vulnerabilities')).toHaveLength(0)
   })
 
+  it('다른 화면으로 옮긴 뒤 완료된 검사는 안내만 하고 화면을 바꾸지 않는다', async () => {
+    await openApp(); await startAnalysis()
+    fireEvent.click(screen.getByRole('button', { name: '검사 기록', exact: true }))
+    data['/api/analyses/jobs'] = [{ ...queued, status: 'SUCCESS', sbom_id: 9, analysis_run_id: 90 }]
+    data['/api/sboms'] = [{ id: 9, component_count: 1 }]
+    data['/api/analyses'] = [{ id: 90, sbom_id: 9, asset_tag: 'VM-001', asset_name: '실습 서버', imported_at: queued.requested_at, cve_count: 1, component_count: 1, scanner: 'grype', scanner_version: '0.110.0' }]
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
+    expect(screen.getByText('검사 #50이(가) 완료되었습니다. 결과 보기로 확인하세요.')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /검사 기록 · 검사 이력/ })).toBeInTheDocument()
+    expect(screen.queryByLabelText('확인할 SBOM')).not.toBeInTheDocument()
+  })
+
   it('실패 원인을 보여주고 재시도를 새 작업으로 추적한다', async () => {
     data['/api/analyses/jobs'] = [failed]
     const retry = { ...queued, id: 51, retry_of_id: 50 }

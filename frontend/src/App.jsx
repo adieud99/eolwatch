@@ -463,6 +463,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
   const [cveFilter, setCveFilter] = useState({ fix: 'ALL', kernel: false })
   const [cveView, setCveView] = useState('components')   // one row per component, CVEs folded under it
   const [expanded, setExpanded] = useState({})            // component_id -> { status, items, total }
+  const loadedKey = useRef('')
   const scanRequest = useRef(null)
   const bundleRequest = useRef(null)
   const cveSection = useRef(null)
@@ -501,11 +502,16 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
     return () => { scanRequest.current?.abort(); scanRequest.current = null }
   }, [sbomId])
 
+  useEffect(() => { setExpanded({}); loadedKey.current = '' }, [sbomId])
   useEffect(() => {
-    const ids = Object.keys(expanded)
-    if (cveView !== 'components' || !sbomId || !ids.length) return
+    const all = Object.keys(expanded)
+    if (cveView !== 'components' || !sbomId || !all.length) return
+    const keyChanged = loadedKey.current !== cveKey
+    loadedKey.current = cveKey
+    const ids = keyChanged ? all : all.filter((id) => !expanded[id].items && expanded[id].status !== 'error')
+    if (!ids.length) return
     const controller = new AbortController()
-    setExpanded((current) => Object.fromEntries(ids.map((id) => [id, { ...current[id], status: 'loading' }])))
+    setExpanded((current) => ({ ...current, ...Object.fromEntries(ids.filter((id) => id in current).map((id) => [id, { ...current[id], status: 'loading' }])) }))
     ids.forEach((id) => {
       const params = new URLSearchParams({ sbom_id: String(sbomId), component_id: id, status: 'ALL', fix: cveFilter.fix, kernel: String(cveFilter.kernel), limit: '100', offset: '0' })
       api(`/vulnerability-work?${params}`, { signal: controller.signal })
@@ -514,7 +520,6 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
     })
     return () => controller.abort()
   }, [cveKey, Object.keys(expanded).sort().join(',')])  // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setExpanded({}) }, [sbomId])
   const toggleComponent = (id) => setExpanded((current) => { const next = { ...current }; if (id in next) delete next[id]; else next[id] = { status: 'loading' }; return next })
 
   function selectSbom(value, scroll = false) {
@@ -625,6 +630,7 @@ export default function App() {
     catch { return null }
   })
   const [tab, setTab] = useState('overview')
+  useEffect(() => { tabRef.current = tab }, [tab])
   const [historyView, setHistoryView] = useState('projects')
   const [summary, setSummary] = useState(EMPTY_SUMMARY)
   const [assets, setAssets] = useState([])
@@ -635,7 +641,8 @@ export default function App() {
   const [jobsError, setJobsError] = useState('')
   const [pendingAssets, setPendingAssets] = useState([])
   const [selectedSbomId, setSelectedSbomId] = useState('')
-  const requestedJobs = useRef(new Set())
+  const requestedJobs = useRef(new Map())   // job id -> tab it was requested from; results auto-open only while the user is still there
+  const tabRef = useRef('overview')
   const requestingAssets = useRef(new Set())
   const jobRequests = useRef(new Set())
   const comparisonRequest = useRef(null)
@@ -681,9 +688,10 @@ export default function App() {
 
   function acceptedAnalysisJob(job) {
     jobsRevision.current += 1
-    requestedJobs.current.add(job.id)
+    const origin = isZipScope(job.scan_scope) ? 'dev' : 'infra'
+    requestedJobs.current.set(job.id, origin)
     setAnalysisJobs((current) => [job, ...current.filter((item) => item.id !== job.id)])
-    setTab(isZipScope(job.scan_scope) ? 'dev' : 'infra')
+    setTab(origin)
     setMessage('검사 요청을 저장했습니다. 작업 진행 상태를 확인하세요.')
   }
 
@@ -736,7 +744,7 @@ export default function App() {
   async function requestAnalysis(assetId, retryJobId, scanScope = 'ubuntu-dpkg-installed') {
     if (!canEdit || requestingAssets.current.has(assetId)) return
     const current = analysisJobs.find((job) => job.asset_id === assetId && activeAnalysisJob(job))
-    if (current) { requestedJobs.current.add(current.id); setTab(isZipScope(current.scan_scope) ? 'dev' : 'infra'); return }
+    if (current) { const origin = isZipScope(current.scan_scope) ? 'dev' : 'infra'; requestedJobs.current.set(current.id, origin); setTab(origin); return }
     const controller = new AbortController()
     jobRequests.current.add(controller)
     requestingAssets.current.add(assetId); setPendingAssets([...requestingAssets.current])
@@ -748,9 +756,10 @@ export default function App() {
       const job = await api(retryJobId ? `/analyses/jobs/${retryJobId}/retry` : `/analyses/assets/${assetId}/jobs`, options)
       if (controller.signal.aborted) return
       jobsRevision.current += 1
-      requestedJobs.current.add(job.id)
+      const origin = isZipScope(job.scan_scope) ? 'dev' : 'infra'
+      requestedJobs.current.set(job.id, origin)
       setAnalysisJobs((previous) => [job, ...previous.filter((item) => item.id !== job.id)])
-      setJobsError(''); setTab(isZipScope(job.scan_scope) ? 'dev' : 'infra')
+      setJobsError(''); setTab(origin)
     } catch (reason) {
       if (!controller.signal.aborted) setError(`검사 요청 실패: ${reason.message}`)
     } finally {
@@ -790,7 +799,7 @@ export default function App() {
         const [recent, active] = await Promise.all(['/analyses/jobs', '/analyses/jobs/active'].map((path) => api(path, { signal: controller.signal })))
         const merged = new Map([...recent, ...active].map((job) => [job.id, job]))
         for (const job of active) tracking.add(job.id)
-        for (const id of requestedJobs.current) tracking.add(id)
+        for (const id of requestedJobs.current.keys()) tracking.add(id)
         const missing = [...tracking].filter((id) => !merged.has(id))
         const tracked = await Promise.all(missing.map((id) => api(`/analyses/jobs/${id}`, { signal: controller.signal }).catch((reason) => {
           if (reason.status === 404) { tracking.delete(id); requestedJobs.current.delete(id); return null }
@@ -806,11 +815,14 @@ export default function App() {
         const completed = jobs.filter((job) => requestedJobs.current.has(job.id) && job.status === 'SUCCESS' && job.sbom_id)
         jobs.filter((job) => ['FAILED', 'CANCELLED'].includes(job.status)).forEach((job) => requestedJobs.current.delete(job.id))
         if (completed.length) {
-          const loaded = await load('검사가 완료되었습니다. 새 SBOM의 CVE 결과를 확인하세요.', false, controller.signal)
+          // Open the result only if the user is still on the tab the scan was started from; otherwise
+          // just say it finished (yanking someone out of a form they are filling in is worse than a click).
+          const stillThere = requestedJobs.current.get(completed[0].id) === tabRef.current
+          const loaded = await load(stillThere ? '검사가 완료되었습니다. 새 SBOM의 CVE 결과를 확인하세요.' : `검사 #${completed[0].id}이(가) 완료되었습니다. 결과 보기로 확인하세요.`, false, controller.signal)
           if (loaded && !controller.signal.aborted) {
             completed.forEach((job) => requestedJobs.current.delete(job.id))
             newSuccesses.forEach((job) => observedSuccesses.add(job.id))
-            setSelectedSbomId(String(completed[0].sbom_id)); openHistory('cve')
+            if (stillThere) { setSelectedSbomId(String(completed[0].sbom_id)); openHistory('cve') }
           }
         } else if (newSuccesses.length) {
           const nextSummary = await api('/dashboard/summary', { signal: controller.signal })

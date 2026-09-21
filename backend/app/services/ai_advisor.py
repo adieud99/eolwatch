@@ -171,8 +171,14 @@ def _complete_openai(prompt: str, system: str, json_mode: bool, max_tokens: int)
             raise HTTPException(status_code=503, detail="OpenAI 인증에 실패했습니다. OPENAI_API_KEY를 확인하세요.")
         if response.status_code == 429:
             raise HTTPException(status_code=429, detail="OpenAI 요청 한도를 초과했습니다. 잠시 후 다시 시도하세요.")
-        if response.status_code == 404 or (response.status_code == 400 and "model" in response.text.lower()):
-            raise HTTPException(status_code=503, detail=f"OpenAI 모델 '{settings.openai_model}'을(를) 쓸 수 없습니다. OPENAI_MODEL을 확인하세요.")
+        if response.status_code in (400, 404):
+            try:
+                error = (response.json() or {}).get("error") or {}
+            except ValueError:
+                error = {}
+            if response.status_code == 404 or error.get("param") == "model" or "model" in str(error.get("code", "")):
+                raise HTTPException(status_code=503, detail=f"OpenAI 모델 '{settings.openai_model}'을(를) 쓸 수 없습니다. OPENAI_MODEL을 확인하세요.")
+            raise HTTPException(status_code=502, detail=f"OpenAI가 요청을 거부했습니다: {str(error.get('message') or response.text)[:160]}")
         response.raise_for_status()
         data = response.json()
     except httpx.HTTPError as error:

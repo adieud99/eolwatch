@@ -340,10 +340,17 @@ def test_import_records_the_package_managers_verdict_per_finding(client, bundle)
     """grype says Jinja2 is fixed in 2.11.3; whether the repository really offers it is recorded on the link and the run."""
     bundle["package_updates"] = {"manager": "apt", "refreshed": True, "collected_at": "2026-09-21T09:00:00Z",
                                  "packages": {"Jinja2": {"candidate": "2.11.3", "installed": "2.4.1"}}}
+    kernel = dict(bundle["sbom"]["packages"][0], SPDXID="SPDXRef-Package-k", name="linux-image-6.8.0-1-aws", versionInfo="6.8.0-1",
+                  externalRefs=[{"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": "pkg:deb/ubuntu/linux-image-6.8.0-1-aws@6.8.0-1?upstream=linux%406.8.0-1"}])
+    bundle["sbom"]["packages"].append(kernel)
+    bundle["sbom"]["relationships"].append({"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": "SPDXRef-Package-k"})
+    bundle["report"]["matches"].append({"artifact": {"name": kernel["name"], "version": "6.8.0-1", "purl": kernel["externalRefs"][0]["referenceLocator"]},
+                                        "vulnerability": {"id": "CVE-2026-30001", "severity": "High", "fix": {"state": "fixed", "versions": ["6.8.0-2"]}}, "relatedVulnerabilities": []})
     imported = client.post("/api/analyses/import", json=bundle)
     assert imported.status_code == 200, imported.text
     body = imported.json()
-    assert body["verified_fixable_cve_count"] == 1 and body["suspect_cve_count"] == 0
+    # the kernel CVE is fixable but gets no apt verdict (apt upgrades linux-aws, not the versioned image), so it is not "suspect"
+    assert body["verified_fixable_cve_count"] == 1 and body["suspect_cve_count"] == 0 and body["kernel_fixable_cve_count"] == 1
     assert body["package_updates"] == {"manager": "apt", "refreshed": True, "collected_at": "2026-09-21T09:00:00Z", "package_count": 1}
     item = client.get("/api/vulnerability-work", params={"sbom_id": body["sbom_id"], "status": "ALL"}).json()["items"][0]
     assert item["fix_check"] == "UPDATE_AVAILABLE"
@@ -355,6 +362,8 @@ def test_import_records_the_package_managers_verdict_per_finding(client, bundle)
     bundle["report"]["descriptor"]["version"] = "test-fixture-1.1"
     second = client.post("/api/analyses/import", json=bundle).json()
     assert second["verified_fixable_cve_count"] == 0 and second["suspect_cve_count"] == 1
+    kernel_items = [i for i in client.get("/api/vulnerability-work", params={"sbom_id": second["sbom_id"], "status": "ALL"}).json()["items"] if i["component_name"].startswith("linux-image")]
+    assert kernel_items and all(i["fix_check"] is None for i in kernel_items)
     # no package manager data at all: nothing is claimed either way
     del bundle["package_updates"]
     bundle["sbom"]["documentNamespace"] = bundle["sbom"]["documentNamespace"] + "-3"

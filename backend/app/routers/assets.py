@@ -20,18 +20,24 @@ router = APIRouter(prefix="/assets", tags=["assets"])
 
 def _asset_read(db: Session, asset: models.Asset) -> schemas.AssetRead:
     sbom_count = db.scalar(select(func.count(models.SbomDocument.id)).where(models.SbomDocument.asset_id == asset.id)) or 0
-    findings = db.execute(
-        select(models.Vulnerability.severity, models.ComponentVulnerability.vex_status)
-        .join(models.ComponentVulnerability, models.ComponentVulnerability.vulnerability_id == models.Vulnerability.id)
-        .join(models.Component, models.Component.id == models.ComponentVulnerability.component_id)
-        .join(models.SbomDocument, models.SbomDocument.id == models.Component.sbom_id)
+    # Open CVEs on the asset's *latest* run per scan scope, counted once per CVE: summing every historical
+    # link would show 70,000 for a server scanned twice with 35,000 links each.
+    latest_runs = db.execute(
+        select(func.max(models.AnalysisRun.id))
+        .join(models.SbomDocument, models.SbomDocument.id == models.AnalysisRun.sbom_id)
         .where(models.SbomDocument.asset_id == asset.id)
-    ).all()
+        .group_by(models.AnalysisRun.scan_scope)
+    ).scalars().all()
+    link = models.ComponentVulnerability
+    findings = db.execute(
+        select(models.Vulnerability.osv_id, func.max(func.upper(func.coalesce(link.finding_severity, models.Vulnerability.severity, "UNKNOWN"))))
+        .join(link, link.vulnerability_id == models.Vulnerability.id)
+        .where(link.analysis_run_id.in_(latest_runs), link.vex_status.in_(("AFFECTED", "UNDER_INVESTIGATION")))
+        .group_by(models.Vulnerability.osv_id)
+    ).all() if latest_runs else []
     vulnerability_counts = {level: 0 for level in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN")}
-    for severity, vex_status in findings:
-        if vex_status not in ("AFFECTED", "UNDER_INVESTIGATION"):
-            continue
-        level = str(severity or "UNKNOWN").upper()
+    for _cve, severity in findings:
+        level = str(severity or "UNKNOWN")
         vulnerability_counts[level if level in vulnerability_counts else "UNKNOWN"] += 1
     values = {column.name: getattr(asset, column.name) for column in models.Asset.__table__.columns
               if column.name not in ("ssh_password_encrypted", "ssh_private_key_encrypted", "ssh_host_key")}

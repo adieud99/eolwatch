@@ -38,6 +38,11 @@ def test_debian_version_ordering(a, b, expected):
     assert pu.compare_versions(b, a) == -expected
 
 
+def test_remote_command_forces_an_english_locale():
+    assert pu.REMOTE_COMMAND.startswith("export LC_ALL=C LANG=C;")
+    assert pu.parse_updates("MANAGER=apt\nREFRESHED=yes\ncurl/x 8.1 amd64 [업그레이드 가능 (현재): 8.0]\n")["packages"] == {}  # what a Korean locale would print
+
+
 def test_fix_check_says_what_the_repository_really_offers():
     updates = pu.parse_updates(APT_OUTPUT)
     assert pu.fix_check("libssl3t64", ["3.5.5-1ubuntu3.2"], updates) == pu.UPDATE_AVAILABLE
