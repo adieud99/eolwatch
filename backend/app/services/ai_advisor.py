@@ -184,7 +184,12 @@ def _complete_openai(prompt: str, system: str, json_mode: bool, max_tokens: int)
         if response.status_code == 401:
             raise HTTPException(status_code=503, detail="OpenAI 인증에 실패했습니다. OPENAI_API_KEY를 확인하세요.")
         if response.status_code == 429:
-            raise HTTPException(status_code=429, detail="OpenAI 요청 한도를 초과했습니다. 잠시 후 다시 시도하세요.")
+            try:
+                reason = str(((response.json() or {}).get("error") or {}).get("message") or "")
+            except ValueError:
+                reason = ""
+            hint = "무료 등급의 하루 요청 한도에 걸렸습니다. 내일 초기화되거나, 결제를 켜거나, 다른 모델(OPENAI_MODEL)을 쓰세요." if "free_tier" in reason or "PerDay" in reason else "잠시 후 다시 시도하세요."
+            raise HTTPException(status_code=429, detail=f"AI 요청 한도를 초과했습니다. {hint}" + (f" 제공자 메시지: {reason.splitlines()[0][:120]}" if reason else ""))
         if response.status_code in (400, 404):
             try:
                 error = (response.json() or {}).get("error") or {}
