@@ -73,7 +73,7 @@ describe('등록 완료 후 폼 초기화와 목록 갱신', () => {
     }))
     function assertEndpoint(url) { expect(url).toBe(scenario.path) }
     render(<App />)
-    await screen.findByText('등록 서버')
+    await screen.findByText('검사 대상')
     fireEvent.click(screen.getByRole('button', { name: scenario.nav }))
     if (scenario.open) fireEvent.click(screen.getByRole('button', { name: scenario.open, exact: true }))
     for (const [label, value] of Object.entries(scenario.fields)) fireEvent.change(screen.getByLabelText(label, { exact: true }), { target: { value } })
@@ -251,7 +251,7 @@ describe('웹에서 서버 취약점 분석 실행', () => {
     expect(screen.queryByRole('button', { name: '작업 50 취소' })).not.toBeInTheDocument()
   })
 
-  it('조회자는 자산 상세와 프로젝트 결과로 이동할 수 있고 실행 중 작업을 취소할 수 없다', async () => {
+  it('조회자는 대상 상세와 프로젝트 결과로 이동할 수 있고 실행 중 작업을 취소할 수 없다', async () => {
     data['/api/assets/7'] = { ...asset, ssh_port: 2222 }
     data['/api/analyses/jobs'] = [queued]
     data['/api/analyses/projects?asset_id=7&limit=20&offset=0'] = { items: [], total: 0, limit: 20, offset: 0 }
@@ -263,13 +263,13 @@ describe('웹에서 서버 취약점 분석 실행', () => {
     fireEvent.click(detail.getByRole('button', { name: '닫기' }))
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'VM-001 검사 기록' })))
     expect(screen.getByRole('heading', { name: '검사 기록 · 검사 이력' })).toBeInTheDocument()
-    expect(screen.getByLabelText('프로젝트 자산')).toHaveValue('7')
+    expect(screen.getByLabelText('대상')).toHaveValue('7')
     openSecurity()
     expect(screen.queryByRole('button', { name: '작업 50 취소' })).not.toBeInTheDocument()
     expect(fetch.mock.calls.every(([, options]) => !options.method)).toBe(true)
   })
 
-  it('데모 앱 분석 범위를 선택해 서버에 전달하고 작업의 범위를 표시한다', async () => {
+  it('데모 앱 검사 범위를 선택해 서버에 전달하고 작업의 범위를 표시한다', async () => {
     postResponse = () => response({ ...queued, scan_scope: 'demo-python-venv' }, 202)
     await openApp(); openAssets()
     fireEvent.change(screen.getByLabelText('VM-001 검사 범위'), { target: { value: 'demo-python-venv' } })
@@ -277,7 +277,7 @@ describe('웹에서 서버 취약점 분석 실행', () => {
     const call = fetch.mock.calls.find(([url]) => url === '/api/analyses/assets/7/jobs')
     expect(JSON.parse(call[1].body)).toEqual({ scan_scope: 'demo-python-venv' })
     expect(call[1].headers.get('Content-Type')).toBe('application/json')
-    expect(within(screen.getByRole('table', { name: '서버 검사 작업' })).getByText('데모 앱 · Python')).toBeInTheDocument()
+    expect(within(screen.getByRole('table', { name: '서버 검사 작업' })).getByText('데모 앱 (Python)')).toBeInTheDocument()
   })
 
   it('느린 상태 조회를 중복 실행하지 않고 요청 이전의 응답으로 새 작업을 덮어쓰지 않는다', async () => {
@@ -326,20 +326,20 @@ describe('웹에서 서버 취약점 분석 실행', () => {
     expect(screen.getByLabelText('확인할 SBOM')).toHaveValue('9')
   })
 
-  it('대시보드는 누적 이력과 OS·앱의 마지막 성공 분석을 구분하고 해당 결과로 이동한다', async () => {
+  it('대시보드는 누적 이력과 OS·앱의 마지막 성공 검사을 구분하고 해당 결과로 이동한다', async () => {
     const latest = { asset_id: 7, asset_tag: 'VM-001', asset_name: '실습 서버', scan_scope: 'demo-python-venv', analysis_run_id: 90, sbom_id: 9, cve_count: 0, last_success_at: '2026-09-15T05:00:00Z' }
     data['/api/dashboard/summary'] = { ...data['/api/dashboard/summary'], open_cves: 3219, affected_assets: 1, latest_analyses: [latest, { ...latest, scan_scope: 'ubuntu-dpkg-installed', analysis_run_id: 80, sbom_id: 8, cve_count: 3216 }] }
     data['/api/sboms'] = [{ id: 9, component_count: 3 }, { id: 8, component_count: 670 }]
     await openApp('VIEWER')
-    expect(screen.getByText('누적 미조치 CVE')).toBeInTheDocument()
+    expect(screen.getByText('전체 이력 미조치 CVE')).toBeInTheDocument()
     expect(screen.getByText('전체 검사 이력 기준 · 1대')).toBeInTheDocument()
-    const table = within(screen.getByRole('table', { name: '대상·범위별 최근 검사' }))
-    const appRow = within(table.getByText('데모 앱 · Python').closest('tr'))
-    const osRow = within(table.getByText('OS · 설치 패키지').closest('tr'))
+    const table = within(screen.getByRole('table', { name: '대상 · 범위별 최근 검사' }))
+    const appRow = within(table.getByText('데모 앱 (Python)').closest('tr'))
+    const osRow = within(table.getByText('OS 설치 패키지').closest('tr'))
     expect(appRow.getByText('0개')).toBeInTheDocument()
-    expect(appRow.getByText('해당 범위·검사 시점에서 미검출')).toBeInTheDocument()
+    expect(appRow.getByText('검사 당시 미검출')).toBeInTheDocument()
     expect(osRow.getByText('3216개')).toBeInTheDocument()
-    await act(async () => { fireEvent.click(appRow.getByRole('button', { name: 'VM-001 데모 앱 · Python 최근 검사 결과 보기' })) })
+    await act(async () => { fireEvent.click(appRow.getByRole('button', { name: 'VM-001 데모 앱 (Python) 최근 검사 결과 보기' })) })
     expect(screen.getByLabelText('확인할 SBOM')).toHaveValue('9')
     expect(fetch.mock.calls.every(([, options]) => !options.method)).toBe(true)
   })
@@ -350,7 +350,7 @@ describe('웹에서 서버 취약점 분석 실행', () => {
     await openApp()
     data['/api/analyses/jobs'] = [{ ...queued, scan_scope: 'demo-python-venv', status: 'SCANNING' }]
     await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
-    const table = within(screen.getByRole('table', { name: '대상·범위별 최근 검사' }))
+    const table = within(screen.getByRole('table', { name: '대상 · 범위별 최근 검사' }))
     expect(table.getByText('재검사 진행 중입니다. 마지막 성공 검사를 표시합니다.')).toBeInTheDocument()
     data['/api/analyses/jobs'] = [{ ...failed, scan_scope: 'demo-python-venv' }, { ...failed, id: 51, asset_id: 8, asset_tag: 'VM-002', scan_scope: 'ubuntu-dpkg-installed' }]
     await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
@@ -381,7 +381,7 @@ describe('웹에서 서버 취약점 분석 실행', () => {
     data['/api/dashboard/summary'] = { ...data['/api/dashboard/summary'], latest_analyses: [{ ...latest, analysis_run_id: 90, sbom_id: 9, cve_count: 0, last_success_at: '2026-09-15T07:00:00Z' }] }
     data['/api/analyses/jobs'] = [{ ...queued, scan_scope: 'demo-python-venv', status: 'SUCCESS', sbom_id: 9, analysis_run_id: 90 }]
     await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
-    const table = within(screen.getByRole('table', { name: '대상·범위별 최근 검사' }))
+    const table = within(screen.getByRole('table', { name: '대상 · 범위별 최근 검사' }))
     expect(table.getByText('검사 #90 · SBOM #9')).toBeInTheDocument()
     expect(table.getByText('0개')).toBeInTheDocument()
     await act(async () => { await vi.advanceTimersByTimeAsync(6000) })
@@ -392,14 +392,14 @@ describe('웹에서 서버 취약점 분석 실행', () => {
   it('현재 범위의 미조치 수와 전체 이력의 미조치 수를 구분하고 집계가 없으면 미확인으로 표시한다', async () => {
     data['/api/dashboard/summary'] = { ...data['/api/dashboard/summary'], open_cves: 300, affected_assets: 7, current_open_cves: 0, current_affected_assets: 0 }
     const view = await openApp('VIEWER')
-    const current = within(screen.getByText('현재 검사의 미조치 CVE').closest('article'))
-    const historical = within(screen.getByText('누적 미조치 CVE').closest('article'))
+    const current = within(screen.getByText('최신 검사 기준 미조치 CVE').closest('article'))
+    const historical = within(screen.getByText('전체 이력 미조치 CVE').closest('article'))
     expect(current.getByText('0')).toBeInTheDocument()
-    expect(current.getByText('서버·범위별 마지막 검사 기준 · 0대')).toBeInTheDocument()
+    expect(current.getByText('대상·범위별 마지막 검사 기준 · 0대')).toBeInTheDocument()
     expect(historical.getByText('300')).toBeInTheDocument()
     view.unmount(); delete data['/api/dashboard/summary'].current_open_cves
     await openApp('VIEWER')
-    expect(within(screen.getByText('현재 검사의 미조치 CVE').closest('article')).getByText('미확인')).toBeInTheDocument()
+    expect(within(screen.getByText('최신 검사 기준 미조치 CVE').closest('article')).getByText('미확인')).toBeInTheDocument()
   })
 })
 
@@ -420,7 +420,7 @@ describe('SBOM 취약점 분석 흐름', () => {
     localStorage.setItem('eolwatch_token', 'token')
     localStorage.setItem('eolwatch_user', JSON.stringify({ id: 1, username: 'operator', role }))
     const view = render(<App />)
-    await screen.findByText('등록 서버')
+    await screen.findByText('검사 대상')
     openHistoryView('CVE 결과·조치')
     await screen.findByRole('heading', { name: '최근 검사 결과' })
     return view
@@ -479,10 +479,10 @@ describe('SBOM 취약점 분석 흐름', () => {
     expect(findings.getByText('OSV')).toBeInTheDocument()
   })
 
-  it('조회자는 분석 이력을 읽을 수 있고 업로드·OSV 조회·상태 변경은 할 수 없다', async () => {
+  it('조회자는 검사 이력을 읽을 수 있고 업로드·OSV 조회·상태 변경은 할 수 없다', async () => {
     await openSecurity('VIEWER')
-    expect(screen.queryByLabelText('분석 결과 JSON 파일')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '분석 결과 저장' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('검사 결과 JSON 파일')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '검사 결과 저장' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'OSV 조회' })).not.toBeInTheDocument()
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '검사 20 CVE 보기' })) })
     expect(screen.getByText(newFinding.cve_id)).toBeInTheDocument()
@@ -710,10 +710,10 @@ describe('SBOM 취약점 분석 흐름', () => {
     expect(fetch.mock.calls.filter(([url]) => url.includes('/vulnerability-work?sbom_id=1'))).toHaveLength(1)
   })
 
-  it('조치 작업목록에서 전체 미완료 이력을 읽고 저장 후 작업과 요약을 갱신한다', async () => {
+  it('조치 목록에서 전체 미완료 이력을 읽고 저장 후 작업과 요약을 갱신한다', async () => {
     await openSecurity()
-    openHistoryView('조치 작업목록')
-    const region = within(await screen.findByRole('region', { name: 'CVE 조치 작업목록' }))
+    openHistoryView('조치 목록')
+    const region = within(await screen.findByRole('region', { name: 'CVE 조치 목록' }))
     await region.findByText(newFinding.cve_id)
     expect(region.getByText(oldFinding.cve_id)).toBeInTheDocument()
     const row = within(region.getByText(newFinding.cve_id).closest('tr'))
@@ -732,8 +732,8 @@ describe('SBOM 취약점 분석 흐름', () => {
 
   it('조회자는 작업목록에서 조치 이력을 읽고 선택한 SBOM의 전체 상태 결과로 이동한다', async () => {
     await openSecurity('VIEWER')
-    openHistoryView('조치 작업목록')
-    const region = within(await screen.findByRole('region', { name: 'CVE 조치 작업목록' }))
+    openHistoryView('조치 목록')
+    const region = within(await screen.findByRole('region', { name: 'CVE 조치 목록' }))
     await region.findByText(newFinding.cve_id)
     expect(region.queryByRole('button', { name: '조치 관리' })).not.toBeInTheDocument()
     expect(region.getAllByRole('button', { name: '조치 이력' })).toHaveLength(2)
@@ -749,7 +749,7 @@ describe('SBOM 취약점 분석 흐름', () => {
 
 })
 
-describe('프로젝트와 자산의 결과 문맥 연결', () => {
+describe('프로젝트와 대상의 결과 문맥 연결', () => {
   const asset = { id: 7, asset_tag: 'VM-001', name: '주문 서버', asset_type: 'vm', risk_level: 'UNKNOWN', days_left: null, monitored: false }
   const base = { id: 1, asset_id: 7, asset_tag: 'VM-001', asset_name: '주문 서버', scan_scope: 'source-zip:orders', sbom_id: 101, imported_at: '2026-01-01T00:00:00Z', cve_count: 3, component_count: 4, scanner: 'Grype' }
   const target = { ...base, id: 205, sbom_id: 305, imported_at: '2026-09-15T00:00:00Z', cve_count: 0 }
@@ -758,14 +758,14 @@ describe('프로젝트와 자산의 결과 문맥 연결', () => {
   let runRequest
   async function openProject() {
     render(<App />)
-    await screen.findByText('등록 서버')
+    await screen.findByText('검사 대상')
     openHistoryView('검사 이력')
     fireEvent.click(await screen.findByRole('button', { name: 'VM-001 소스 ZIP · orders 이력 보기' }))
-    await screen.findByText('분석 #1', { selector: 'strong' })
+    await screen.findByText('검사 #1', { selector: 'strong' })
   }
   function selectPair() {
-    fireEvent.click(within(screen.getByText('분석 #1', { selector: 'strong' }).closest('tr')).getByRole('button', { name: '이전으로 선택' }))
-    fireEvent.click(within(screen.getByText('분석 #205', { selector: 'strong' }).closest('tr')).getByRole('button', { name: '이후로 선택' }))
+    fireEvent.click(within(screen.getByText('검사 #1', { selector: 'strong' }).closest('tr')).getByRole('button', { name: '이전으로' }))
+    fireEvent.click(within(screen.getByText('검사 #205', { selector: 'strong' }).closest('tr')).getByRole('button', { name: '이후로' }))
   }
   beforeEach(() => {
     localStorage.clear(); localStorage.setItem('eolwatch_token', 'token'); localStorage.setItem('eolwatch_user', JSON.stringify({ id: 1, username: 'viewer', role: 'VIEWER' }))
@@ -788,7 +788,7 @@ describe('프로젝트와 자산의 결과 문맥 연결', () => {
 
   it('최근 분석 배열에 없는 두 분석을 단건 조회해 비교하고 돌아오면 선택 범위를 유지한다', async () => {
     await openProject(); selectPair()
-    fireEvent.click(screen.getByRole('button', { name: '선택한 분석 비교' }))
+    fireEvent.click(screen.getByRole('button', { name: '선택한 두 검사 비교' }))
     await screen.findByRole('heading', { name: '검사 기록 · 검사 전후 비교' })
     expect(screen.getByLabelText('이전 검사')).toHaveValue('1')
     expect(screen.getByLabelText('이후 검사')).toHaveValue('205')
@@ -797,16 +797,16 @@ describe('프로젝트와 자산의 결과 문맥 연결', () => {
     fireEvent.click(screen.getByRole('button', { name: '검사 전후 비교', exact: true }))
     await screen.findByRole('table', { name: '검사 전후 CVE 비교' })
     fireEvent.click(screen.getByRole('button', { name: '검사 이력으로 돌아가기' }))
-    await screen.findByText('분석 #1', { selector: 'strong' })
+    await screen.findByText('검사 #1', { selector: 'strong' })
     expect(screen.getByRole('heading', { name: 'VM-001 · 소스 ZIP · orders' })).toBeInTheDocument()
-    expect(within(screen.getByRole('region', { name: '선택한 프로젝트' })).getByText('분석 #205 · CVE 0건')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: '선택한 프로젝트' })).getByText('검사 #205 · CVE 0건')).toBeInTheDocument()
   })
 
   it('비교 준비 연타를 막고 다른 화면으로 이동하면 단건 조회를 중단해 늦은 응답을 버린다', async () => {
     const finish = []
     runRequest = (url) => new Promise((resolve) => finish.push(() => resolve(response(url.endsWith('/1') ? base : target))))
     await openProject(); selectPair()
-    const compare = screen.getByRole('button', { name: '선택한 분석 비교' })
+    const compare = screen.getByRole('button', { name: '선택한 두 검사 비교' })
     fireEvent.click(compare); fireEvent.click(compare)
     expect(screen.getByRole('button', { name: '비교 준비 중…' })).toBeDisabled()
     const reads = fetch.mock.calls.filter(([url]) => url.startsWith('/api/analyses/runs/'))
@@ -818,22 +818,22 @@ describe('프로젝트와 자산의 결과 문맥 연결', () => {
     expect(screen.queryByRole('heading', { name: '검사 기록 · 검사 전후 비교' })).not.toBeInTheDocument()
   })
 
-  it('프로젝트에서 오래된 CVE 결과·SBOM 상세를 왕복하고 자산 조치 필터를 이어받는다', async () => {
+  it('프로젝트에서 오래된 CVE 결과·SBOM 상세를 왕복하고 대상 조치 필터를 이어받는다', async () => {
     await openProject()
-    fireEvent.click(within(screen.getByText('분석 #1', { selector: 'strong' }).closest('tr')).getByRole('button', { name: 'CVE 결과' }))
+    fireEvent.click(within(screen.getByText('검사 #1', { selector: 'strong' }).closest('tr')).getByRole('button', { name: 'CVE 결과' }))
     await waitFor(() => expect(screen.getByLabelText('확인할 SBOM')).toHaveValue('101'))
-    fireEvent.click(screen.getByRole('button', { name: '선택한 SBOM의 의존성 목록 보기' }))
+    fireEvent.click(screen.getByRole('button', { name: '이 결과의 의존성 목록 보기' }))
     await screen.findByRole('heading', { name: 'SBOM #101 의존성 목록' })
     fireEvent.click(screen.getByRole('button', { name: '이 SBOM의 CVE 보기' }))
     await waitFor(() => expect(screen.getByLabelText('확인할 SBOM')).toHaveValue('101'))
     openHistoryView('검사 이력')
-    fireEvent.click(await screen.findByRole('button', { name: '이 자산 조치목록' }))
-    await screen.findByRole('region', { name: 'CVE 조치 작업목록' })
-    expect(screen.getByLabelText('대상 자산')).toHaveValue('7')
+    fireEvent.click(await screen.findByRole('button', { name: '이 대상의 조치 목록' }))
+    await screen.findByRole('region', { name: 'CVE 조치 목록' })
+    expect(screen.getByLabelText('대상')).toHaveValue('7')
     await waitFor(() => expect(fetch.mock.calls.some(([url]) => url === '/api/vulnerability-work?status=OPEN&limit=25&offset=0&asset_id=7')).toBe(true))
     fireEvent.click(screen.getByRole('button', { name: /개요/ }))
-    openHistoryView('조치 작업목록')
-    expect(screen.getByLabelText('대상 자산')).toHaveValue('7')
+    openHistoryView('조치 목록')
+    expect(screen.getByLabelText('대상')).toHaveValue('7')
     expect(fetch.mock.calls.some(([url]) => url === '/api/vulnerabilities')).toBe(false)
     expect(fetch.mock.calls.every(([, options]) => !options.method)).toBe(true)
   })
@@ -890,7 +890,7 @@ describe('서버 분석 전후 비교', () => {
   })
   afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-  it('같은 자산·범위의 더 나중 분석만 비교 대상으로 선택할 수 있다', async () => {
+  it('같은 대상·범위의 더 나중 분석만 비교 대상으로 선택할 수 있다', async () => {
     await openComparison()
     const button = screen.getByRole('button', { name: '검사 전후 비교', exact: true })
     expect(button).toBeDisabled()
@@ -923,7 +923,7 @@ describe('서버 분석 전후 비교', () => {
     expect(row.getByText('2.32.5')).toBeInTheDocument()
     expect(row.getByText('2.20.0')).toBeInTheDocument()
     for (const status of ['재검사 미검출', '계속 검출', '새로 검출', '구성요소 제거']) expect(table.getByText(status)).toBeInTheDocument()
-    expect(screen.getByText(/미검출은 자동 조치 완료 판정이 아닙니다/)).toBeInTheDocument()
+    expect(screen.getByText(/미검출이 곧 조치 완료는 아닙니다/)).toBeInTheDocument()
     expect(screen.getByText('취약점 DB 기준 시각이 다릅니다.')).toBeInTheDocument()
     expect(fetch.mock.calls.every(([, options]) => !options.method)).toBe(true)
     expect(table.queryByRole('combobox')).not.toBeInTheDocument()
@@ -962,10 +962,10 @@ describe('서버 분석 전후 비교', () => {
 
   it('분석 조건이 다르면 주의사항과 함께 원본 보고서의 탐지 변화를 표시한다', async () => {
     comparison.comparable = false
-    comparison.warnings = ['두 분석의 수집 조건을 확인하세요.']
+    comparison.warnings = ['두 검사의 수집 조건을 확인하세요.']
     await openComparison(); selectPair(); await runComparison()
-    expect(screen.getByRole('status')).toHaveTextContent('검사 조건 차이를 함께 확인하세요. 아래는 원본 보고서의 탐지 변화입니다.')
-    expect(screen.getByText('두 분석의 수집 조건을 확인하세요.')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('검사 조건이 달라 단순 비교가 어렵습니다. 아래는 원본 보고서의 변화입니다.')
+    expect(screen.getByText('두 검사의 수집 조건을 확인하세요.')).toBeInTheDocument()
     const table = within(screen.getByRole('table', { name: '검사 전후 CVE 비교' }))
     expect(table.getByText('재검사 미검출')).toBeInTheDocument()
     expect(table.getByText('2.19.1')).toBeInTheDocument()
@@ -981,7 +981,7 @@ describe('서버 분석 전후 비교', () => {
     await openComparison()
     expect(screen.queryByRole('button', { name: '검증 보고서 PDF' })).not.toBeInTheDocument()
     selectPair(); await runComparison()
-    expect(screen.getByText('검사 범위·도구·원본 식별정보·CVE 전후 결과를 포함합니다.')).toBeInTheDocument()
+    expect(screen.getByText('범위·도구·원본 정보와 CVE 전후 결과가 담깁니다.')).toBeInTheDocument()
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '검증 보고서 PDF' })) })
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '검증 데이터 JSON' })) })
     const calls = fetch.mock.calls.filter(([url]) => url.startsWith('/api/reports/analyses/'))
