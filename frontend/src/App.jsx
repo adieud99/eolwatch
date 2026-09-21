@@ -191,7 +191,7 @@ function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendin
     <section className="panel full-panel">
       {editing && <AssetEditor key={editing.id} asset={editing} canEdit={canEdit} request={api} onViewCve={onViewCve} onViewSbom={onViewSbom} onSaved={(updated) => { setEditing(null); onChanged(updated ? '서버 정보를 저장했습니다.' : '사용하지 않는 서버를 삭제했습니다.') }} onClose={() => setEditing(null)} />}
       <div className="panel-heading">
-        <div><span className="eyebrow">INFRASTRUCTURE SCAN</span><h2>검사 대상 서버</h2><small>서버 IP와 SSH 계정을 등록하면 접속해서 설치 패키지와 서버 정보를 수집하고 취약점을 검사합니다.</small></div>
+        <div><span className="eyebrow">INFRASTRUCTURE SCAN</span><h2>검사 대상 서버</h2><small>서버 주소(IP나 도메인)와 SSH 계정을 등록하면 접속해서 설치 패키지와 서버 정보를 수집하고 취약점을 검사합니다.</small></div>
         <div className="action-row">
           {canEdit && <button className="primary" onClick={() => setOpen(!open)}>{open ? '닫기' : '+ 서버 등록'}</button>}
         </div>
@@ -201,7 +201,7 @@ function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendin
           <label>서버 번호<input name="asset_tag" required placeholder="SRV-001" /></label>
           <label>서버 이름<input name="name" required placeholder="운영 웹 서버" /></label>
           <label>유형<select name="asset_type" defaultValue="server">{Object.entries(typeText).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-          <label>서버 IP<input name="ip_address" placeholder="10.0.1.11" /></label>
+          <label>서버 주소 (IP 또는 도메인)<input name="ip_address" placeholder="10.0.1.11 또는 db01.example.com" /></label>
           <label>SSH 포트<input name="ssh_port" type="number" min="1" max="65535" defaultValue="22" /></label>
           <label>SSH 계정<input name="ssh_username" placeholder="eolwatch" /></label>
           <label className="checkbox"><input type="checkbox" name="monitored" defaultChecked /> 검사 대상으로 사용</label>
@@ -224,7 +224,7 @@ function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendin
                 <td><code>{asset.asset_tag}</code></td>
                 <td><strong>{asset.name}</strong><div className="action-row cell-actions"><button className="table-button" aria-label={`${asset.asset_tag} 서버 ${canEdit ? '수정' : '상세'}`} onClick={() => setEditing(asset)}>{canEdit ? '수정' : '상세'}</button><button className="table-button" aria-label={`${asset.asset_tag} 검사 기록`} onClick={() => onViewProjects(asset.id)}>검사 기록</button></div></td>
                 <td>{typeText[asset.asset_type] || asset.asset_type}</td>
-                <td>{asset.ip_address ? <><strong>{asset.ip_address}:{asset.ssh_port}</strong><small>{asset.ssh_username || 'SSH 계정 미입력'}</small></> : <small>IP 미입력</small>}</td>
+                <td>{asset.ip_address ? <><strong>{asset.ip_address}:{asset.ssh_port}</strong><small>{asset.ssh_username || 'SSH 계정 미입력'}</small></> : <small>주소 미입력</small>}</td>
                 <td>{info ? <><strong>{info.os_name || 'OS 미확인'}</strong><small>{[info.cpu_cores ? `${info.cpu_cores}코어` : null, gigabytes(info.memory_total_mb), platformText[info.platform] || info.platform].filter(Boolean).join(' · ')}</small>{info.cloud && <small>{info.cloud.instance_id} · {info.cloud.instance_type}</small>}</> : <small>SSH 점검 후 표시</small>}</td>
                 <td>SBOM {asset.sbom_count ?? 0}<small>CVE {asset.vulnerability_count ?? 0}건</small></td>
                 <td><label>검사 범위<select aria-label={`${asset.asset_tag} 검사 범위`} value={scanScopes[asset.id] || 'ubuntu-dpkg-installed'} disabled={!canEdit || unavailable || pending || Boolean(activeJob)} onChange={(event) => setScanScopes((current) => ({ ...current, [asset.id]: event.target.value }))}>{Object.entries(analysisScopeText).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><div className="action-row"><button className="table-button" disabled={!canEdit || !asset.ip_address || !asset.ssh_username} onClick={async () => {

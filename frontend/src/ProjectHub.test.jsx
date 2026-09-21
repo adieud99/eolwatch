@@ -232,3 +232,28 @@ describe('프로젝트별 서버 페이지 이력', () => {
     expect(request.mock.calls.find(([path]) => path.startsWith('/analyses/job-history?'))[1].signal.aborted).toBe(true)
   })
 })
+
+describe('대상 삭제', () => {
+  it('프로젝트 상세에서 대상 번호를 확인한 뒤 이력 포함 삭제를 요청하고 목록을 비운다', async () => {
+    const project = { asset_id: 7, asset_tag: 'GH-old', asset_name: 'GitHub old', scan_scope: 'source-git:old', project_name: 'old', latest_analysis: null, latest_job: null, schedule: null, analysis_count: 0, job_count: 1, upload_count: 0 }
+    let deleted = false
+    const request = vi.fn(async (path, options) => {
+      if (options?.method === 'DELETE') { deleted = true; return null }
+      if (path.startsWith('/analyses/projects?')) return { items: deleted ? [] : [project], total: deleted ? 0 : 1, limit: 20, offset: 0 }
+      return { items: [], total: 0, limit: 20, offset: 0 }
+    })
+    const onChanged = vi.fn(); const onTargetDeleted = vi.fn()
+    render(<ProjectHub assets={[{ id: 7, asset_tag: 'GH-old', name: 'GitHub old' }]} canEdit request={request} download={vi.fn()} onChanged={onChanged} onJobQueued={vi.fn()} onViewResult={vi.fn()} onViewSbom={vi.fn()} onCompare={vi.fn()} onNewAnalysis={vi.fn()} onTargetDeleted={onTargetDeleted} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'GH-old Git 저장소 · old 이력 보기' }))
+    fireEvent.click(await screen.findByRole('button', { name: '대상 삭제…' }))
+    const confirm = screen.getByRole('button', { name: '대상 영구 삭제' })
+    expect(confirm).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('삭제 확인 대상 번호'), { target: { value: 'GH-old' } })
+    fireEvent.click(confirm)
+    await waitFor(() => expect(onTargetDeleted).toHaveBeenCalledWith(7))
+    const [path] = request.mock.calls.find(([, options]) => options?.method === 'DELETE')
+    expect(path).toBe('/assets/7?purge=true')
+    expect(onChanged).toHaveBeenCalledWith('대상과 이력을 삭제했습니다.')
+    await waitFor(() => expect(screen.queryByRole('region', { name: '선택한 프로젝트' })).not.toBeInTheDocument())
+  })
+})

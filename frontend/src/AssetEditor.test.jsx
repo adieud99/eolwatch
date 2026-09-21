@@ -17,7 +17,7 @@ describe('서버 정보 수정', () => {
     expect(screen.getByRole('button', { name: '서버 변경 저장' })).toBeDisabled()
     await ready()
     fireEvent.change(screen.getByLabelText('SSH 포트'), { target: { value: '2222' } })
-    fireEvent.change(screen.getByLabelText('서버 IP / 호스트'), { target: { value: '10.0.0.9' } })
+    fireEvent.change(screen.getByLabelText('서버 주소 (IP 또는 도메인)'), { target: { value: '10.0.0.9' } })
     fireEvent.click(screen.getByLabelText('검사 대상으로 사용'))
     fireEvent.click(screen.getByRole('button', { name: '서버 변경 저장' }))
     await waitFor(() => expect(props.onSaved).toHaveBeenCalled())
@@ -50,7 +50,7 @@ describe('서버 정보 수정', () => {
     await screen.findByText(/검사 이력이 있는 서버는 삭제할 수 없습니다/)
     expect(props.onSaved).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: '삭제 취소' }))
-    expect(screen.getByLabelText('서버 IP / 호스트')).toHaveValue('10.0.0.1')
+    expect(screen.getByLabelText('서버 주소 (IP 또는 도메인)')).toHaveValue('10.0.0.1')
   })
 
   it('중복 저장을 막고 언마운트 후 응답을 폐기한다', async () => {
@@ -77,5 +77,20 @@ describe('서버 정보 수정', () => {
     fireEvent.click(screen.getByRole('button', { name: '목록 보기' }))
     expect(props.onViewSbom).toHaveBeenCalledWith(12)
     expect(props.request.mock.calls.every(([, options]) => !options.method)).toBe(true)
+  })
+})
+
+describe('이력 포함 삭제', () => {
+  it('이력 포함 삭제를 선택하면 purge 옵션으로 요청하고, 선택하지 않으면 그대로 요청한다', async () => {
+    const request = vi.fn(async (path, options) => options?.method === 'DELETE' ? null : path === '/sboms' || path.endsWith('/timeline') ? [] : asset)
+    const { props } = open({ request })
+    await ready()
+    fireEvent.click(screen.getByRole('button', { name: '서버 삭제…' }))
+    fireEvent.click(screen.getByLabelText(/이력 포함 삭제/))
+    fireEvent.change(screen.getByLabelText('삭제 확인 서버 번호'), { target: { value: 'LAB-01' } })
+    fireEvent.click(screen.getByRole('button', { name: '서버 영구 삭제' }))
+    await waitFor(() => expect(props.onSaved).toHaveBeenCalledWith(null))
+    const [path] = request.mock.calls.find(([, options]) => options?.method === 'DELETE')
+    expect(path).toBe('/assets/1?purge=true')
   })
 })

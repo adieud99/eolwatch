@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import './AssetEditor.css'
 
 const types = { server: '서버', storage: '스토리지', network: '네트워크', security: '보안', vm: '가상머신', cloud: '클라우드', other: '기타' }
-const textFields = [['ip_address', '서버 IP / 호스트'], ['ssh_username', 'SSH 사용자명']]
+const textFields = [['ip_address', '서버 주소 (IP 또는 도메인)'], ['ssh_username', 'SSH 사용자명']]
 const editable = ['asset_tag', 'name', 'asset_type', ...textFields.map(([key]) => key), 'ssh_port', 'monitored']
 const draftOf = (asset) => Object.fromEntries(editable.map((key) => [key, key === 'monitored' ? Boolean(asset[key]) : asset[key] ?? (key === 'ssh_port' ? 22 : '')]))
 const normalize = (key, value) => key === 'monitored' ? value : key === 'ssh_port' ? (value === '' ? null : Number(value)) : typeof value === 'string' ? value.trim() || null : value
@@ -20,12 +20,15 @@ export default function AssetEditor({ asset, canEdit, request, onSaved, onClose,
   const [detailTab, setDetailTab] = useState('overview')
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [confirmation, setConfirmation] = useState('')
+  const [purge, setPurge] = useState(false)
   const busy = useRef(false)
   const mutation = useRef(null)
+  const panel = useRef(null)
+  useEffect(() => { panel.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }) }, [asset.id])
 
   useEffect(() => {
     const controller = new AbortController()
-    setReady(false); setLoading(true); setPending(false); setError(''); setDeleteOpen(false); setConfirmation('')
+    setReady(false); setLoading(true); setPending(false); setError(''); setDeleteOpen(false); setConfirmation(''); setPurge(false)
     request(`/assets/${asset.id}`, { signal: controller.signal }).then((fresh) => {
       if (!controller.signal.aborted) { setCurrent(fresh); setDraft(draftOf(fresh)); setReady(true) }
     }).catch((err) => { if (!controller.signal.aborted) setError(`서버 정보를 불러오지 못했습니다. ${err.message}`) })
@@ -63,13 +66,13 @@ export default function AssetEditor({ asset, canEdit, request, onSaved, onClose,
     busy.current = true; setPending(true); setError('')
     const controller = new AbortController(); mutation.current = controller
     try {
-      await request(`/assets/${asset.id}`, { method: 'DELETE', signal: controller.signal })
+      await request(`/assets/${asset.id}${purge ? '?purge=true' : ''}`, { method: 'DELETE', signal: controller.signal })
       if (!controller.signal.aborted) onSaved(null)
     } catch (err) { if (!controller.signal.aborted) setError(`서버를 삭제하지 못했습니다. ${err.message}`) }
     finally { if (!controller.signal.aborted) { busy.current = false; setPending(false) } }
   }
 
-  return <section className="asset-editor panel" aria-label="서버 정보 관리">
+  return <section ref={panel} className="asset-editor panel" aria-label="서버 정보 관리">
     <div className="asset-editor-heading"><h3>{current.asset_tag} · 서버 정보</h3><button type="button" className="secondary" disabled={pending} onClick={onClose}>닫기</button></div>
     {loading && <p role="status">최신 서버 정보를 불러오는 중입니다.</p>}
     {error && <p role="alert" className="form-error">{error}</p>}
@@ -89,7 +92,7 @@ export default function AssetEditor({ asset, canEdit, request, onSaved, onClose,
       </fieldset>
       <div className="asset-editor-heading"><button type="submit" className="primary" disabled={!ready || pending}>{pending ? '저장 중…' : '서버 변경 저장'}</button><button type="button" className="secondary" disabled={!ready || pending} onClick={() => { setDeleteOpen(true); setError('') }}>서버 삭제…</button></div>
     </form>}
-    {canEdit && deleteOpen && <form onSubmit={remove} className="asset-editor-delete"><h4>서버 삭제 확인</h4><p>검사·점검·SBOM 이력이 있는 서버는 삭제할 수 없습니다. 검사에서 제외하려면 검사 대상 설정을 해제하세요.</p><p>삭제할 서버 번호 <strong>{current.asset_tag}</strong>를 입력하세요. 삭제 후 되돌릴 수 없습니다.</p><label>삭제 확인 서버 번호<input autoComplete="off" value={confirmation} disabled={pending} onChange={(e) => setConfirmation(e.target.value)} /></label><div className="asset-editor-heading"><button type="submit" disabled={pending || confirmation !== current.asset_tag}>서버 영구 삭제</button><button type="button" className="secondary" disabled={pending} onClick={() => { setDeleteOpen(false); setConfirmation(''); setError('') }}>삭제 취소</button></div></form>}
+    {canEdit && deleteOpen && <form onSubmit={remove} className="asset-editor-delete"><h4>서버 삭제 확인</h4><p>이력이 없는 서버만 바로 삭제됩니다. 검사·점검·결과 이력이 있으면 아래 '이력 포함 삭제'를 선택해야 하며, 그 경우 검사 결과·CVE 조치 기록·저장된 ZIP·AI 요약이 함께 지워집니다.</p><label className="asset-editor-check"><input type="checkbox" checked={purge} disabled={pending} onChange={(e) => setPurge(e.target.checked)} />이력 포함 삭제 (검사 결과와 조치 기록까지 모두 삭제)</label><p>삭제할 서버 번호 <strong>{current.asset_tag}</strong>를 입력하세요. 삭제 후 되돌릴 수 없습니다.</p><label>삭제 확인 서버 번호<input autoComplete="off" value={confirmation} disabled={pending} onChange={(e) => setConfirmation(e.target.value)} /></label><div className="asset-editor-heading"><button type="submit" disabled={pending || confirmation !== current.asset_tag}>서버 영구 삭제</button><button type="button" className="secondary" disabled={pending} onClick={() => { setDeleteOpen(false); setConfirmation(''); setError('') }}>삭제 취소</button></div></form>}
     {detailTab === 'timeline' && <section className="asset-timeline" aria-label="서버 타임라인"><h4>서버 타임라인</h4>{timeline.length ? <ol>{timeline.slice(0, 20).map((event, index) => <li key={`${event.type}-${event.at}-${index}`}><strong>{event.title}</strong><small>{event.at ? new Date(event.at).toLocaleString('ko-KR') : '시각 미기록'}</small><span>{event.detail}</span></li>)}</ol> : <p>검사·점검·SBOM·조치 이력이 없습니다.</p>}</section>}
   </section>
 }

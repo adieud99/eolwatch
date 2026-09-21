@@ -64,7 +64,7 @@ function RunButtons({ run, onViewResult, onViewSbom, onDownload, busy }) {
   return <div className="action-row"><button className="table-button" onClick={() => onViewResult(run.sbom_id)}>CVE 결과</button><button className="table-button" onClick={() => onViewSbom(run.sbom_id)}>의존성 목록</button><button className="table-button" disabled={busy} onClick={() => onDownload(`/analyses/${run.id}/bundle`, `eolwatch-analysis-${run.id}.json`, `bundle-${run.id}`)}>원본 파일</button></div>
 }
 
-function ProjectDetail({ group: initialGroup, canEdit, request, download, onJobQueued, onChanged, onViewResult, onViewSbom, onCompare, onNewAnalysis, onViewWork }) {
+function ProjectDetail({ group: initialGroup, canEdit, request, download, onJobQueued, onChanged, onViewResult, onViewSbom, onCompare, onNewAnalysis, onViewWork, onTargetDeleted }) {
   const metadata = usePage(request, query('/analyses/projects', { asset_id: initialGroup.asset_id, scan_scope: initialGroup.scan_scope }), 'projects')
   const group = metadata.data?.items.find((item) => groupKey(item) === groupKey(initialGroup)) || initialGroup
   const [tab, setTab] = useState('results')
@@ -77,6 +77,8 @@ function ProjectDetail({ group: initialGroup, canEdit, request, download, onJobQ
   const [base, setBase] = useState(null)
   const [target, setTarget] = useState(null)
   const operation = useRef(null)
+  const [removing, setRemoving] = useState(false)
+  const [removeTag, setRemoveTag] = useState('')
   const common = { asset_id: group.asset_id, scan_scope: group.scan_scope }
   const applied = { ...common, ...filters }
   if (tab !== 'jobs') delete applied.status
@@ -112,13 +114,18 @@ function ProjectDetail({ group: initialGroup, canEdit, request, download, onJobQ
     if (!canEdit || job.status !== 'FAILED') return
     runOperation(`retry-${job.id}`, (signal) => request(`/analyses/jobs/${job.id}/retry`, { method: 'POST', signal }), (queued) => { page.refresh(); metadata.refresh(); onJobQueued(queued) })
   }
+  function removeTarget() {
+    if (!canEdit || removeTag !== group.asset_tag) return
+    runOperation('remove-target', (signal) => request(`/assets/${group.asset_id}?purge=true`, { method: 'DELETE', signal }), () => { setRemoving(false); setRemoveTag(''); onTargetDeleted?.(group.asset_id) })
+  }
   function startNew() {
     const separator = group.scan_scope.indexOf(':')
     onNewAnalysis({ assetId: group.asset_id, scanScope: group.scan_scope, projectName: group.project_name || (group.scan_scope.startsWith('source-') ? group.scan_scope.slice(separator + 1) : ''), targetPath: group.scan_scope.startsWith('ssh-') && separator >= 0 ? group.scan_scope.slice(separator + 1) : '', gitUrl: group.latest_job?.git_url || '', gitRef: group.latest_job?.git_ref || '' })
   }
 
   return <section className="panel project-detail" aria-label="선택한 프로젝트">
-    <div className="project-heading"><div><span className="eyebrow">PROJECT HISTORY</span><h2>{group.asset_tag} · {scopeLabel(group.scan_scope)}</h2><p>{group.asset_name} · 같은 대상과 검사 범위의 모든 이력입니다.</p></div><div className="action-row">{onViewWork && <button className="secondary" onClick={() => onViewWork(group.asset_id)}>이 대상의 조치 목록</button>}{canEdit && isExecutableScope(group.scan_scope) && <button className="primary" onClick={startNew}>이 프로젝트 다시 검사</button>}</div></div>
+    <div className="project-heading"><div><span className="eyebrow">PROJECT HISTORY</span><h2>{group.asset_tag} · {scopeLabel(group.scan_scope)}</h2><p>{group.asset_name} · 같은 대상과 검사 범위의 모든 이력입니다.</p></div><div className="action-row">{onViewWork && <button className="secondary" onClick={() => onViewWork(group.asset_id)}>이 대상의 조치 목록</button>}{canEdit && isExecutableScope(group.scan_scope) && <button className="primary" onClick={startNew}>이 프로젝트 다시 검사</button>}{canEdit && <button className="secondary" disabled={!!pending} onClick={() => { setRemoving((value) => !value); setRemoveTag(''); setError('') }}>대상 삭제…</button>}</div></div>
+    {removing && <div className="project-remove" role="group" aria-label="대상 삭제 확인"><p><strong>{group.asset_tag}</strong> 대상과 그 아래 모든 프로젝트의 검사 결과·작업·저장된 ZIP·CVE 조치 기록·AI 요약을 지웁니다. 되돌릴 수 없습니다.</p><label>삭제 확인 대상 번호<input autoComplete="off" value={removeTag} disabled={!!pending} onChange={(event) => setRemoveTag(event.target.value)} /></label><div className="action-row"><button className="primary" disabled={!!pending || removeTag !== group.asset_tag} onClick={removeTarget}>{pending === 'remove-target' ? '삭제 중…' : '대상 영구 삭제'}</button><button className="secondary" disabled={!!pending} onClick={() => { setRemoving(false); setRemoveTag('') }}>취소</button></div></div>}
     <ReadState state={metadata} name="선택한 프로젝트 정보" />
     <div className="project-summary"><div><strong>마지막 성공 검사</strong><p>{group.latest_analysis ? `검사 #${group.latest_analysis.id} · CVE ${group.latest_analysis.cve_count}건` : '성공한 검사 없음'}</p><small>{dateTime(group.latest_analysis?.imported_at)}</small></div><div><strong>마지막 작업</strong><p>{group.latest_job ? `#${group.latest_job.id} · ${jobLabels[group.latest_job.status] || group.latest_job.status}` : '작업 없음'}</p><small>{dateTime(group.latest_job?.requested_at)}</small>{group.latest_job?.error_message && <small>{group.latest_job.error_message}</small>}</div><div><strong>정기 검사</strong><p>{group.schedule ? group.schedule.enabled ? `${group.schedule.interval_minutes}분마다 실행` : '일시 중지' : '예약 없음'}</p><small>{group.schedule?.enabled ? `다음 실행 ${dateTime(group.schedule.next_run_at)}` : '인프라 검사에서 등록합니다.'}</small></div></div>
     <p className="project-help">CVE 수는 각 검사 당시 보고서 기준입니다. 이후 작업이 실패하거나 취소되어도 마지막 결과는 그대로입니다.</p>
@@ -140,7 +147,7 @@ function ProjectDetail({ group: initialGroup, canEdit, request, download, onJobQ
   </section>
 }
 
-export default function ProjectHub({ assets, canEdit, request, download, onChanged, onJobQueued, onViewResult, onViewSbom, onCompare, onNewAnalysis, initialAssetId, initialScope, onSelectionChange, onViewWork }) {
+export default function ProjectHub({ assets, canEdit, request, download, onChanged, onJobQueued, onViewResult, onViewSbom, onCompare, onNewAnalysis, initialAssetId, initialScope, onSelectionChange, onViewWork, onTargetDeleted }) {
   const [draft, setDraft] = useState({ asset_id: initialAssetId == null ? '' : String(initialAssetId), q: '' })
   const [filters, setFilters] = useState(draft)
   const [offset, setOffset] = useState(0)
@@ -164,7 +171,7 @@ export default function ProjectHub({ assets, canEdit, request, download, onChang
       {!groups.loading && !groups.error && !items.length && <p className="project-empty">조건에 맞는 프로젝트가 없습니다.{canEdit ? ' 새 검사에서 ZIP을 올리거나 서버 경로를 등록하세요.' : '관리자가 검사를 실행하면 여기서 결과를 볼 수 있습니다.'}</p>}
       {groups.data && <PageControls name="프로젝트" total={groups.data.total} offset={offset} busy={groups.loading} onPage={setOffset} />}
     </section>
-    {group ? <ProjectDetail key={groupKey(group)} group={group} canEdit={canEdit} request={request} download={download} onChanged={() => { groups.refresh(); onChanged?.() }} onJobQueued={(job) => { groups.refresh(); onJobQueued(job) }} onViewResult={onViewResult} onViewSbom={onViewSbom} onCompare={onCompare} onNewAnalysis={onNewAnalysis} onViewWork={onViewWork} /> : <p className="project-empty">프로젝트의 ‘이력 보기’를 누르면 결과·작업·저장된 ZIP이 나옵니다.</p>}
+    {group ? <ProjectDetail key={groupKey(group)} group={group} canEdit={canEdit} request={request} download={download} onChanged={() => { groups.refresh(); onChanged?.() }} onJobQueued={(job) => { groups.refresh(); onJobQueued(job) }} onViewResult={onViewResult} onViewSbom={onViewSbom} onCompare={onCompare} onNewAnalysis={onNewAnalysis} onViewWork={onViewWork} onTargetDeleted={(id) => { setSelected(null); onSelectionChange?.({}); groups.refresh(); onChanged?.('대상과 이력을 삭제했습니다.'); onTargetDeleted?.(id) }} /> : <p className="project-empty">프로젝트의 ‘이력 보기’를 누르면 결과·작업·저장된 ZIP이 나옵니다.</p>}
     {canEdit && <section className="panel project-storage"><div className="project-heading"><h3>검사 파일 보관 현황</h3><button className="secondary" onClick={() => { if (storageOpen) storage.refresh(); else setStorageOpen(true) }} disabled={storage.loading}>보관 현황 {storageOpen ? '새로고침' : '조회'}</button></div>{storageOpen && <><ReadState state={storage} name="보관 현황" />{storage.data && <><dl>{[['보관 파일', 'files'], ['연결된 파일', 'referenced_files'], ['미연결 파일', 'unreferenced_files'], ['누락 파일', 'missing_files'], ['크기 불일치', 'size_mismatch_files'], ['접근 불가', 'unsafe_files'], ['임시 파일', 'temp_files']].map(([label, key]) => <div key={key}><dt>{label}</dt><dd>{storage.data[key] ?? '미확인'}</dd></div>)}<div><dt>보관 용량</dt><dd>{bytes(storage.data.bytes)}</dd></div><div><dt>디스크 여유</dt><dd>{bytes(storage.data.free_disk_bytes)}</dd></div></dl><p className="project-help">확인 시각 {dateTime(storage.data.checked_at)} · 보관 상태와 크기 기준이며 전체 파일 내용 검증은 수행하지 않았습니다.</p></>}</>}</section>}
   </div>
 }

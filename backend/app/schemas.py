@@ -1,12 +1,35 @@
 from __future__ import annotations
 
+import ipaddress
+import re
+
 from datetime import date, datetime
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 AssetType = Literal["server", "storage", "network", "security", "vm", "cloud", "other"]
+
+
+HOSTNAME_PATTERN = re.compile(r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*$")
+
+
+def validate_address(value: Optional[str]) -> Optional[str]:
+    """IPv4, IPv6 or a DNS host name. Empty stays empty."""
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        ipaddress.ip_address(text)
+        return text
+    except ValueError:
+        pass
+    if HOSTNAME_PATTERN.match(text):
+        return text
+    raise ValueError("서버 주소는 IP 주소나 도메인 이름이어야 합니다 (예: 10.0.1.11, db01.example.com)")
 
 
 class AssetBase(BaseModel):
@@ -14,7 +37,12 @@ class AssetBase(BaseModel):
     asset_tag: str = Field(min_length=1, max_length=80)
     name: str = Field(min_length=1, max_length=160)
     asset_type: AssetType
-    ip_address: Optional[str] = Field(default=None, max_length=64)
+    ip_address: Optional[str] = Field(default=None, max_length=253)
+
+    @field_validator("ip_address")
+    @classmethod
+    def _address(cls, value):
+        return validate_address(value)
     ssh_port: int = Field(default=22, ge=1, le=65535)
     ssh_username: Optional[str] = Field(default=None, max_length=80)
     monitored: bool = False
@@ -29,7 +57,12 @@ class AssetUpdate(BaseModel):
     asset_tag: Optional[str] = Field(default=None, min_length=1, max_length=80)
     name: Optional[str] = Field(default=None, min_length=1, max_length=160)
     asset_type: Optional[AssetType] = None
-    ip_address: Optional[str] = Field(default=None, max_length=64)
+    ip_address: Optional[str] = Field(default=None, max_length=253)
+
+    @field_validator("ip_address")
+    @classmethod
+    def _address(cls, value):
+        return validate_address(value)
     ssh_port: Optional[int] = Field(default=None, ge=1, le=65535)
     ssh_username: Optional[str] = Field(default=None, max_length=80)
     monitored: Optional[bool] = None

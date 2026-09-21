@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
+from ..config import get_settings
 from ..db import get_db
 
 
@@ -131,16 +132,61 @@ def update_asset(asset_id: int, payload: schemas.AssetUpdate, db: Session = Depe
 
 
 @router.delete("/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_asset(asset_id: int, db: Session = Depends(get_db)):
+def delete_asset(asset_id: int, purge: bool = Query(False), db: Session = Depends(get_db)):
+    """Delete a target. Without `purge` the target must have no history; with `purge` every scan,
+    check, SBOM, CVE link, remediation action, upload and AI summary of the target is removed too."""
     asset = db.scalar(select(models.Asset).where(models.Asset.id == asset_id).with_for_update())
     if not asset:
-        raise HTTPException(status_code=404, detail="자산이 없습니다")
-    for model in (models.AnalysisJob, models.CollectionJob, models.SbomDocument, models.AnalysisUpload, models.AnalysisSchedule):
-        if db.scalar(select(model.asset_id).where(model.asset_id == asset_id).limit(1)) is not None:
-            raise HTTPException(status_code=409, detail="분석·점검·SBOM 이력이 있는 자산은 삭제할 수 없습니다. 이력을 보존하려면 모니터링을 해제하세요")
+        raise HTTPException(status_code=404, detail="대상이 없습니다")
+    if not purge:
+        for model in (models.AnalysisJob, models.CollectionJob, models.SbomDocument, models.AnalysisUpload, models.AnalysisSchedule):
+            if db.scalar(select(model.asset_id).where(model.asset_id == asset_id).limit(1)) is not None:
+                raise HTTPException(status_code=409, detail="검사·점검·결과 이력이 있는 대상입니다. 이력까지 지우려면 '이력 포함 삭제'를 선택하세요")
+    else:
+        if db.scalar(select(models.AnalysisJob.id).where(models.AnalysisJob.asset_id == asset_id, models.AnalysisJob.active_asset_id.is_not(None)).limit(1)):
+            raise HTTPException(status_code=409, detail="진행 중인 검사가 있습니다. 취소가 끝난 뒤 삭제하세요")
+        _purge_history(db, asset_id)
     db.delete(asset)
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(status_code=409, detail="자산에 연결된 이력이 있어 삭제할 수 없습니다")
+        raise HTTPException(status_code=409, detail="대상에 연결된 이력이 있어 삭제할 수 없습니다")
+
+
+def _purge_history(db: Session, asset_id: int) -> None:
+    from sqlalchemy import delete
+    from ..services.analysis_uploads import archive_path
+    sbom_ids = list(db.scalars(select(models.SbomDocument.id).where(models.SbomDocument.asset_id == asset_id)))
+    run_ids = list(db.scalars(select(models.AnalysisRun.id).where(models.AnalysisRun.sbom_id.in_(sbom_ids)))) if sbom_ids else []
+    job_ids = list(db.scalars(select(models.CollectionJob.id).where(models.CollectionJob.asset_id == asset_id)))
+    component_ids = list(db.scalars(select(models.Component.id).where(models.Component.sbom_id.in_(sbom_ids)))) if sbom_ids else []
+    link_ids = list(db.scalars(select(models.ComponentVulnerability.id).where(models.ComponentVulnerability.component_id.in_(component_ids)))) if component_ids else []
+    if link_ids:
+        db.execute(delete(models.VulnerabilityAction).where(models.VulnerabilityAction.link_id.in_(link_ids)))
+        db.execute(delete(models.ComponentVulnerability).where(models.ComponentVulnerability.id.in_(link_ids)))
+    if run_ids:
+        db.execute(delete(models.AiSummary).where(models.AiSummary.kind == "analysis", models.AiSummary.target_id.in_(run_ids)))
+        db.execute(delete(models.AnalysisRun).where(models.AnalysisRun.id.in_(run_ids)))
+    if sbom_ids:
+        db.execute(delete(models.DependencyEdge).where(models.DependencyEdge.sbom_id.in_(sbom_ids)))
+        db.execute(delete(models.Component).where(models.Component.sbom_id.in_(sbom_ids)))
+        db.execute(delete(models.SbomDocument).where(models.SbomDocument.id.in_(sbom_ids)))
+    db.execute(delete(models.AnalysisSchedule).where(models.AnalysisSchedule.asset_id == asset_id))
+    db.execute(delete(models.AnalysisJob).where(models.AnalysisJob.asset_id == asset_id))
+    uploads = list(db.scalars(select(models.AnalysisUpload).where(models.AnalysisUpload.asset_id == asset_id)))
+    for upload in uploads:
+        db.delete(upload)
+    db.flush()
+    settings = get_settings()
+    for upload in uploads:
+        still_used = db.scalar(select(models.AnalysisUpload.id).where(models.AnalysisUpload.sha256 == upload.sha256).limit(1))
+        if still_used is None:
+            try:
+                archive_path(settings, upload.sha256).unlink(missing_ok=True)
+            except (OSError, ValueError):
+                pass
+    if job_ids:
+        db.execute(delete(models.AiSummary).where(models.AiSummary.kind == "check", models.AiSummary.target_id.in_(job_ids)))
+        db.execute(delete(models.CheckResult).where(models.CheckResult.collection_job_id.in_(job_ids)))
+        db.execute(delete(models.CollectionJob).where(models.CollectionJob.id.in_(job_ids)))

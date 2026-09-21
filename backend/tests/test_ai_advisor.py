@@ -11,6 +11,8 @@ from fastapi.testclient import TestClient
 
 os.environ.setdefault("DATABASE_URL", "sqlite:////tmp/eolwatch-test.db")
 
+from sqlalchemy import select  # noqa: E402
+
 from app import models  # noqa: E402
 from app.db import Base, engine, SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
@@ -125,3 +127,33 @@ def test_check_context_is_compact_but_keeps_the_facts_that_matter():
 
 def test_plain_text_strips_markdown_decorations():
     assert ai_advisor._plain("## 위험\n**jackson** 2.9.8\n* 올린다\n• 확인") == "위험\njackson 2.9.8\n- 올린다\n- 확인"
+
+
+def test_purge_deletes_target_with_all_history_and_reports_conflicts(client, monkeypatch):
+    run_id = _import_run(client)
+    with SessionLocal() as db:
+        run = db.get(models.AnalysisRun, run_id)
+        asset_id, sbom_id = run.sbom.asset_id, run.sbom_id
+    monkeypatch.setattr(ai_advisor, "complete", lambda prompt: ("요약", "qwen2.5:7b", {"input_tokens": 1, "output_tokens": 1}))
+    assert client.post(f"/api/ai/analyses/{run_id}").status_code == 200
+    plain = client.delete(f"/api/assets/{asset_id}")
+    assert plain.status_code == 409 and "이력 포함 삭제" in plain.json()["detail"]
+    purged = client.delete(f"/api/assets/{asset_id}?purge=true")
+    assert purged.status_code == 204, purged.text
+    with SessionLocal() as db:
+        assert db.get(models.Asset, asset_id) is None
+        assert db.get(models.SbomDocument, sbom_id) is None and db.get(models.AnalysisRun, run_id) is None
+        assert db.scalar(select(models.Component).where(models.Component.sbom_id == sbom_id)) is None
+        assert db.scalar(select(models.AiSummary).where(models.AiSummary.target_id == run_id)) is None
+    assert client.get(f"/api/analyses/runs/{run_id}").status_code == 404
+    assert client.get("/api/dashboard/summary").json()["sbom_documents"] == 0
+
+
+def test_address_accepts_ip_and_hostname_but_not_garbage(client):
+    ok = client.post("/api/assets", json={"asset_tag": "H-1", "name": "호스트", "asset_type": "server", "ip_address": "db01.lab.example.com"})
+    assert ok.status_code == 201, ok.text
+    assert ok.json()["ip_address"] == "db01.lab.example.com"
+    assert client.post("/api/assets", json={"asset_tag": "H-2", "name": "v6", "asset_type": "server", "ip_address": "fe80::1"}).status_code == 201
+    bad = client.post("/api/assets", json={"asset_tag": "H-3", "name": "x", "asset_type": "server", "ip_address": "not a host!"})
+    assert bad.status_code == 422 and "도메인" in bad.text
+    assert client.patch(f"/api/assets/{ok.json()['id']}", json={"ip_address": "10.0.1.11"}).status_code == 200
