@@ -52,7 +52,7 @@ def test_work_as_of_and_overdue_query_use_one_business_date(monkeypatch):
             finding = models.ComponentVulnerability(component=component, vulnerability=vulnerability, vex_status="AFFECTED", due_date=date(2026, 9, 15))
             db.add(finding); db.commit()
             def page(overdue):
-                return list_work(q="", asset_id=None, sbom_id=None, status="ALL", severity=None, assignee_id=None,
+                return list_work(q="", asset_id=None, sbom_id=None, component_id=None, status="ALL", severity=None, assignee_id=None,
                                  unassigned=False, overdue=overdue, limit=25, offset=0, db=db)
             korean = page(True)
             assert korean.as_of == date(2026, 9, 16)

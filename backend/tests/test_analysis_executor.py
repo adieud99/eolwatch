@@ -148,7 +148,7 @@ def mocked_pipeline(tmp_path, monkeypatch):
     def remote(self, _client, name, argv, timeout, output=None, pid_file=None):
         state["remote_commands"].append((name, argv))
         path = self.directory / (output or name + ".stdout.log")
-        path.write_text("Linux aarch64\n" if name == "target-architecture" else json.dumps(state["raw"]))
+        path.write_text("Linux aarch64\n" if name == "target-architecture" else state.get("updates", "MANAGER=none\n") if name == "package-updates" else json.dumps(state["raw"]))
         return path
 
     def local(self, name, argv, timeout, env, output=None):
@@ -167,7 +167,8 @@ def test_pipeline_scans_exact_spdx_and_records_hashes(tmp_path, mocked_pipeline)
     settings, state = mocked_pipeline
     directory = tmp_path / "job"
     result = executor.execute_analysis({"id": 9, "ip_address": "10.77.0.21"}, directory, settings, state["stages"].append)
-    assert result == {"sbom": state["sbom"], "report": state["report"], "scan_scope": "ubuntu-dpkg-installed"}
+    assert {k: v for k, v in result.items() if k != "package_updates"} == {"sbom": state["sbom"], "report": state["report"], "scan_scope": "ubuntu-dpkg-installed"}
+    assert result["package_updates"]["manager"] is None and result["package_updates"]["packages"] == {}
     assert state["stages"] == ["COLLECTING", "SCANNING", "IMPORTING"]
     grype = next(argv for name, argv in state["local_commands"] if name == "grype-scan")
     assert "sbom:" + str(directory / "sbom.spdx.json") in grype
@@ -368,3 +369,28 @@ def test_remote_syft_is_picked_by_target_cpu_and_verified(tmp_path):
     with pytest.raises(executor.AnalysisExecutionError) as tampered:
         executor._remote_syft(local, "Linux x86_64", run)
     assert tampered.value.code == "TOOL_CHECKSUM"
+
+
+APT_OUTPUT = """MANAGER=apt
+REFRESHED=yes
+Listing...
+curl/resolute-updates,resolute-security 8.18.0-1ubuntu2.5 amd64 [upgradable from: 8.18.0-1ubuntu2.1]
+libssl3t64/resolute-updates,resolute-security 3.5.5-1ubuntu3.5 amd64 [upgradable from: 3.5.5-1ubuntu3]
+linux-aws/resolute-updates,resolute-security 7.0.0-1012.12 amd64 [upgradable from: 7.0.0-1006.6]
+"""
+
+
+def test_os_scan_collects_updates_read_only_and_ships_them_to_the_importer(tmp_path, mocked_pipeline):
+    settings, state = mocked_pipeline
+    state["updates"] = APT_OUTPUT
+    result = executor.execute_analysis({"id": 9, "ip_address": "10.77.0.21"}, tmp_path / "job", settings, state["stages"].append)
+    names = [name for name, _ in state["remote_commands"]]
+    assert names.index("package-updates") > names.index("syft-scan")
+    command = next(argv for name, argv in state["remote_commands"] if name == "package-updates")
+    assert command[:2] == ["sh", "-c"] and "apt list --upgradable" in command[2] and "apt-get install" not in command[2] and "upgrade " not in command[2].replace("--upgradable", "")
+    assert result["package_updates"]["manager"] == "apt" and set(result["package_updates"]["packages"]) == {"curl", "libssl3t64", "linux-aws"}
+    manifest = json.loads((tmp_path / "job" / "manifest.json").read_text())
+    assert manifest["package_updates"] == {"manager": "apt", "refreshed": True, "collected_at": result["package_updates"]["collected_at"], "package_count": 3}
+    grype = next(argv for name, argv in state["local_commands"] if name == "grype-scan")
+    config = Path(grype[grype.index("--config") + 1]).read_text()
+    assert "using-cpes: false" in config  # OS packages are judged by distro fix data only, never by upstream CPE versions

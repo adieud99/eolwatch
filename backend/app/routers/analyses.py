@@ -118,7 +118,7 @@ def retry_job(job_id: int, payload: Optional[schemas.AnalysisJobRequest] = Body(
 
 def read(run: models.AnalysisRun, counts: Optional[dict[str, int]] = None) -> schemas.AnalysisRead:
     asset = run.sbom.asset
-    return schemas.AnalysisRead(**(counts or {}),
+    return schemas.AnalysisRead(**(counts or {}), package_updates=(run.database_info or {}).get('package_updates') if isinstance(run.database_info, dict) else None,
         id=run.id, sbom_id=run.sbom_id, asset_id=run.sbom.asset_id,
         asset_tag=asset.asset_tag if asset else None, asset_name=asset.name if asset else None,
         scanner=run.scanner, scanner_version=run.scanner_version,

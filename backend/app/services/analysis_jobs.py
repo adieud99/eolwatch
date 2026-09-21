@@ -356,7 +356,7 @@ def process_next_analysis_job() -> Optional[int]:
                 raise JobLeaseLost('Analysis worker no longer owns this job')
             _check_target(db, snapshot)
             payload = schemas.AnalysisImport(asset_id=job.asset_id, sbom=bundle['sbom'], report=bundle['report'],
-                                            scan_scope=bundle['scan_scope'])
+                                            scan_scope=bundle['scan_scope'], package_updates=bundle.get('package_updates'))
             run = import_analysis(db, payload, commit=False)
             if bundle.get('learned_host_key'):
                 target = db.get(models.Asset, job.asset_id)

@@ -334,3 +334,30 @@ def test_runs_split_fixable_and_kernel_cves_and_work_list_filters_them(client, b
     assert cves(component_id=kernel_row["component_id"]) == ["CVE-2026-20001", "CVE-2026-20002"]
     assert cves(component_id=kernel_row["component_id"], fix="FIXED") == ["CVE-2026-20001"]
     assert client.get("/api/vulnerability-work/components", params={"sbom_id": sbom_id, "status": "ALL", "kernel": "false"}).json()["total"] == 1
+
+
+def test_import_records_the_package_managers_verdict_per_finding(client, bundle):
+    """grype says Jinja2 is fixed in 2.11.3; whether the repository really offers it is recorded on the link and the run."""
+    bundle["package_updates"] = {"manager": "apt", "refreshed": True, "collected_at": "2026-09-21T09:00:00Z",
+                                 "packages": {"Jinja2": {"candidate": "2.11.3", "installed": "2.4.1"}}}
+    imported = client.post("/api/analyses/import", json=bundle)
+    assert imported.status_code == 200, imported.text
+    body = imported.json()
+    assert body["verified_fixable_cve_count"] == 1 and body["suspect_cve_count"] == 0
+    assert body["package_updates"] == {"manager": "apt", "refreshed": True, "collected_at": "2026-09-21T09:00:00Z", "package_count": 1}
+    item = client.get("/api/vulnerability-work", params={"sbom_id": body["sbom_id"], "status": "ALL"}).json()["items"][0]
+    assert item["fix_check"] == "UPDATE_AVAILABLE"
+    group = client.get("/api/vulnerability-work/components", params={"sbom_id": body["sbom_id"], "status": "ALL"}).json()["items"][0]
+    assert group["update_available_count"] == 1 and group["no_update_count"] == 0
+    # same report, but apt has nothing to upgrade: the finding is flagged as suspect
+    bundle["package_updates"]["packages"] = {}
+    bundle["sbom"]["documentNamespace"] = bundle["sbom"]["documentNamespace"] + "-2"
+    bundle["report"]["descriptor"]["version"] = "test-fixture-1.1"
+    second = client.post("/api/analyses/import", json=bundle).json()
+    assert second["verified_fixable_cve_count"] == 0 and second["suspect_cve_count"] == 1
+    # no package manager data at all: nothing is claimed either way
+    del bundle["package_updates"]
+    bundle["sbom"]["documentNamespace"] = bundle["sbom"]["documentNamespace"] + "-3"
+    bundle["report"]["descriptor"]["version"] = "test-fixture-1.2"
+    third = client.post("/api/analyses/import", json=bundle).json()
+    assert third["verified_fixable_cve_count"] == 0 and third["suspect_cve_count"] == 0 and third["package_updates"] is None

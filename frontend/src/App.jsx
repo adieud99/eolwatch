@@ -30,6 +30,12 @@ const gigabytes = (mb) => mb == null ? null : mb >= 1024 ? `${(mb / 1024).toFixe
 const bytesText = (value) => value == null ? '-' : `${(value / (1024 ** 3)).toFixed(1)} GB`
 const latestServerInfo = (checks, assetId) => checks.find((job) => job.asset_id === assetId && job.status === 'SUCCESS' && job.server_info)
 
+const fixCheckText = { UPDATE_AVAILABLE: '저장소에 업데이트 있음', UPDATE_BELOW_FIX: '업데이트는 있지만 수정판 미만', NO_UPDATE_FOUND: '저장소에 업데이트 없음 · 오탐 의심' }
+function FixCheck({ value }) {
+  if (!value || !fixCheckText[value]) return null
+  return <small className={`fix-check fix-check-${value.toLowerCase()}`}>{fixCheckText[value]}</small>
+}
+
 function ServerInfoCard({ info }) {
   if (!info) return null
   const cloud = info.cloud
@@ -521,7 +527,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
     return <tr key={item.link_id}><td><code>{item.cve_id}</code><small>{item.finding_source || item.source || '출처 미상'}{item.analysis_run_id ? ` · 검사 #${item.analysis_run_id}` : ''}</small><small>{item.summary || '설명 없음'}</small></td>
       {!nested && <td><strong>{item.asset_tag || '미연결'}</strong><small>{item.asset_name || '대상 없음'}</small></td>}
       {!nested && <td><strong>{item.component_name}</strong><small>검사 당시 {item.component_version || '버전 미상'}</small></td>}
-      <td><strong>{item.fixed_versions?.length ? item.fixed_versions.join(', ') : item.fixed_version || '확인 필요'}</strong></td>
+      <td><strong>{item.fixed_versions?.length ? item.fixed_versions.join(', ') : item.fixed_version || '확인 필요'}</strong><FixCheck value={item.fix_check} /></td>
       <td><span className={`severity severity-${item.severity.toLowerCase()}`}>{item.severity}</span></td>
       <td><span aria-label={`${item.cve_id} ${item.component_name} 조치 상태`}>{vexStatusText[item.vex_status] || item.vex_status}</span><small>담당 {item.assignee_username || '미지정'}</small>{item.due_date && <small>기한 {item.due_date}</small>}<button className="table-button" aria-label={`${item.cve_id} ${item.component_name} ${canEdit ? '조치 관리' : '조치 이력'}`} onClick={() => setSelectedFinding(item)}>{canEdit ? '조치 관리' : '조치 이력'}</button></td></tr>
   }
@@ -564,7 +570,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
           <td>{new Date(run.imported_at).toLocaleString('ko-KR')}<small>검사 #{run.id} · SBOM #{run.sbom_id}</small></td>
           <td><strong>{run.asset_tag} · {run.asset_name}</strong><small>{analysisScopeText[run.scan_scope] || scopeLabel(run.scan_scope)}</small></td>
           <td><strong>{run.scanner} {run.scanner_version}</strong><small>SBOM 생성: {run.generator?.includes('AI-Library-Reference') ? <span className="chip chip-ai">AI 라이브러리 참조 · 버전 추정</span> : (run.generator || '미상')}</small>{(run.database_info?.built || run.database_info?.status?.built) && <small>DB 기준: {new Date(run.database_info.built || run.database_info.status.built).toLocaleString('ko-KR')}</small>}</td>
-          <td><strong>지금 고칠 수 있는 CVE {(run.fixable_cve_count ?? 0) - (run.kernel_fixable_cve_count ?? 0)}개{run.kernel_cve_count ? ' (커널 제외)' : ''}</strong><small>{run.kernel_cve_count ? `커널(linux) 업데이트로 ${run.kernel_fixable_cve_count ?? 0}개 더 · 커널 전체 ${run.kernel_cve_count}개 · ` : ''}수정판 없음 {run.cve_count - (run.fixable_cve_count ?? 0)}개 · 전체 CVE {run.cve_count}개 · 구성요소 연결 {run.link_count}건</small><small>구성요소 {run.component_count}개 · 전체 탐지 {run.match_count}건 · CVE 외 {run.ignored_non_cve}건</small></td>
+          <td><strong>지금 고칠 수 있는 CVE {(run.fixable_cve_count ?? 0) - (run.kernel_fixable_cve_count ?? 0)}개{run.kernel_cve_count ? ' (커널 제외)' : ''}</strong><small>{run.kernel_cve_count ? `커널(linux) 업데이트로 ${run.kernel_fixable_cve_count ?? 0}개 더 · 커널 전체 ${run.kernel_cve_count}개 · ` : ''}수정판 없음 {run.cve_count - (run.fixable_cve_count ?? 0)}개 · 전체 CVE {run.cve_count}개 · 구성요소 연결 {run.link_count}건</small>{run.package_updates?.manager && <small className="fix-check-summary">{run.package_updates.manager === 'apt' ? 'apt' : 'dnf'} 대조: 저장소에 업데이트 있음 {run.verified_fixable_cve_count ?? 0}개 · 오탐 의심 {run.suspect_cve_count ?? 0}개{run.package_updates.refreshed ? '' : ' · 패키지 목록 갱신 못 함'}</small>}<small>구성요소 {run.component_count}개 · 전체 탐지 {run.match_count}건 · CVE 외 {run.ignored_non_cve}건</small></td>
           <td><div className="action-row"><button className="table-button" aria-label={`검사 ${run.id} CVE 보기`} onClick={() => selectSbom(String(run.sbom_id), true)}>CVE 보기</button><button className="table-button" aria-label={`검사 ${run.id} 원본 보기`} aria-pressed={bundle?.run?.id === run.id} onClick={() => viewBundle(run)}>원본 보기</button></div></td>
         </tr>)}{!analyses.length && <tr><td colSpan="5" className="empty">저장된 검사 결과가 없습니다.</td></tr>}</tbody>
       </table></div>
@@ -589,7 +595,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
     {cveView === 'components' ? <div className="table-wrap"><table aria-label="구성요소별 CVE"><thead><tr><th>구성요소</th><th>영향 대상</th><th>CVE</th><th>최고 심각도</th><th>수정 버전</th><th>확인</th></tr></thead>
       <tbody>{visibleGroups.flatMap((group) => {
         const state = expanded[group.component_id]
-        const row = <tr key={group.component_id}><td><strong>{group.component_name}</strong><small>검사 당시 {group.component_version || '버전 미상'}</small></td><td><strong>{group.asset_tag || '미연결'}</strong><small>{group.asset_name || '대상 없음'}</small></td><td><strong>{group.cve_count}개</strong><small>미조치 {group.open_count}건 · 연결 {group.link_count}건</small></td><td><span className={`severity severity-${(group.max_severity || 'unknown').toLowerCase()}`}>{group.max_severity}</span></td><td><strong>{group.fixed_versions?.length ? group.fixed_versions.slice(0, 3).join(', ') + (group.fixed_versions.length > 3 ? ` 외 ${group.fixed_versions.length - 3}` : '') : '확인 필요'}</strong></td><td><button className="table-button" aria-expanded={Boolean(state)} aria-label={`${group.component_name} CVE ${group.cve_count}개 ${state ? '접기' : '보기'}`} onClick={() => toggleComponent(String(group.component_id))}>{state ? '접기' : `CVE ${group.cve_count}개 보기`}</button></td></tr>
+        const row = <tr key={group.component_id}><td><strong>{group.component_name}</strong><small>검사 당시 {group.component_version || '버전 미상'}</small></td><td><strong>{group.asset_tag || '미연결'}</strong><small>{group.asset_name || '대상 없음'}</small></td><td><strong>{group.cve_count}개</strong><small>미조치 {group.open_count}건 · 연결 {group.link_count}건</small></td><td><span className={`severity severity-${(group.max_severity || 'unknown').toLowerCase()}`}>{group.max_severity}</span></td><td><strong>{group.fixed_versions?.length ? group.fixed_versions.slice(0, 3).join(', ') + (group.fixed_versions.length > 3 ? ` 외 ${group.fixed_versions.length - 3}` : '') : '확인 필요'}</strong>{group.update_available_count ? <small className="fix-check fix-check-update_available">저장소에 업데이트 있음 {group.update_available_count}건</small> : null}{group.no_update_count ? <small className="fix-check fix-check-no_update_found">저장소에 업데이트 없음 · 오탐 의심 {group.no_update_count}건</small> : null}</td><td><button className="table-button" aria-expanded={Boolean(state)} aria-label={`${group.component_name} CVE ${group.cve_count}개 ${state ? '접기' : '보기'}`} onClick={() => toggleComponent(String(group.component_id))}>{state ? '접기' : `CVE ${group.cve_count}개 보기`}</button></td></tr>
         if (!state) return [row]
         const detail = <tr key={`${group.component_id}-cves`} className="nested"><td colSpan="6">
           {state.status === 'loading' && <p role="status">{group.component_name}의 CVE를 불러오는 중…</p>}

@@ -219,6 +219,7 @@ class ComponentVulnerability(Base):
     finding_source: Mapped[Optional[str]] = mapped_column(String(40))
     finding_severity: Mapped[Optional[str]] = mapped_column(String(20))
     fixed_versions: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    fix_check: Mapped[Optional[str]] = mapped_column(String(30))  # package_updates.fix_check verdict
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     component: Mapped[Component] = relationship()

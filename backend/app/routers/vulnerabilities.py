@@ -34,6 +34,7 @@ def _read(link: models.ComponentVulnerability) -> schemas.VulnerabilityRead:
         aliases=vulnerability.aliases,
         fixed_version=link.fixed_version,
         fixed_versions=link.fixed_versions or [],
+        fix_check=link.fix_check,
         finding_source=link.finding_source or "OSV",
         analysis_run_id=link.analysis_run_id,
         vex_status=link.vex_status,

@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
+from .package_updates import fix_check
 from .sbom import import_spdx, validate_spdx_schema
 
 
@@ -115,6 +116,8 @@ def import_analysis(db: Session, payload: schemas.AnalysisImport, *, commit: boo
         link_count=0, ignored_non_cve=0, database_info=report.descriptor.db,
         raw_report=payload.report,
     )
+    if payload.package_updates:
+        run.database_info = {**(run.database_info or {}), 'package_updates': {k: v for k, v in payload.package_updates.items() if k != 'packages'} | {'package_count': len(payload.package_updates.get('packages') or {})}}
     db.add(run)
     db.flush()
     seen, cves = set(), set()
@@ -177,6 +180,7 @@ def import_analysis(db: Session, payload: schemas.AnalysisImport, *, commit: boo
                 link.fixed_versions = sorted(set(link.fixed_versions) | set(versions))
                 # Multiple fixed branches are alternatives, not a single recommended upgrade.
                 link.fixed_version = link.fixed_versions[0] if len(link.fixed_versions) == 1 else None
+                link.fix_check = fix_check(component.name, link.fixed_versions, payload.package_updates)
                 seen.add(key)
     run.cve_count, run.link_count = len(cves), len(seen)
     if commit:

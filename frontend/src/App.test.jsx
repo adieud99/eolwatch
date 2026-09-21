@@ -23,6 +23,8 @@ function componentPage(findings, url) {
     const key = `${finding.component_name}@${finding.component_version}`
     const group = groups.get(key) || { component_id: finding.component_id || groups.size + 1, component_name: finding.component_name, component_version: finding.component_version, sbom_id: finding.sbom_id, asset_tag: finding.asset_tag, asset_name: finding.asset_name, cve_count: 0, link_count: 0, open_count: 0, max_severity: 'UNKNOWN', fixed_versions: [] }
     group.cve_count += 1; group.link_count += 1
+    if (finding.fix_check === 'UPDATE_AVAILABLE') group.update_available_count = (group.update_available_count || 0) + 1
+    if (finding.fix_check === 'NO_UPDATE_FOUND') group.no_update_count = (group.no_update_count || 0) + 1
     if (['AFFECTED', 'UNDER_INVESTIGATION'].includes(finding.vex_status)) group.open_count += 1
     if ((rank[finding.severity] || 0) > (rank[group.max_severity] || 0)) group.max_severity = finding.severity
     ;(finding.fixed_versions || (finding.fixed_version ? [finding.fixed_version] : [])).forEach((v) => { if (!group.fixed_versions.includes(v)) group.fixed_versions.push(v) })
@@ -793,9 +795,9 @@ describe('SBOM 취약점 분석 흐름', () => {
 describe('구성요소별 CVE 보기', () => {
   afterEach(() => { cleanup(); vi.unstubAllGlobals() })
   it('같은 구성요소의 CVE를 한 줄로 접어 두고 펼치면 그 아래에 나열한다', async () => {
-    const mk = (id, cve, name, version, severity, fixed) => ({ link_id: id, sbom_id: 2, component_id: name === 'linux-image' ? 1 : 2, cve_id: cve, component_name: name, component_version: version, fixed_version: fixed, severity, vex_status: 'AFFECTED', asset_tag: 'srv-han', asset_name: '성민 서버', finding_source: 'Grype', analysis_run_id: 20 })
+    const mk = (id, cve, name, version, severity, fixed) => ({ link_id: id, sbom_id: 2, component_id: name === 'linux-image' ? 1 : 2, cve_id: cve, component_name: name, component_version: version, fixed_version: fixed, fix_check: fixed ? (name === 'openssl' ? 'UPDATE_AVAILABLE' : 'NO_UPDATE_FOUND') : null, severity, vex_status: 'AFFECTED', asset_tag: 'srv-han', asset_name: '성민 서버', finding_source: 'Grype', analysis_run_id: 20 })
     const findings = [mk(1, 'CVE-2026-1', 'linux-image', '7.0.0-1006', 'HIGH', '7.0.0-1012'), mk(2, 'CVE-2026-2', 'linux-image', '7.0.0-1006', 'MEDIUM', null), mk(3, 'CVE-2026-3', 'linux-image', '7.0.0-1006', 'LOW', '7.0.0-1012'), mk(4, 'CVE-2026-9', 'openssl', '3.5.5', 'CRITICAL', '3.5.5-1ubuntu3.5')]
-    const data = { '/api/dashboard/summary': { assets: 1, lifecycle_risk: {}, sbom_quality: {}, urgent_items: [] }, '/api/sboms': [{ id: 2, component_count: 2 }], '/api/analyses': [{ id: 20, sbom_id: 2, asset_tag: 'srv-han', asset_name: '성민 서버', scanner: 'grype', scanner_version: '0.118.0', generator: 'syft', scan_scope: 'ubuntu-dpkg-installed', component_count: 2, match_count: 4, cve_count: 4, link_count: 4, ignored_non_cve: 0, fixable_cve_count: 3, kernel_cve_count: 3, kernel_fixable_cve_count: 2, imported_at: '2026-09-21T09:00:00Z', database_info: {} }] }
+    const data = { '/api/dashboard/summary': { assets: 1, lifecycle_risk: {}, sbom_quality: {}, urgent_items: [] }, '/api/sboms': [{ id: 2, component_count: 2 }], '/api/analyses': [{ id: 20, sbom_id: 2, asset_tag: 'srv-han', asset_name: '성민 서버', scanner: 'grype', scanner_version: '0.118.0', generator: 'syft', scan_scope: 'ubuntu-dpkg-installed', component_count: 2, match_count: 4, cve_count: 4, link_count: 4, ignored_non_cve: 0, fixable_cve_count: 3, kernel_cve_count: 3, kernel_fixable_cve_count: 2, verified_fixable_cve_count: 1, suspect_cve_count: 2, package_updates: { manager: 'apt', refreshed: true, package_count: 173 }, imported_at: '2026-09-21T09:00:00Z', database_info: {} }] }
     localStorage.clear(); localStorage.setItem('eolwatch_token', 'token'); localStorage.setItem('eolwatch_user', JSON.stringify({ id: 1, username: 'operator', role: 'ADMIN' }))
     vi.stubGlobal('fetch', vi.fn(async (url) => {
       if (url.startsWith('/api/vulnerability-work/components?')) return { ok: true, status: 200, json: async () => componentPage(findings, url) }
@@ -821,6 +823,10 @@ describe('구성요소별 CVE 보기', () => {
     const nested = within(await screen.findByRole('table', { name: 'linux-image CVE 목록' }))
     expect(nested.getAllByRole('row')).toHaveLength(4)
     expect(nested.getByText('CVE-2026-2')).toBeInTheDocument()
+    expect(nested.getAllByText('저장소에 업데이트 없음 · 오탐 의심')).toHaveLength(2)
+    expect(table.getByText('저장소에 업데이트 없음 · 오탐 의심 2건')).toBeInTheDocument()
+    expect(table.getByText('저장소에 업데이트 있음 1건')).toBeInTheDocument()
+    expect(screen.getByText(/apt 대조: 저장소에 업데이트 있음 1개 · 오탐 의심 2개/)).toBeInTheDocument()
     expect(fetch.mock.calls.some(([url]) => url === '/api/vulnerability-work?sbom_id=2&component_id=1&status=ALL&fix=ALL&kernel=true&limit=100&offset=0')).toBe(true)
     await act(async () => { fireEvent.click(table.getByRole('button', { name: 'linux-image CVE 3개 접기' })) })
     expect(screen.queryByRole('table', { name: 'linux-image CVE 목록' })).not.toBeInTheDocument()

@@ -29,6 +29,7 @@ from .analysis_profiles import (ANALYSIS_PROFILES, DEFAULT_SCAN_SCOPE, GIT_SCAN_
 from .analysis_uploads import InvalidArchive, extract_upload
 from . import ssh_auth
 from .ai_library_reference import LibraryReferenceError, reference_libraries
+from .package_updates import REMOTE_COMMAND as PACKAGE_UPDATES_COMMAND, parse_updates
 
 
 SCAN_SCOPE = DEFAULT_SCAN_SCOPE
@@ -36,6 +37,7 @@ EXCLUSIONS = list(ANALYSIS_PROFILES[DEFAULT_SCAN_SCOPE].exclusions)
 SYFT_CONFIG = {"file": {"metadata": {"selection": "none"}},
                "relationships": {"package-file-ownership": False},
                "package": {"search-indexed-archives": False, "search-unindexed-archives": False}}
+GRYPE_CONFIG = "match:\n  dpkg:\n    using-cpes: false\n  rpm:\n    using-cpes: false\n  apk:\n    using-cpes: false\n"
 OUTPUT_LIMIT = 256 * 1024 * 1024
 LOG_LIMIT = 16 * 1024 * 1024
 HEARTBEAT_SECONDS = 5
@@ -532,6 +534,7 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
     run = _Run(asset_snapshot, output_dir, stage_callback)
     client = None
     remote_config = None
+    package_updates = None
     try:
         run.heartbeat("COLLECTING")
         profile = ANALYSIS_PROFILES.get(run.profile)
@@ -583,6 +586,13 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
                       "--config", remote_config, *scan_options]
             raw_path = run.remote(client, "syft-scan", remote, settings.analysis_collect_timeout_seconds,
                                   output="sbom.syft.json", pid_file=pid_file)
+            if run.profile == DEFAULT_SCAN_SCOPE:
+                # Ask apt/dnf what it would upgrade, so each 'fixed' CVE can be checked against the real repository.
+                try:
+                    package_updates = parse_updates(run.remote(client, "package-updates", ["sh", "-c", PACKAGE_UPDATES_COMMAND], 180).read_text(errors="replace"))
+                except AnalysisExecutionError as error:
+                    package_updates = {"manager": None, "refreshed": False, "packages": {}, "error": error.code}
+                run.manifest["package_updates"] = {k: v for k, v in package_updates.items() if k != "packages"} | {"package_count": len(package_updates["packages"])}
         run.manifest["scan_directory"] = directory
         raw = _json(raw_path)
         packages = raw.get("artifacts")
@@ -618,7 +628,11 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
         if sbom.get("spdxVersion") != "SPDX-2.3" or not sbom.get("packages"):
             raise AnalysisExecutionError("SPDX_INVALID", "SPDX 2.3 구성요소 목록 생성에 실패했습니다.")
         run.manifest["grype_input_sha256"] = _sha256(spdx_path)
-        grype_arguments = [str(grype), "sbom:" + str(spdx_path), "--config", str(config)]
+        # OS packages: match only on the distribution's own fixed package versions (backports stay correct);
+        # CPE matching would judge by upstream version and re-create the classic false positives.
+        grype_config = run.directory / "grype.yaml"
+        grype_config.write_text(GRYPE_CONFIG, encoding="utf-8")
+        grype_arguments = [str(grype), "sbom:" + str(spdx_path), "--config", str(grype_config)]
         if run.profile == DEFAULT_SCAN_SCOPE:
             grype_arguments.extend(["--distro", "ubuntu:" + distro["versionID"]])
         grype_arguments.extend(["--by-cve", "-o", "json"])
@@ -631,6 +645,8 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
         run.heartbeat("IMPORTING")
         run.manifest["status"] = "ready_for_import"
         result = {"sbom": sbom, "report": report, "scan_scope": run.scan_scope}
+        if package_updates is not None:
+            result["package_updates"] = package_updates
         if run.manifest.get("git_commit"):
             result["git_commit"] = run.manifest["git_commit"]
         learned = getattr(client, "eolwatch_learned_host_key", None) if client is not None else None

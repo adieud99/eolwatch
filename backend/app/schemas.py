@@ -262,6 +262,7 @@ class VulnerabilityRead(BaseModel):
     aliases: list[Any]
     fixed_version: Optional[str]
     fixed_versions: list[str] = Field(default_factory=list)
+    fix_check: Optional[str] = None
     finding_source: Optional[str] = None
     analysis_run_id: Optional[int] = None
     vex_status: str
@@ -358,6 +359,7 @@ class AnalysisImport(BaseModel):
     sbom: dict[str, Any]
     report: dict[str, Any]
     scan_scope: str = Field(default="uploaded SPDX SBOM", min_length=1, max_length=300)
+    package_updates: Optional[dict[str, Any]] = None  # what apt/dnf would upgrade on the target, see package_updates.py
 
 
 class AnalysisRead(BaseModel):
@@ -378,6 +380,9 @@ class AnalysisRead(BaseModel):
     fixable_cve_count: int = 0          # distinct CVEs with a fixed package version
     kernel_cve_count: int = 0           # distinct CVEs on kernel (linux source) packages
     kernel_fixable_cve_count: int = 0
+    verified_fixable_cve_count: int = 0  # fixable CVEs whose fix the package manager really offers
+    suspect_cve_count: int = 0           # fixable CVEs with no update in the repository (possible false positives)
+    package_updates: Optional[dict[str, Any]] = None
     database_info: dict[str, Any]
     imported_at: datetime
 

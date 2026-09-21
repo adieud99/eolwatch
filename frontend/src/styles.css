@@ -163,6 +163,11 @@ input[type="file"] { padding: 7px 10px; }
 .server-info dt { color: var(--green); font-weight: 700; }
 .server-info dd { margin: 0; word-break: break-word; }
 .agent-results { grid-template-columns: 96px 1fr; }
+.fix-check { display: inline-block; margin-top: 4px; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+.fix-check-update_available { background: #e3efe6; color: var(--green); }
+.fix-check-update_below_fix { background: #fbf1d6; color: #8a6d1d; }
+.fix-check-no_update_found { background: #f6e3e1; color: #a33a2c; }
+.fix-check-summary { color: var(--green) !important; }
 .view-toggle { display: flex; gap: 8px; margin: 10px 0 4px; }
 .view-toggle .table-button[aria-pressed="true"] { background: var(--green); color: #fff; border-color: var(--green); }
 tr.nested > td { padding: 10px 14px 14px 36px; background: #f6f8f6; }
