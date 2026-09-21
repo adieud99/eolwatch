@@ -44,6 +44,15 @@
 
 **읽는 법** 결과 표의 "지금 고칠 수 있는 CVE n개 (커널 제외)"가 조치 대상이다. CVE 목록은 기본으로 커널을 빼고, "수정판 있는 CVE만"을 고르면 `apt upgrade`로 없앨 항목만 남는다. 자세한 설명은 `docs/WEB_ANALYSIS.md`의 "CVE 개수 읽는 법".
 
+**근거 자료** (2026-09-21 확인)
+- AWS EC2 사용 설명서 "Update instance software": "When you first launch and connect to an Amazon Linux instance, you might see a message asking you to update software packages for security purposes." — 막 만든 인스턴스도 보안 업데이트가 밀려 있을 수 있다는 AWS 자신의 설명. https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/install-updates.html
+- Ubuntu on AWS 문서: AMI는 "Daily (untested) and release versions of the images are published regularly." 즉 이미지는 만든 시점의 패키지를 담고, 그 뒤 나온 보안 업데이트는 인스턴스에서 받아야 한다. https://ubuntu.com/aws/docs/aws-how-to/instances/find-ubuntu-images/
+- Ubuntu 서버 문서 "Automatic updates": unattended-upgrades가 하루 한 번 보안 업데이트를 설치한다. srv-han은 켠 지 몇 시간이라 아직 돌지 않았다. https://ubuntu.com/server/docs/how-to/software/automatic-updates/
+- Ubuntu CVE 추적기 안내: 지원하는 모든 Ubuntu 버전에 대해 패키지별 상태를 기록하며, 상태에는 "Needs evaluation", "Vulnerable, fix deferred", "Ignored(won't be fixed)"가 포함된다. 검사 결과의 "수정판 없음"이 바로 이 항목들이다. https://ubuntu.com/security/cves/about
+- Grype 문서: 배포판 데이터에는 수정판이 없는 취약점도 들어 있어 fix state가 `fixed / not-fixed / wont-fix / unknown`으로 나뉘고 `--only-fixed`로 걸러 볼 수 있다. https://oss.anchore.com/docs/guides/vulnerability/filter-results/
+- 커널 CVE 규모: 커널 프로젝트가 2024년부터 직접 CVE를 발급하면서 연간 3,000~5,700건, 릴리스당 1,000건 이상으로 늘었다(7.0 계열). 커널 패키지 하나에 수천 개가 붙는 이유다. https://linuxcvetracker.com/cve-statistics/ , https://www.tomshardware.com/software/linux/linux-kernel-nears-2-000-cves-per-release-as-ai-bug-hunters-scour-40-million-lines-of-code-maintainers-say-they-are-completely-overwhelmed
+- 표본 대조: srv-han 결과에서 무작위 8개 CVE를 Ubuntu 추적기에서 조회해 수정판 버전·상태가 모두 일치했다(예: CVE-2026-8925 curl → released 8.18.0-1ubuntu2.2).
+
 ## 8. "버전만 보고 오탐하는 것 아닌가"
 
 **대책** OS 패키지는 Ubuntu가 공개한 패키지 버전 기준 수정 정보로만 대조하고(CPE 대조 끔), 검사 직후 서버의 apt/dnf에게 실제로 올릴 수 있는 버전을 물어 CVE마다 "저장소에 업데이트 있음 / 수정판 미만 / 업데이트 없음 · 오탐 의심"을 남긴다. srv-han은 211개 중 209개가 확인됐고 오탐 의심은 coreutils 하나였다. 커널은 메타 패키지로 올라가므로 판정하지 않는다.
