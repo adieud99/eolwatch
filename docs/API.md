@@ -16,13 +16,15 @@
 
 | 방식 | 경로 | 권한 | 용도 |
 |---|---|---|---|
-| GET | `/api/ai/status` | 로그인 | AI 요약 사용 가능 여부와 모델 (`ANTHROPIC_API_KEY`가 설정돼야 `enabled: true`) |
+| GET | `/api/ai/status` | 로그인 | AI 사용 가능 여부, 제공자(`ollama`/`anthropic`), 모델. Ollama는 서버가 응답하고 모델이 받아져 있어야 `enabled: true` |
 | GET | `/api/ai/analyses/{run_id}` | 로그인 | 검사 결과의 마지막 AI 요약 (없으면 `null`) |
-| POST | `/api/ai/analyses/{run_id}` | ADMIN | 검사 결과의 CVE 목록을 Claude에 보내 위험 수준·우선 조치·확인 사항을 한국어로 생성해 저장 |
+| POST | `/api/ai/analyses/{run_id}` | ADMIN | 검사 결과의 CVE 목록을 압축해 AI에 보내 위험 수준·우선 조치·확인 사항을 한국어로 생성해 저장. 같은 데이터·모델이면 저장된 답을 재사용하고 `?force=true`로 다시 생성 |
 | GET | `/api/ai/checks/{job_id}` | 로그인 | SSH 점검의 마지막 AI 요약 |
-| POST | `/api/ai/checks/{job_id}` | ADMIN | 서버 정보·자원 사용률·포트·서비스를 Claude에 보내 서버 진단을 생성해 저장 |
+| POST | `/api/ai/checks/{job_id}` | ADMIN | 서버 정보·자원 사용률·포트·서비스를 압축해 AI에 보내 서버 진단을 생성해 저장 (`?force=true` 재생성) |
 
-AI에는 EOLWatch가 이미 저장한 데이터(CVE 번호·구성요소·버전·서버 정보)만 보낸다. 토큰·소스 코드·비밀번호는 보내지 않는다. 결과는 담당자 참고용이며 검사 결과나 조치 상태를 바꾸지 않는다. 모델은 `AI_MODEL`(기본 `claude-opus-5`)로 바꾼다.
+제공자는 `AI_PROVIDER`로 고른다. 기본 `ollama`는 같은 PC의 Ollama(`OLLAMA_BASE_URL`, 기본 `http://host.docker.internal:11434`, 모델 `OLLAMA_MODEL` 기본 `qwen2.5:7b`)를 쓰므로 키·비용·외부 전송이 없다. `anthropic`으로 바꾸면 `ANTHROPIC_API_KEY`와 `AI_MODEL`(기본 `claude-opus-5`)을 쓴다.
+
+**토큰 다이어트.** AI에는 저장된 데이터만, 그것도 압축해서 보낸다. CVE는 라이브러리별로 묶어 최고 심각도·건수·수정 버전·대표 CVE 3개만 남기고 라이브러리 25개까지, 서버 정보는 포트 20개·서비스 15개·프로세스 5개·디스크 6개까지만 보낸다. 설치 패키지 목록(수백 개)은 건수만 보낸다. JSON은 공백 없이 보내고, 같은 데이터·모델이면 저장된 답을 재사용한다. 응답에는 보낸 글자 수와 입력·출력 토큰 수가 남는다. 토큰·소스 코드·비밀번호는 보내지 않으며 결과는 참고용이다.
 
 ## 1. 개발 검사 — 소스 ZIP · 의존성 파일 · Git 저장소
 

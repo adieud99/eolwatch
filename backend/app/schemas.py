@@ -408,6 +408,7 @@ class AnalysisScheduleRead(BaseModel):
 
 class AiStatus(BaseModel):
     enabled: bool
+    provider: str
     model: str
 
 
@@ -415,7 +416,11 @@ class AiSummaryRead(BaseModel):
     id: int
     kind: Literal["analysis", "check"]
     target_id: int
+    provider: str = "anthropic"
     model: str
     summary: str
+    prompt_chars: Optional[int] = None
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
     generated_at: datetime
     generated_by: Optional[str] = None

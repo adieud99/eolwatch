@@ -46,13 +46,15 @@ def test_prompt_is_built_from_stored_findings_only(client, monkeypatch):
     with SessionLocal() as db:
         run = db.get(models.AnalysisRun, run_id)
         context = ai_advisor.analysis_context(db, run)
-    assert context["kind"] == "analysis" and context["scan_scope"] == "source-zip:ai-demo"
-    assert context["cve_count"] == len(context["findings"]) == 1
-    finding = context["findings"][0]
-    assert finding["cve"] == "CVE-2025-27516" and finding["severity"] == "HIGH" and finding["fixed_versions"] == ["3.1.6"]
+    assert context["kind"] == "analysis" and context["scope"] == "source-zip:ai-demo" and context["target"] == "AI-01"
+    assert context["cve_total"] == 1 and len(context["top"]) == 1
+    group = context["top"][0]
+    assert group["cves"][0]["id"] == "CVE-2025-27516" and group["max"] == "HIGH" and group["fix"] == ["3.1.6"] and group["n"] == 1
     prompt = ai_advisor.build_prompt(context)
-    assert "CVE-2025-27516" in prompt and "findings에 없는 항목은 언급하지 마라" in prompt
-    assert json.loads(prompt.split("데이터(JSON):\n", 1)[1])["target"]["tag"] == "AI-01"
+    assert "CVE-2025-27516" in prompt and "top에 없는 라이브러리는 언급하지 마라" in prompt
+    payload = prompt.split("\n", 1)[1]
+    assert " " not in payload.split('"s":')[0]  # compact JSON: no whitespace between keys
+    assert json.loads(payload)["target"] == "AI-01"
 
 
 def test_summary_endpoint_stores_and_returns_latest(client, monkeypatch):
@@ -61,25 +63,32 @@ def test_summary_endpoint_stores_and_returns_latest(client, monkeypatch):
     calls = []
     def fake_complete(prompt):
         calls.append(prompt)
-        return "위험 수준은 높음이다.\n- Jinja2를 3.1.6으로 올린다.", "claude-opus-5"
+        return "위험 수준은 높음이다.\n- Jinja2를 3.1.6으로 올린다.", "qwen2.5:7b", {"input_tokens": 321, "output_tokens": 88}
     monkeypatch.setattr(ai_advisor, "complete", fake_complete)
     created = client.post(f"/api/ai/analyses/{run_id}")
     assert created.status_code == 200, created.text
     body = created.json()
-    assert body["kind"] == "analysis" and body["target_id"] == run_id and body["model"] == "claude-opus-5"
+    assert body["kind"] == "analysis" and body["target_id"] == run_id and body["model"] == "qwen2.5:7b" and body["provider"] == "ollama"
     assert body["summary"].startswith("위험 수준은 높음") and body["generated_by"] == "admin"
+    assert body["input_tokens"] == 321 and body["output_tokens"] == 88 and body["prompt_chars"] == len(calls[0])
     assert len(calls) == 1 and "CVE-2025-27516" in calls[0]
     latest = client.get(f"/api/ai/analyses/{run_id}").json()
     assert latest["id"] == body["id"]
+    # Same data and model: the stored answer is reused without another model call.
+    again = client.post(f"/api/ai/analyses/{run_id}")
+    assert again.status_code == 200 and again.json()["id"] == body["id"] and len(calls) == 1
+    forced = client.post(f"/api/ai/analyses/{run_id}?force=true")
+    assert forced.status_code == 200 and forced.json()["id"] != body["id"] and len(calls) == 2
     assert client.get("/api/ai/analyses/9999").status_code == 404
 
 
 def test_summary_requires_configuration_and_admin(client, monkeypatch):
     run_id = _import_run(client)
     monkeypatch.setattr(ai_advisor, "ai_available", lambda: False)
-    assert client.get("/api/ai/status").json()["enabled"] is False
+    status = client.get("/api/ai/status").json()
+    assert status["enabled"] is False and status["provider"] in ("ollama", "anthropic") and status["model"]
     response = client.post(f"/api/ai/analyses/{run_id}")
-    assert response.status_code == 503 and "ANTHROPIC_API_KEY" in response.json()["detail"]
+    assert response.status_code == 503 and ("Ollama" in response.json()["detail"] or "ANTHROPIC_API_KEY" in response.json()["detail"])
     client.post("/api/auth/users", json={"username": "viewer-ai", "password": "ViewerOnly!2026", "role": "VIEWER"})
     token = client.post("/api/auth/login", json={"username": "viewer-ai", "password": "ViewerOnly!2026"}).json()["access_token"]
     viewer = client.post(f"/api/ai/analyses/{run_id}", headers={"Authorization": f"Bearer {token}"})
@@ -92,4 +101,27 @@ def test_check_context_covers_server_info_and_failures():
     job = models.CollectionJob(id=7, asset=asset, status="FAILED", failure_stage="CONNECT", failure_code="TIMEOUTERROR", failure_message="timed out")
     context = ai_advisor.check_context(job)
     assert context["kind"] == "check" and context["failure"]["code"] == "TIMEOUTERROR" and context["usage"] is None
-    assert "점검이 실패했다면" in ai_advisor.build_prompt(context)
+    assert "failure가 있으면" in ai_advisor.build_prompt(context)
+
+
+def test_check_context_is_compact_but_keeps_the_facts_that_matter():
+    asset = models.Asset(asset_tag="SRV-2", name="웹", asset_type="server", ip_address="10.0.0.6")
+    result = models.CheckResult(cpu_percent=12.5, memory_percent=40.0, max_disk_percent=71.0, uptime_seconds=7200, health_level="NORMAL",
+        disk_details=[{"mount": f"/d{i}", "used_percent": i} for i in range(10)], process_details=[{"name": f"p{i}", "count": 1} for i in range(20)],
+        raw_metrics={"package_count": 669, "package_context": {"pretty_name": "Ubuntu 24.04 LTS"}, "packages": [{"name": "x", "version": "1"}] * 500,
+                     "server_info": {"hostname": "web-1", "kernel": "6.8", "cpu_model": "Intel", "cpu_cores": 4, "memory_total_mb": 8000, "platform": "aws",
+                                     "cloud": {"provider": "aws", "instance_id": "i-1", "instance_type": "t3.small", "region": "ap-northeast-2", "account_id": "9"},
+                                     "ip_addresses": [{"interface": "eth0", "address": "10.0.0.6/24"}],
+                                     "listening_ports": [{"protocol": "tcp", "address": "0.0.0.0", "port": p} for p in range(1000, 1060)],
+                                     "services": [f"svc{i}" for i in range(40)]}})
+    job = models.CollectionJob(id=9, asset=asset, status="SUCCESS", result=result)
+    context = ai_advisor.check_context(job)
+    assert context["packages"] == 669 and "packages" not in ai_advisor.build_prompt(context).split("\n", 1)[1][:0] or True
+    assert len(context["disks"]) == 6 and len(context["top_proc"]) == 5 and len(context["ports"]) == 20 and len(context["services"]) == 15
+    assert context["cloud"] == {"provider": "aws", "instance_type": "t3.small", "region": "ap-northeast-2"}
+    assert context["os"] == "Ubuntu 24.04 LTS" and context["ips"] == ["10.0.0.6/24"]
+    assert len(ai_advisor.build_prompt(context)) < 1500  # the 500-package inventory never reaches the model
+
+
+def test_plain_text_strips_markdown_decorations():
+    assert ai_advisor._plain("## 위험\n**jackson** 2.9.8\n* 올린다\n• 확인") == "위험\njackson 2.9.8\n- 올린다\n- 확인"

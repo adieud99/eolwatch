@@ -22,6 +22,9 @@ services:
       JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-before-deployment}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Eolwatch!2026}
+      AI_PROVIDER: ${AI_PROVIDER:-ollama}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       AI_MODEL: ${AI_MODEL:-claude-opus-5}
       PUBLIC_BASE_URL: http://localhost:8080
@@ -29,6 +32,8 @@ services:
       SSH_PRIVATE_KEY_PATH: /run/secrets/eolwatch_ssh_key
       SSH_KNOWN_HOSTS_PATH: /run/secrets/known_hosts
       SSH_STRICT_HOST_KEY: "true"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8000:8000"
     healthcheck:

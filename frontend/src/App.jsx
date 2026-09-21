@@ -222,7 +222,7 @@ function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendin
               return (
               <tr key={asset.id}>
                 <td><code>{asset.asset_tag}</code></td>
-                <td><strong>{asset.name}</strong><button className="table-button" aria-label={`${asset.asset_tag} 서버 ${canEdit ? '수정' : '상세'}`} onClick={() => setEditing(asset)}>{canEdit ? '수정' : '상세'}</button><button className="table-button" aria-label={`${asset.asset_tag} 검사 기록`} onClick={() => onViewProjects(asset.id)}>검사 기록</button></td>
+                <td><strong>{asset.name}</strong><div className="action-row cell-actions"><button className="table-button" aria-label={`${asset.asset_tag} 서버 ${canEdit ? '수정' : '상세'}`} onClick={() => setEditing(asset)}>{canEdit ? '수정' : '상세'}</button><button className="table-button" aria-label={`${asset.asset_tag} 검사 기록`} onClick={() => onViewProjects(asset.id)}>검사 기록</button></div></td>
                 <td>{typeText[asset.asset_type] || asset.asset_type}</td>
                 <td>{asset.ip_address ? <><strong>{asset.ip_address}:{asset.ssh_port}</strong><small>{asset.ssh_username || 'SSH 계정 미입력'}</small></> : <small>IP 미입력</small>}</td>
                 <td>{info ? <><strong>{info.os_name || 'OS 미확인'}</strong><small>{[info.cpu_cores ? `${info.cpu_cores}코어` : null, gigabytes(info.memory_total_mb), platformText[info.platform] || info.platform].filter(Boolean).join(' · ')}</small>{info.cloud && <small>{info.cloud.instance_id} · {info.cloud.instance_type}</small>}</> : <small>SSH 점검 후 표시</small>}</td>
@@ -376,16 +376,16 @@ function AiSummaryPanel({ kind, targetId, canEdit, title = 'AI 요약' }) {
   async function generate() {
     if (!targetId || busy) return
     setBusy(true); setError('')
-    try { setRecord(await api(`/ai/${kind === 'check' ? 'checks' : 'analyses'}/${targetId}`, { method: 'POST' })) }
+    try { setRecord(await api(`/ai/${kind === 'check' ? 'checks' : 'analyses'}/${targetId}${record ? '?force=true' : ''}`, { method: 'POST' })) }
     catch (reason) { setError(reason.message) }
     finally { setBusy(false) }
   }
   if (!targetId) return null
   return <section className="panel ai-panel" aria-label={title}>
-    <div className="panel-heading"><div><span className="eyebrow">AI ADVISOR</span><h2>{title}</h2><small>저장된 검사 데이터만 AI에 보내 한국어로 정리합니다. 조치 판단은 담당자가 합니다.</small></div><div className="action-row">{canEdit && <button className="primary" disabled={busy || status?.enabled === false} title={status?.enabled === false ? 'ANTHROPIC_API_KEY를 설정하면 사용할 수 있습니다.' : ''} onClick={generate}>{busy ? 'AI가 정리하는 중…' : record ? '다시 생성' : 'AI 요약 생성'}</button>}</div></div>
-    {status?.enabled === false && <p className="subtle">AI 요약이 꺼져 있습니다. 서버에 ANTHROPIC_API_KEY를 설정하면 켜집니다.</p>}
+    <div className="panel-heading"><div><span className="eyebrow">AI ADVISOR</span><h2>{title}</h2><small>저장된 검사 데이터만 압축해서 AI에 보내 한국어로 정리합니다. 조치 판단은 담당자가 합니다.{status?.model ? ` · ${status.provider === 'ollama' ? '로컬 Ollama' : 'Claude'} ${status.model}` : ''}</small></div><div className="action-row">{canEdit && <button className="primary" disabled={busy || status?.enabled === false} title={status?.enabled === false ? 'AI 서버가 준비되지 않았습니다.' : ''} onClick={generate}>{busy ? 'AI가 정리하는 중…' : record ? '다시 생성' : 'AI 요약 생성'}</button>}</div></div>
+    {status?.enabled === false && <p className="subtle">{status.provider === 'ollama' ? `로컬 AI가 꺼져 있습니다. 이 PC에서 ollama serve 를 실행하고 ${status.model} 모델을 받아 두면 켜집니다.` : 'AI 요약이 꺼져 있습니다. 서버에 ANTHROPIC_API_KEY를 설정하면 켜집니다.'}</p>}
     {error && <p className="form-error" role="alert">{error}</p>}
-    {record ? <div className="ai-summary"><pre>{record.summary}</pre><small>{record.model} · {new Date(record.generated_at).toLocaleString('ko-KR')}{record.generated_by ? ` · ${record.generated_by}` : ''}</small></div> : !error && <p className="subtle">아직 생성한 요약이 없습니다.</p>}
+    {record ? <div className="ai-summary"><pre>{record.summary}</pre><small>{record.provider === 'ollama' ? '로컬 Ollama' : 'Claude'} {record.model} · {new Date(record.generated_at).toLocaleString('ko-KR')}{record.generated_by ? ` · ${record.generated_by}` : ''}{record.input_tokens != null ? ` · 입력 ${record.input_tokens.toLocaleString()} 토큰 / 출력 ${record.output_tokens?.toLocaleString() ?? '-'} 토큰` : ''}{record.prompt_chars ? ` (압축한 데이터 ${record.prompt_chars.toLocaleString()}자)` : ''}</small></div> : !error && <p className="subtle">아직 생성한 요약이 없습니다.</p>}
   </section>
 }
 

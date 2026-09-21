@@ -206,3 +206,12 @@ input[type="file"] { padding: 7px 10px; }
 .ai-panel { margin-top: 14px; border-left: 4px solid var(--green); }
 .ai-summary pre { margin: 0; white-space: pre-wrap; font: inherit; line-height: 1.8; color: var(--ink); }
 .ai-summary small { display: block; margin-top: 12px; color: var(--muted); font-size: 12px; }
+
+/* Breathing room between things that sit together inside a table cell */
+.cell-actions { margin-top: 10px; gap: 8px; flex-wrap: wrap; }
+td .action-row { gap: 8px; flex-wrap: wrap; }
+td > .table-button + .table-button, td > strong + .table-button { margin-left: 8px; }
+td > label + .action-row, td > .action-row + small, td > label + small { margin-top: 8px; }
+td label { margin-bottom: 8px; }
+td strong + small, td strong + .job, td .job + small { margin-top: 5px; }
+th, td { line-height: 1.5; }

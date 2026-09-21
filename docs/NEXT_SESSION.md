@@ -22,7 +22,7 @@
 
 **관리 VM(18080)에 재범위화 코드를 배포하고 브라우저로 두 흐름을 끝까지 확인한 상태는 아니다.** 배포 시 `alembic upgrade head`가 `d2f8c4a71e9b`를 적용해 제거 대상 테이블·컬럼을 삭제하므로 배포 전에 DB 백업을 남긴다.
 
-AI 요약(교수님 메모의 (AI) 부분)은 구현돼 있으며 `ANTHROPIC_API_KEY`를 `.env`에 넣어야 켜진다. 시연 전에 키를 넣고 `docker compose up -d`로 다시 올린다.
+AI 요약은 기본으로 같은 PC의 Ollama(`qwen2.5:7b`)를 쓴다. 시연 PC에서 `ollama serve`가 떠 있고 모델이 받아져 있으면 된다. Claude를 쓰려면 `.env`에 `AI_PROVIDER=anthropic`과 `ANTHROPIC_API_KEY`를 넣는다. 교수님 메모의 파이프라인 안 AI(라이브러리 참조, 수집 에이전트)는 다음 작업이다.
 
 ## 다음 작업
 
