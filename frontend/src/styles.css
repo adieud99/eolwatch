@@ -163,6 +163,12 @@ input[type="file"] { padding: 7px 10px; }
 .server-info dt { color: var(--green); font-weight: 700; }
 .server-info dd { margin: 0; word-break: break-word; }
 .agent-results { grid-template-columns: 96px 1fr; }
+.view-toggle { display: flex; gap: 8px; margin: 10px 0 4px; }
+.view-toggle .table-button[aria-pressed="true"] { background: var(--green); color: #fff; border-color: var(--green); }
+tr.nested > td { padding: 10px 14px 14px 36px; background: #f6f8f6; }
+tr.nested table { font-size: 13px; }
+tr.nested td { padding: 10px 12px; background: #fff; }
+tr.nested th { padding: 8px 12px; font-size: 12px; }
 .cve-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; margin: 8px 0 10px; font-size: 13px; }
 .cve-filters label { display: flex; flex-direction: row; align-items: center; gap: 6px; white-space: nowrap; margin: 0; width: auto; }
 .cve-filters input[type="checkbox"] { width: auto; margin: 0; }

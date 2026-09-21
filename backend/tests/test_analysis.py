@@ -324,3 +324,13 @@ def test_runs_split_fixable_and_kernel_cves_and_work_list_filters_them(client, b
     assert cves(fix="UNFIXED") == ["CVE-2026-20002"]
     assert cves(kernel="false") == ["CVE-2026-12345"]
     assert cves(fix="FIXED", kernel="false") == ["CVE-2026-12345"]
+    # folded per component: the kernel package is one row with two CVEs, not two rows
+    groups = client.get("/api/vulnerability-work/components", params={"sbom_id": sbom_id, "status": "ALL"})
+    assert groups.status_code == 200, groups.text
+    page = groups.json()
+    assert page["total"] == 2 and [(g["component_name"], g["cve_count"], g["max_severity"]) for g in page["items"]] == [("Jinja2", 1, "HIGH"), ("linux-image-6.8.0-1-aws", 2, "MEDIUM")]
+    kernel_row = page["items"][1]
+    assert kernel_row["fixed_versions"] == ["6.8.0-2"] and kernel_row["open_count"] == 2 and kernel_row["asset_tag"] == "ANALYSIS-SRV-01"
+    assert cves(component_id=kernel_row["component_id"]) == ["CVE-2026-20001", "CVE-2026-20002"]
+    assert cves(component_id=kernel_row["component_id"], fix="FIXED") == ["CVE-2026-20001"]
+    assert client.get("/api/vulnerability-work/components", params={"sbom_id": sbom_id, "status": "ALL", "kernel": "false"}).json()["total"] == 1

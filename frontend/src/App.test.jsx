@@ -7,9 +7,29 @@ function workPage(findings, url) {
   const params = new URL(url, 'http://localhost').searchParams
   const hasFix = (finding) => Boolean(finding.fixed_version || finding.fixed_versions?.length)
   const isKernel = (finding) => /^linux|^bpftool$/.test(finding.component_name || '')
-  const items = findings.filter((finding) => (!params.has('sbom_id') || String(finding.sbom_id) === params.get('sbom_id')) && (params.get('status') !== 'OPEN' || ['AFFECTED', 'UNDER_INVESTIGATION'].includes(finding.vex_status))
+  const items = findings.filter((finding) => (!params.has('sbom_id') || String(finding.sbom_id) === params.get('sbom_id')) && (!params.has('component_id') || String(finding.component_id) === params.get('component_id')) && (params.get('status') !== 'OPEN' || ['AFFECTED', 'UNDER_INVESTIGATION'].includes(finding.vex_status))
     && (!params.has('fix') || params.get('fix') === 'ALL' || (params.get('fix') === 'FIXED') === hasFix(finding)) && (params.get('kernel') !== 'false' || !isKernel(finding)))
   const limit = Number(params.get('limit') || 25)
+  const offset = Number(params.get('offset') || 0)
+  return { items: items.slice(offset, offset + limit), total: items.length, limit, offset, as_of: '2026-09-15' }
+}
+
+function componentPage(findings, url) {
+  const params = new URL(url, 'http://localhost').searchParams
+  const rows = workPage(findings, url.replace('/components?', '?').replace(/&limit=\d+/, '').replace(/&offset=\d+/, '')).items
+  const rank = { CRITICAL: 5, HIGH: 4, MEDIUM: 3, LOW: 2, NONE: 1 }
+  const groups = new Map()
+  rows.forEach((finding) => {
+    const key = `${finding.component_name}@${finding.component_version}`
+    const group = groups.get(key) || { component_id: finding.component_id || groups.size + 1, component_name: finding.component_name, component_version: finding.component_version, sbom_id: finding.sbom_id, asset_tag: finding.asset_tag, asset_name: finding.asset_name, cve_count: 0, link_count: 0, open_count: 0, max_severity: 'UNKNOWN', fixed_versions: [] }
+    group.cve_count += 1; group.link_count += 1
+    if (['AFFECTED', 'UNDER_INVESTIGATION'].includes(finding.vex_status)) group.open_count += 1
+    if ((rank[finding.severity] || 0) > (rank[group.max_severity] || 0)) group.max_severity = finding.severity
+    ;(finding.fixed_versions || (finding.fixed_version ? [finding.fixed_version] : [])).forEach((v) => { if (!group.fixed_versions.includes(v)) group.fixed_versions.push(v) })
+    groups.set(key, group)
+  })
+  const items = [...groups.values()]
+  const limit = Number(params.get('limit') || 50)
   const offset = Number(params.get('offset') || 0)
   return { items: items.slice(offset, offset + limit), total: items.length, limit, offset, as_of: '2026-09-15' }
 }
@@ -130,6 +150,7 @@ describe('웹에서 서버 취약점 분석 실행', () => {
         data['/api/analyses/jobs'] = [queued]
         return response(queued, 202)
       }
+      if (url.startsWith('/api/vulnerability-work/components?')) return response(componentPage(data.findings || [], url))
       if (url.startsWith('/api/vulnerability-work?')) return response(workPage(data.findings || [], url))
       return response(data[url] ?? [])
     }))
@@ -173,6 +194,7 @@ describe('웹에서 서버 취약점 분석 실행', () => {
     openAssets()
     await act(async () => { await vi.advanceTimersByTimeAsync(3000) })
     expect(screen.getByLabelText('확인할 SBOM')).toHaveValue('9')
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'CVE별로 보기' })) })
     expect(screen.getByText('CVE-2026-12345')).toBeInTheDocument()
     openAssets()
     expect(screen.getByRole('button', { name: '작업 50 결과 보기' })).toBeInTheDocument()
@@ -439,6 +461,7 @@ describe('SBOM 취약점 분석 흐름', () => {
       '/api/auth/users': [{ id: 1, username: 'operator', role: 'ADMIN', active: true }, { id: 2, username: 'owner', role: 'VIEWER', active: true }],
     }
     vi.stubGlobal('fetch', vi.fn(async (url, options) => {
+      if (url.startsWith('/api/vulnerability-work/components?')) return jsonResponse(componentPage(data.findings, url))
       if (url.startsWith('/api/vulnerability-work?')) return jsonResponse(workPage(data.findings, url))
       if (/^\/api\/vulnerabilities\/\d+$/.test(url) && !options?.method) return jsonResponse({ ...data.findings.find((finding) => finding.link_id === Number(url.split('/').at(-1))), review_revision: 0 })
       if (/\/api\/analyses\/runs\/\d+\/candidates/.test(url)) return jsonResponse({ base: {}, items: [], total: 0, limit: 20, offset: 0 })
@@ -464,11 +487,13 @@ describe('SBOM 취약점 분석 흐름', () => {
 
   it('SBOM 선택에 따라 CVE를 분리하고 전체 수정 버전과 출처를 표시한다', async () => {
     await openSecurity()
+    fireEvent.click(screen.getByRole('button', { name: 'CVE별로 보기' }))
     const findings = within(screen.getByRole('table', { name: '선택한 SBOM의 CVE' }))
     expect(findings.queryByText(oldFinding.cve_id)).not.toBeInTheDocument()
     expect(findings.queryByText(newFinding.cve_id)).not.toBeInTheDocument()
 
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '검사 20 CVE 보기' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'CVE별로 보기' })) })
     expect(findings.getByText(newFinding.cve_id)).toBeInTheDocument()
     expect(findings.queryByText(oldFinding.cve_id)).not.toBeInTheDocument()
     expect(findings.getByText('2.1, 3.0')).toBeInTheDocument()
@@ -487,6 +512,7 @@ describe('SBOM 취약점 분석 흐름', () => {
     expect(screen.queryByRole('button', { name: '검사 결과 저장' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'OSV 조회' })).not.toBeInTheDocument()
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '검사 20 CVE 보기' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'CVE별로 보기' })) })
     expect(screen.getByText(newFinding.cve_id)).toBeInTheDocument()
     expect(screen.getByLabelText(`${newFinding.cve_id} current-package 조치 상태`)).toHaveTextContent('영향 있음')
     expect(screen.getByRole('button', { name: `${newFinding.cve_id} current-package 조치 이력` })).toBeEnabled()
@@ -499,6 +525,7 @@ describe('SBOM 취약점 분석 흐름', () => {
     data.findings = [{ ...newFinding, vex_status: 'UNDER_INVESTIGATION', assignee_id: 2, assignee_username: 'owner', due_date: '2026-09-30' }]
     await openSecurity()
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '검사 20 CVE 보기' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'CVE별로 보기' })) })
     const row = within(screen.getByRole('table', { name: '선택한 SBOM의 CVE' }))
     expect(row.getByLabelText(`${newFinding.cve_id} current-package 조치 상태`)).toHaveTextContent('조사 중')
     expect(row.getByText('담당 owner')).toBeInTheDocument()
@@ -511,6 +538,7 @@ describe('SBOM 취약점 분석 흐름', () => {
   it('조치 패널에서 근거·담당자·기한을 저장한 뒤 패널을 닫고 CVE 목록을 갱신한다', async () => {
     await openSecurity()
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '검사 20 CVE 보기' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'CVE별로 보기' })) })
     fireEvent.click(screen.getByRole('button', { name: `${newFinding.cve_id} current-package 조치 관리` }))
     const panel = within(screen.getByRole('region', { name: 'CVE 조치 관리' }))
     await panel.findByText(/아직 기록된 조치 이력이 없습니다/)
@@ -538,6 +566,7 @@ describe('SBOM 취약점 분석 흐름', () => {
   it('조회자의 조치 이력 패널은 읽기 전용이며 닫을 수 있다', async () => {
     await openSecurity('VIEWER')
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '검사 20 CVE 보기' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'CVE별로 보기' })) })
     fireEvent.click(screen.getByRole('button', { name: `${newFinding.cve_id} current-package 조치 이력` }))
     const panel = within(screen.getByRole('region', { name: 'CVE 조치 관리' }))
     await panel.findByText(/아직 기록된 조치 이력이 없습니다/)
@@ -556,6 +585,7 @@ describe('SBOM 취약점 분석 흐름', () => {
     data.findings = [newFinding, { ...newFinding, link_id: 21, component_name: 'second-package' }]
     await openSecurity()
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '검사 20 CVE 보기' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'CVE별로 보기' })) })
     fireEvent.click(screen.getByRole('button', { name: `${newFinding.cve_id} current-package 조치 관리` }))
     await screen.findByText(/아직 기록된 조치 이력이 없습니다/)
     fireEvent.change(screen.getByRole('textbox', { name: /^조치 내용/ }), { target: { value: '첫 구성요소의 조치 초안' } })
@@ -576,6 +606,7 @@ describe('SBOM 취약점 분석 흐름', () => {
     })
     await openSecurity()
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '검사 20 CVE 보기' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'CVE별로 보기' })) })
     fireEvent.click(screen.getByRole('button', { name: `${newFinding.cve_id} current-package 조치 관리` }))
     await screen.findByText(/아직 기록된 조치 이력이 없습니다/)
     const panel = within(screen.getByRole('region', { name: 'CVE 조치 관리' }))
@@ -592,6 +623,7 @@ describe('SBOM 취약점 분석 흐름', () => {
     data.findings = [oldFinding, newFinding, ...Array.from({ length: 100 }, (_, index) => ({ ...newFinding, link_id: 1000 + index, cve_id: `CVE-2026-${20000 + index}` }))]
     await openSecurity()
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '검사 20 CVE 보기' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'CVE별로 보기' })) })
     fireEvent.click(screen.getByRole('button', { name: `${newFinding.cve_id} current-package 조치 관리` }))
     await screen.findByText(/아직 기록된 조치 이력이 없습니다/)
     const firstHistory = fetch.mock.calls.find(([url]) => url === '/api/vulnerabilities/20/actions?limit=20')
@@ -610,6 +642,7 @@ describe('SBOM 취약점 분석 흐름', () => {
     data.findings = [oldFinding, ...Array.from({ length: 101 }, (_, index) => ({ ...newFinding, link_id: 1000 + index, cve_id: `CVE-2025-${30000 + index}` }))]
     await openSecurity()
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '검사 20 CVE 보기' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'CVE별로 보기' })) })
     const findings = within(screen.getByRole('table', { name: '선택한 SBOM의 CVE' }))
     expect(findings.getAllByRole('row')).toHaveLength(101)
     expect(findings.getByText('CVE-2025-30000')).toBeInTheDocument()
@@ -630,6 +663,7 @@ describe('SBOM 취약점 분석 흐름', () => {
     expect(findings.getByText(oldFinding.cve_id)).toBeInTheDocument()
     expect(screen.getByText('1 / 1 페이지')).toBeInTheDocument()
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '검사 20 CVE 보기' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'CVE별로 보기' })) })
     expect(findings.getByText('CVE-2025-30000')).toBeInTheDocument()
     expect(screen.getByText('1 / 2 페이지')).toBeInTheDocument()
   })
@@ -641,6 +675,7 @@ describe('SBOM 취약점 분석 흐름', () => {
     await openSecurity()
     expect(fetch.mock.calls.some(([url]) => url.startsWith('/api/vulnerability-work'))).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: '검사 20 CVE 보기' }))
+    fireEvent.click(screen.getByRole('button', { name: 'CVE별로 보기' }))
     const oldRequest = fetch.mock.calls.find(([url]) => url.includes('/vulnerability-work?sbom_id=2'))
     expect(screen.getByText('CVE 결과를 불러오는 중…')).toBeInTheDocument()
     expect(screen.queryByText('이 SBOM에 저장된 CVE 결과가 없습니다.')).not.toBeInTheDocument()
@@ -661,6 +696,7 @@ describe('SBOM 취약점 분석 흐름', () => {
     })
     const view = await openSecurity()
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '검사 20 CVE 보기' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'CVE별로 보기' })) })
     expect(screen.getByRole('alert')).toHaveTextContent('CVE 결과 조회 실패: 잠시 후 다시 요청하세요.')
     expect(screen.queryByText('이 SBOM에 저장된 CVE 결과가 없습니다.')).not.toBeInTheDocument()
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'CVE 조회 다시 시도' })) })
@@ -681,6 +717,7 @@ describe('SBOM 취약점 분석 흐름', () => {
     fetch.mockImplementation((url, options) => url === '/api/vulnerabilities/scan/sbom/2' ? new Promise((resolve) => { finishScan = resolve }) : defaultFetch(url, options))
     await openSecurity()
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '검사 20 CVE 보기' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'CVE별로 보기' })) })
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '다음 페이지' })) })
     expect(screen.getByText('2 / 2 페이지')).toBeInTheDocument()
     const scanButton = screen.getByRole('button', { name: 'OSV 조회' })
@@ -701,6 +738,7 @@ describe('SBOM 취약점 분석 흐름', () => {
     fetch.mockImplementation((url, options) => url === '/api/vulnerabilities/scan/sbom/2' ? new Promise((resolve) => { finishScan = resolve }) : defaultFetch(url, options))
     await openSecurity()
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: '검사 20 CVE 보기' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'CVE별로 보기' })) })
     fireEvent.click(screen.getByRole('button', { name: 'OSV 조회' }))
     const scanRequest = fetch.mock.calls.find(([url]) => url === '/api/vulnerabilities/scan/sbom/2')
     await act(async () => { fireEvent.change(screen.getByLabelText('확인할 SBOM'), { target: { value: '1' } }) })
@@ -741,6 +779,7 @@ describe('SBOM 취약점 분석 흐름', () => {
     expect(region.getAllByRole('button', { name: '조치 이력' })).toHaveLength(2)
     await act(async () => { fireEvent.click(region.getByRole('button', { name: 'SBOM #2 결과' })) })
     expect(screen.getByLabelText('확인할 SBOM')).toHaveValue('2')
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'CVE별로 보기' })) })
     expect(screen.getByText(newFinding.cve_id)).toBeInTheDocument()
     expect(screen.queryByText(oldFinding.cve_id)).not.toBeInTheDocument()
     const pageRequest = fetch.mock.calls.find(([url]) => url === '/api/vulnerability-work?sbom_id=2&status=ALL&fix=ALL&kernel=false&limit=100&offset=0')
@@ -749,6 +788,45 @@ describe('SBOM 취약점 분석 흐름', () => {
     expect(fetch.mock.calls.every(([, options]) => !options.method)).toBe(true)
   })
 
+})
+
+describe('구성요소별 CVE 보기', () => {
+  afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+  it('같은 구성요소의 CVE를 한 줄로 접어 두고 펼치면 그 아래에 나열한다', async () => {
+    const mk = (id, cve, name, version, severity, fixed) => ({ link_id: id, sbom_id: 2, component_id: name === 'linux-image' ? 1 : 2, cve_id: cve, component_name: name, component_version: version, fixed_version: fixed, severity, vex_status: 'AFFECTED', asset_tag: 'srv-han', asset_name: '성민 서버', finding_source: 'Grype', analysis_run_id: 20 })
+    const findings = [mk(1, 'CVE-2026-1', 'linux-image', '7.0.0-1006', 'HIGH', '7.0.0-1012'), mk(2, 'CVE-2026-2', 'linux-image', '7.0.0-1006', 'MEDIUM', null), mk(3, 'CVE-2026-3', 'linux-image', '7.0.0-1006', 'LOW', '7.0.0-1012'), mk(4, 'CVE-2026-9', 'openssl', '3.5.5', 'CRITICAL', '3.5.5-1ubuntu3.5')]
+    const data = { '/api/dashboard/summary': { assets: 1, lifecycle_risk: {}, sbom_quality: {}, urgent_items: [] }, '/api/sboms': [{ id: 2, component_count: 2 }], '/api/analyses': [{ id: 20, sbom_id: 2, asset_tag: 'srv-han', asset_name: '성민 서버', scanner: 'grype', scanner_version: '0.118.0', generator: 'syft', scan_scope: 'ubuntu-dpkg-installed', component_count: 2, match_count: 4, cve_count: 4, link_count: 4, ignored_non_cve: 0, fixable_cve_count: 3, kernel_cve_count: 3, kernel_fixable_cve_count: 2, imported_at: '2026-09-21T09:00:00Z', database_info: {} }] }
+    localStorage.clear(); localStorage.setItem('eolwatch_token', 'token'); localStorage.setItem('eolwatch_user', JSON.stringify({ id: 1, username: 'operator', role: 'ADMIN' }))
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      if (url.startsWith('/api/vulnerability-work/components?')) return { ok: true, status: 200, json: async () => componentPage(findings, url) }
+      if (url.startsWith('/api/vulnerability-work?')) return { ok: true, status: 200, json: async () => workPage(findings, url) }
+      return { ok: true, status: 200, json: async () => (url in data ? data[url] : (url.startsWith('/api/ai/') ? null : [])) }
+    }))
+    render(<App />)
+    await screen.findByText('검사 대상')
+    openHistoryView('CVE 결과·조치')
+    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: '검사 20 CVE 보기' })) })
+    // default: kernel packages are folded away and the filter says so
+    let table = within(screen.getByRole('table', { name: '구성요소별 CVE' }))
+    expect(table.getByText('openssl')).toBeInTheDocument()
+    expect(table.queryByText('linux-image')).not.toBeInTheDocument()
+    expect(screen.getByText('구성요소 1개 · 1–1개 표시')).toBeInTheDocument()
+    await act(async () => { fireEvent.click(screen.getByLabelText('커널(linux) CVE 포함')) })
+    table = within(screen.getByRole('table', { name: '구성요소별 CVE' }))
+    expect(table.getByText('linux-image')).toBeInTheDocument()
+    expect(table.getByText('3개')).toBeInTheDocument()
+    expect(table.getByText('7.0.0-1012')).toBeInTheDocument()
+    expect(table.queryByText('CVE-2026-2')).not.toBeInTheDocument()
+    await act(async () => { fireEvent.click(table.getByRole('button', { name: 'linux-image CVE 3개 보기' })) })
+    const nested = within(await screen.findByRole('table', { name: 'linux-image CVE 목록' }))
+    expect(nested.getAllByRole('row')).toHaveLength(4)
+    expect(nested.getByText('CVE-2026-2')).toBeInTheDocument()
+    expect(fetch.mock.calls.some(([url]) => url === '/api/vulnerability-work?sbom_id=2&component_id=1&status=ALL&fix=ALL&kernel=true&limit=100&offset=0')).toBe(true)
+    await act(async () => { fireEvent.click(table.getByRole('button', { name: 'linux-image CVE 3개 접기' })) })
+    expect(screen.queryByRole('table', { name: 'linux-image CVE 목록' })).not.toBeInTheDocument()
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'CVE별로 보기' })) })
+    expect(within(screen.getByRole('table', { name: '선택한 SBOM의 CVE' })).getAllByRole('row')).toHaveLength(5)
+  })
 })
 
 describe('프로젝트와 대상의 결과 문맥 연결', () => {
