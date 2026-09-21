@@ -23,8 +23,6 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}
-      TEAMS_WEBHOOK_URL: ${TEAMS_WEBHOOK_URL:-}
-      TEAMS_RECIPIENT_LABEL: ${TEAMS_RECIPIENT_LABEL:-EOLWatch 운영 채널}
       PUBLIC_BASE_URL: https://${DOMAIN}
       DEMO_TARGET_IPS: ${DEMO_TARGET_IPS:-}
       SSH_PRIVATE_KEY_PATH: /run/secrets/eolwatch_ssh_key

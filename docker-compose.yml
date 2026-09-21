@@ -22,8 +22,6 @@ services:
       JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-before-deployment}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Eolwatch!2026}
-      TEAMS_WEBHOOK_URL: ${TEAMS_WEBHOOK_URL:-}
-      TEAMS_RECIPIENT_LABEL: ${TEAMS_RECIPIENT_LABEL:-EOLWatch 운영 채널}
       PUBLIC_BASE_URL: http://localhost:8080
       DEMO_TARGET_IPS: ${DEMO_TARGET_IPS:-}
       SSH_PRIVATE_KEY_PATH: /run/secrets/eolwatch_ssh_key
@@ -59,7 +57,6 @@ services:
       COLLECTION_HOUR: "8"
       COLLECTION_MINUTE: "30"
       SCHEDULER_TIMEZONE: Asia/Seoul
-      TEAMS_WEBHOOK_URL: ${TEAMS_WEBHOOK_URL:-}
       ANALYSIS_SYFT_PATH: /opt/analysis-tools/syft
       ANALYSIS_GRYPE_PATH: /opt/analysis-tools/grype
       ANALYSIS_ARTIFACTS_DIR: /var/lib/eolwatch/analysis
