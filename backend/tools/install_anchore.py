@@ -27,7 +27,7 @@ def install(destination: Path) -> None:
     if platform.system() != "Linux" or arch is None:
         raise RuntimeError("Analysis worker tools require Linux arm64 or amd64")
     destination.mkdir(parents=True, exist_ok=True)
-    manifest = {"system": "Linux", "architecture": arch, "tools": {}}
+    manifest = {"system": "Linux", "architecture": arch, "tools": {}, "remote_syft": {}}
     for name, version in VERSIONS.items():
         filename = f"{name}_{version}_linux_{arch}.tar.gz"
         url = f"https://github.com/anchore/{name}/releases/download/v{version}/{filename}"
@@ -46,6 +46,26 @@ def install(destination: Path) -> None:
         manifest["tools"][name] = {"version": version, "archive_sha256": CHECKSUMS[name, arch],
                                   "binary_sha256": hashlib.sha256(binary).hexdigest(), "url": url}
         print(f"Installed verified {name} {version} for Linux {arch}", flush=True)
+    # Targets may run on the other CPU family: keep a verified syft for each so the worker can copy the right one.
+    for target_arch in ("amd64", "arm64"):
+        version = VERSIONS["syft"]
+        filename = f"syft_{version}_linux_{target_arch}.tar.gz"
+        url = f"https://github.com/anchore/syft/releases/download/v{version}/{filename}"
+        with urlopen(url, timeout=120) as response:
+            archive = response.read(128 * 1024 * 1024 + 1)
+        if len(archive) > 128 * 1024 * 1024 or hashlib.sha256(archive).hexdigest() != CHECKSUMS["syft", target_arch]:
+            raise RuntimeError(f"Official release archive checksum mismatch: {filename}")
+        with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as package:
+            members = [entry for entry in package.getmembers() if entry.name in ("syft", "./syft") and entry.isfile()]
+            if len(members) != 1:
+                raise RuntimeError(f"Expected exactly one executable in {filename}")
+            binary = package.extractfile(members[0]).read()
+        tool_path = destination / f"syft-{target_arch}"
+        tool_path.write_bytes(binary)
+        tool_path.chmod(0o755)
+        manifest["remote_syft"][target_arch] = {"version": version, "archive_sha256": CHECKSUMS["syft", target_arch],
+                                                "binary_sha256": hashlib.sha256(binary).hexdigest(), "url": url}
+        print(f"Installed verified syft {version} for remote Linux {target_arch}", flush=True)
     (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
 

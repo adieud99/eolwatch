@@ -348,3 +348,23 @@ def test_remote_failure_message_includes_what_the_server_printed(tmp_path):
     assert executor._remote_hint(out, err).endswith("…") and len(executor._remote_hint(out, err)) == 201
     (tmp_path / "missing").unlink(missing_ok=True)
     assert executor._remote_hint(tmp_path / "missing", tmp_path / "missing2") == ""
+
+
+def test_remote_syft_is_picked_by_target_cpu_and_verified(tmp_path):
+    tools = tmp_path / "tools"; tools.mkdir()
+    local = tools / "syft"; local.write_bytes(b"local")
+    other = tools / "syft-amd64"; other.write_bytes(b"amd64 binary")
+    (tools / "manifest.json").write_text(json.dumps({"tools": {}, "remote_syft": {"amd64": {"version": "1.51.1", "binary_sha256": executor._sha256(other)}}}))
+    run = executor._Run({"id": 1}, tmp_path / "run", lambda _stage: None)
+    assert executor._remote_syft(local, "Linux x86_64\n", run) == other.resolve()
+    assert run.manifest["tools"]["remote_syft"]["architecture"] == "amd64"
+    with pytest.raises(executor.AnalysisExecutionError) as missing:
+        executor._remote_syft(local, "Linux aarch64", run)  # no arm64 remote binary installed here
+    assert missing.value.code == "TOOL_NOT_INSTALLED"
+    with pytest.raises(executor.AnalysisExecutionError) as unsupported:
+        executor._remote_syft(local, "Darwin arm64", run)
+    assert unsupported.value.code == "TARGET_ARCHITECTURE"
+    other.write_bytes(b"tampered")
+    with pytest.raises(executor.AnalysisExecutionError) as tampered:
+        executor._remote_syft(local, "Linux x86_64", run)
+    assert tampered.value.code == "TOOL_CHECKSUM"

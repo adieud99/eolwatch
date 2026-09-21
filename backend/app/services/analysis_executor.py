@@ -301,6 +301,26 @@ def _tools(settings, run: _Run):
     return syft.resolve(), grype.resolve(), "Linux " + expected_arch
 
 
+REMOTE_ARCHITECTURES = {"Linux x86_64": "amd64", "Linux aarch64": "arm64", "Linux arm64": "arm64"}
+
+
+def _remote_syft(syft: Path, architecture_line: str, run: _Run) -> Path:
+    """The verified syft binary built for the target's CPU (targets need not match the worker)."""
+    arch = REMOTE_ARCHITECTURES.get(architecture_line.strip())
+    if not arch:
+        raise AnalysisExecutionError("TARGET_ARCHITECTURE", f"대상 서버는 Linux x86_64 또는 arm64여야 합니다. 응답: {architecture_line.strip()[:60] or '없음'}")
+    candidate = syft.parent / f"syft-{arch}"
+    installed = _json(syft.parent / "manifest.json").get("remote_syft", {}).get(arch, {})
+    if not candidate.is_file() or not installed:
+        raise AnalysisExecutionError("TOOL_NOT_INSTALLED", f"대상 CPU({arch})용 syft가 워커에 없습니다. analysis-worker 이미지를 다시 빌드하세요.")
+    digest = _sha256(candidate)
+    if digest != installed.get("binary_sha256"):
+        raise AnalysisExecutionError("TOOL_CHECKSUM", f"대상 CPU({arch})용 syft 체크섬이 설치 기록과 다릅니다.")
+    run.manifest.setdefault("tools", {})["remote_syft"] = {"architecture": arch, "version": installed.get("version"), "sha256": digest}
+    run.save()
+    return candidate.resolve()
+
+
 def _connect(asset: dict, settings):
     if not asset.get("ip_address") or not asset.get("ssh_username"):
         raise AnalysisExecutionError("TARGET_NOT_CONFIGURED", "대상 자산의 IP 주소와 SSH 계정을 설정하세요.")
@@ -529,13 +549,14 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
         else:
             client = _connect(asset_snapshot, settings)
             architecture = run.remote(client, "target-architecture", ["uname", "-sm"], 10)
-            if architecture.read_text().strip() != expected_architecture:
-                raise AnalysisExecutionError("TARGET_ARCHITECTURE", "대상 서버는 분석 워커와 같은 CPU 아키텍처의 Linux여야 합니다.")
+            architecture_line = architecture.read_text().strip()
+            remote_syft = syft if architecture_line == expected_architecture else _remote_syft(syft, architecture_line, run)
+            run.manifest["target_architecture"] = architecture_line
             if run.profile in PATH_SCAN_SCOPES:
                 directory = _scan_directory(client, profile, asset_snapshot.get('target_path'))
             else:
                 directory = _scan_directory(client, profile)
-            target, remote_config, pid_file = _provision(client, syft, run)
+            target, remote_config, pid_file = _provision(client, remote_syft, run)
             remote = ["env", "SYFT_CHECK_FOR_APP_UPDATE=false", target, "scan", "dir:" + directory,
                       "--config", remote_config, *scan_options]
             raw_path = run.remote(client, "syft-scan", remote, settings.analysis_collect_timeout_seconds,
