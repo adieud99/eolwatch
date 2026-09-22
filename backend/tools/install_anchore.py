@@ -12,13 +12,15 @@ import tarfile
 from urllib.request import urlopen
 
 
-VERSIONS = {"syft": "1.51.1", "grype": "0.118.0"}
+# 2026-09-22: 1.51.1 / 0.118.0 -> 1.52.0 / 0.119.0 (grype: deterministic --by-cve merge, distro-dropped matches in
+# ignoredMatches; syft: bounded .deb/kernel-module decompression). Checksums verified against the release assets.
+VERSIONS = {"syft": "1.52.0", "grype": "0.119.0"}
 # https://github.com/anchore/{tool}/releases/download/v{version}/{tool}_{version}_checksums.txt
 CHECKSUMS = {
-    ("syft", "amd64"): "8fcb33017a0dc1058298c923c436d19dfa68ae93968e0b423248542e3afb9fc3",
-    ("syft", "arm64"): "a7fd2b784e6664acd44719270574f6cd8c6864fc2b1700bf9099bd1cccda7d7f",
-    ("grype", "amd64"): "1d444c5e7360471815f7158f71935fcecc68a3c417d85c7344f770854300bba2",
-    ("grype", "arm64"): "32aceeb8ee837244775fcb522372c8b3a47914986385f3148f4ee2c930482a84",
+    ("syft", "amd64"): "caeedb81fb0491615f1ebd1761e4145d41ee86dd2cc7bf80669f9f5ad9d6133d",
+    ("syft", "arm64"): "c46d5e4c28e12aa4c5becfaa343ef1c7f89045b6b895f2c21d471c62db09c706",
+    ("grype", "amd64"): "3fa2dc4b924621ab65404cf08d0b8438d896d80ab949c9d5a4ca283c36004c9b",
+    ("grype", "arm64"): "29f0ec7c549ddb0e2b6a0ca714851f7399438afc399b80c12808e065edc9a8f8",
 }
 
 
