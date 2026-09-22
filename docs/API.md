@@ -242,6 +242,8 @@ CVE 매칭은 Grype 한 곳에서 하며 외부 OSV 조회는 없다. 전체 모
 
 정렬은 심각도 높은 순 → 연결 ID 순이다.
 
+같은 필터로 두 가지 묶음 조회를 제공한다. `GET /api/vulnerability-work/components`는 구성요소(설치 패키지)마다 한 행, `GET /api/vulnerability-work/cves`는 CVE 번호마다 한 행이다. 커널에서 나온 바이너리 패키지(linux-modules·linux-tools·bpftool)나 binutils 계열처럼 한 소스에서 나온 형제 패키지는 같은 CVE를 공유해 연결 목록에 같은 CVE가 여러 번 보이므로, 화면의 `CVE별로 보기`는 `/cves`를 쓴다. 각 항목은 `cve_id`, `summary`, 최고 `severity`, `link_count`, `open_count`, `update_available_count`, `no_update_count`, 수정 버전 합집합 `fixed_versions`와 패키지별 연결 목록 `links`(각각 기존 CVE 응답 형식)를 포함하며, `total`은 CVE 수다. 정렬은 최고 심각도 → CVE 번호 순, `limit` 기본 25(최대 100)이다.
+
 응답은 `{items,total,limit,offset,as_of,scope}`이며 `scope`는 `ALL_SBOM_HISTORY`다. 각 항목은 기존 CVE 응답과 `asset_id`를 포함한다. 이전 SBOM의 미완료 조치를 새 검사 때문에 숨기지 않는다. count와 페이지를 DB에서 계산하며 원본 SBOM·Grype JSON은 읽지 않는다.
 
 전체 구현과 실제 검증의 구분은 [구현 현황](IMPLEMENTATION_STATUS.md)을 확인한다.

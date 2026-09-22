@@ -480,6 +480,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
   const [cveFilter, setCveFilter] = useState({ fix: 'ALL', kernel: false, resolved: false })   // resolved: show 조치 완료·영향 없음 too
   const [cveView, setCveView] = useState('components')   // one row per component, CVEs folded under it
   const [expanded, setExpanded] = useState({})            // component_id -> { status, items, total }
+  const [expandedCves, setExpandedCves] = useState({})    // cve_id -> true when its package links are shown
   const loadedKey = useRef('')
   const bundleRequest = useRef(null)
   const cveSection = useRef(null)
@@ -500,7 +501,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
     const controller = new AbortController()
     setCveRead({ key: cveKey, status: 'loading' })
     const params = new URLSearchParams({ sbom_id: String(sbomId), status: cveFilter.resolved ? 'ALL' : 'OPEN', fix: cveFilter.fix, kernel: String(cveFilter.kernel), limit: String(pageSize), offset: String(currentPage * pageSize) })
-    api(cveView === 'components' ? `/vulnerability-work/components?${params}` : `/vulnerability-work?${params}`, { signal: controller.signal }).then((result) => {
+    api(cveView === 'components' ? `/vulnerability-work/components?${params}` : `/vulnerability-work/cves?${params}`, { signal: controller.signal }).then((result) => {
       if (controller.signal.aborted) return
       if (currentPage && currentPage * pageSize >= result.total) {
         setPage({ sbomId, number: Math.max(0, Math.ceil(result.total / pageSize) - 1) })
@@ -518,7 +519,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
     return () => {}
   }, [sbomId])
 
-  useEffect(() => { setExpanded({}); loadedKey.current = '' }, [sbomId])
+  useEffect(() => { setExpanded({}); setExpandedCves({}); loadedKey.current = '' }, [sbomId])
   useEffect(() => {
     const all = Object.keys(expanded)
     if (cveView !== 'components' || !sbomId || !all.length) return
@@ -536,6 +537,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
     })
     return () => controller.abort()
   }, [cveKey, Object.keys(expanded).sort().join(',')])  // eslint-disable-line react-hooks/exhaustive-deps
+  const toggleCve = (id) => setExpandedCves((current) => ({ ...current, [id]: !current[id] }))
   const toggleComponent = (id) => setExpanded((current) => { const next = { ...current }; if (id in next) delete next[id]; else next[id] = { status: 'loading' }; return next })
 
   function selectSbom(value, scroll = false) {
@@ -548,6 +550,13 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
     return <tr key={item.link_id}><td><code>{item.cve_id}</code><small>{item.finding_source || item.source || '출처 미상'}{item.analysis_run_id ? ` · 검사 #${item.analysis_run_id}` : ''}</small><small>{item.summary || '설명 없음'}</small></td>
       {!nested && <td><strong>{item.asset_tag || '미연결'}</strong><small>{item.asset_name || '대상 없음'}</small></td>}
       {!nested && <td><strong>{item.component_name}</strong><small>검사 당시 {item.component_version || '버전 미상'}</small></td>}
+      <td><strong>{item.fixed_versions?.length ? item.fixed_versions.join(', ') : item.fixed_version || '확인 필요'}</strong><FixCheck value={item.fix_check} /></td>
+      <td><span className={`severity severity-${item.severity.toLowerCase()}`}>{item.severity}</span></td>
+      <td><span aria-label={`${item.cve_id} ${item.component_name} 조치 상태`}>{vexStatusText[item.vex_status] || item.vex_status}</span><button className="table-button" aria-label={`${item.cve_id} ${item.component_name} ${canEdit ? '조치 관리' : '조치 이력'}`} onClick={() => setSelectedFinding(item)}>{canEdit ? '조치 관리' : '조치 이력'}</button></td></tr>
+  }
+
+  function renderPackageRow(item) {
+    return <tr key={item.link_id}><td><strong>{item.component_name}</strong><small>검사 당시 {item.component_version || '버전 미상'}</small></td>
       <td><strong>{item.fixed_versions?.length ? item.fixed_versions.join(', ') : item.fixed_version || '확인 필요'}</strong><FixCheck value={item.fix_check} /></td>
       <td><span className={`severity severity-${item.severity.toLowerCase()}`}>{item.severity}</span></td>
       <td><span aria-label={`${item.cve_id} ${item.component_name} 조치 상태`}>{vexStatusText[item.vex_status] || item.vex_status}</span><button className="table-button" aria-label={`${item.cve_id} ${item.component_name} ${canEdit ? '조치 관리' : '조치 이력'}`} onClick={() => setSelectedFinding(item)}>{canEdit ? '조치 관리' : '조치 이력'}</button></td></tr>
@@ -615,10 +624,27 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
       })}{!cveLoading && !cveError && !visibleGroups.length && <tr><td colSpan="6" className="empty">{sbomId ? '이 조건에 맞는 CVE가 없습니다.' : '위 목록에서 CVE 보기를 누르거나 SBOM을 고르세요.'}</td></tr>}</tbody>
     </table></div>
     : <div className="table-wrap"><table aria-label="선택한 SBOM의 CVE"><thead><tr><th>CVE·출처</th><th>영향 대상</th><th>구성요소</th><th>수정 버전</th><th>심각도</th><th>조치 상태</th></tr></thead>
-      <tbody>{visibleVulnerabilities.map((item) => renderCveRow(item, false))}{!cveLoading && !cveError && !visibleVulnerabilities.length && <tr><td colSpan="6" className="empty">{sbomId ? '이 SBOM에 저장된 CVE 결과가 없습니다.' : '위 목록에서 CVE 보기를 누르거나 SBOM을 고르세요.'}</td></tr>}</tbody>
+      <tbody>{visibleVulnerabilities.flatMap((group) => {
+        const links = group.links || []
+        if (links.length <= 1) return links.length ? [renderCveRow(links[0], false)] : []
+        // One CVE on several packages (kernel binaries, the binutils family): one row, packages folded underneath.
+        const first = links[0]
+        const open = Boolean(expandedCves[group.cve_id])
+        const row = <tr key={`cve-${group.cve_id}`}><td><code>{group.cve_id}</code><small>{first.finding_source || first.source || '출처 미상'}{first.analysis_run_id ? ` · 검사 #${first.analysis_run_id}` : ''}</small><small>{group.summary || first.summary || '설명 없음'}</small></td>
+          <td><strong>{first.asset_tag || '미연결'}</strong><small>{first.asset_name || '대상 없음'}</small></td>
+          <td><strong>패키지 {links.length}개</strong><small>{links.slice(0, 3).map((item) => item.component_name).join(', ')}{links.length > 3 ? ` 외 ${links.length - 3}` : ''}</small></td>
+          <td><strong>{group.fixed_versions?.length ? group.fixed_versions.join(', ') : '확인 필요'}</strong>{group.update_available_count ? <small className="fix-check fix-check-update_available">저장소에 업데이트 있음 {group.update_available_count}건</small> : null}{group.no_update_count ? <small className="fix-check fix-check-no_update_found">저장소에 업데이트 없음 · 오탐 의심 {group.no_update_count}건</small> : null}</td>
+          <td><span className={`severity severity-${(group.severity || 'unknown').toLowerCase()}`}>{group.severity}</span></td>
+          <td><span aria-label={`${group.cve_id} 조치 상태`}>미조치 {group.open_count} / {links.length}</span><button className="table-button" aria-expanded={open} aria-label={`${group.cve_id} 패키지 ${links.length}개 ${open ? '접기' : '펼치기'}`} onClick={() => toggleCve(group.cve_id)}>{open ? '접기' : `패키지 ${links.length}개 펼치기`}</button></td></tr>
+        if (!open) return [row]
+        const detail = <tr key={`cve-${group.cve_id}-links`} className="nested"><td colSpan="6">
+          <table aria-label={`${group.cve_id} 패키지별 조치`}><thead><tr><th>패키지</th><th>수정 버전</th><th>심각도</th><th>조치 상태</th></tr></thead><tbody>{links.map((item) => renderPackageRow(item))}</tbody></table>
+        </td></tr>
+        return [row, detail]
+      })}{!cveLoading && !cveError && !visibleVulnerabilities.length && <tr><td colSpan="6" className="empty">{sbomId ? '이 SBOM에 저장된 CVE 결과가 없습니다.' : '위 목록에서 CVE 보기를 누르거나 SBOM을 고르세요.'}</td></tr>}</tbody>
     </table></div>}
     {!cveLoading && !cveError && cveTotal > 0 && <div className="panel-heading">
-      <span className="subtle">{cveView === 'components' ? `구성요소 ${cveTotal}개 · ${currentPage * pageSize + 1}–${Math.min(currentPage * pageSize + visibleGroups.length, cveTotal)}개 표시` : `총 ${cveTotal}건 · ${currentPage * pageSize + 1}–${Math.min(currentPage * pageSize + visibleVulnerabilities.length, cveTotal)}건 표시`}</span>
+      <span className="subtle">{cveView === 'components' ? `구성요소 ${cveTotal}개 · ${currentPage * pageSize + 1}–${Math.min(currentPage * pageSize + visibleGroups.length, cveTotal)}개 표시` : `CVE ${cveTotal}개 · ${currentPage * pageSize + 1}–${Math.min(currentPage * pageSize + visibleVulnerabilities.length, cveTotal)}개 표시`}</span>
       <div className="action-row"><button className="table-button" disabled={currentPage === 0} onClick={() => setPage({ sbomId, number: currentPage - 1 })}>이전 페이지</button><span className="subtle">{currentPage + 1} / {pageCount} 페이지</span><button className="table-button" disabled={currentPage + 1 >= pageCount} onClick={() => setPage({ sbomId, number: currentPage + 1 })}>다음 페이지</button></div>
     </div>}
   </section>
