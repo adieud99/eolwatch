@@ -35,6 +35,21 @@ class Finding(ReportObject):
     dataSource: Optional[str] = None
     urls: list[str] = Field(default_factory=list)
     fix: Fix = Field(default_factory=Fix)
+    # Grype >= 0.87 adds exploitation evidence per finding; older reports simply leave these empty.
+    epss: list[dict[str, Any]] = Field(default_factory=list)
+    knownExploited: list[dict[str, Any]] = Field(default_factory=list)
+    risk: Optional[float] = None
+
+
+def _exploit_evidence(finding: Finding, cve: str) -> tuple[Optional[float], Optional[float], bool, Optional[float]]:
+    """EPSS probability/percentile for this CVE (or the highest listed), KEV membership and the risk score."""
+    rows = [row for row in finding.epss if isinstance(row, dict)]
+    mine = [row for row in rows if row.get("cve") == cve] or rows
+    epss = max((float(row.get("epss") or 0) for row in mine), default=None)
+    percentile = max((float(row.get("percentile") or 0) for row in mine), default=None)
+    kev = any(isinstance(row, dict) and (row.get("cve") in (None, cve) or row.get("cve") == finding.id) for row in finding.knownExploited)
+    risk = float(finding.risk) if isinstance(finding.risk, (int, float)) else None
+    return epss, percentile, kev, risk
 
 
 class Artifact(ReportObject):
@@ -174,11 +189,19 @@ def import_analysis(db: Session, payload: schemas.AnalysisImport, *, commit: boo
                     link.finding_source = 'Grype'
                     link.finding_severity = severity
                     link.fixed_versions = []
+                    link.epss = link.epss_percentile = link.risk = None
+                    link.kev = False
                     links[key] = link
                 link = links[key]
                 if rank[severity] > rank[link.finding_severity]:
                     link.finding_severity = severity
                 link.fixed_versions = sorted(set(link.fixed_versions) | set(versions))
+                epss, percentile, kev, risk = _exploit_evidence(match.vulnerability, cve)
+                if epss is not None and (link.epss is None or epss > link.epss):
+                    link.epss, link.epss_percentile = epss, percentile
+                link.kev = bool(link.kev) or kev
+                if risk is not None and (link.risk is None or risk > link.risk):
+                    link.risk = risk
                 # Multiple fixed branches are alternatives, not a single recommended upgrade.
                 link.fixed_version = link.fixed_versions[0] if len(link.fixed_versions) == 1 else None
                 # apt/dnf upgrade the kernel through its meta package (linux-aws), never the versioned binary, so no verdict there.

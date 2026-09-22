@@ -23,7 +23,7 @@ ANALYSIS_PROFILES = {
     DEFAULT_SCAN_SCOPE: AnalysisProfile(
         cataloger="dpkg-db-cataloger",
         package_type="deb",
-        description="Installed Ubuntu dpkg packages; application dependencies and container images are excluded.",
+        description="Installed dpkg packages of an Ubuntu or Debian server; application dependencies and container images are excluded.",
         # The dpkg cataloger only reads /var/lib/dpkg (+ /etc/os-release for the distro). Everything else is
         # walked just to build syft's file index, which on a 1 GB EC2 got the process OOM-killed after the
         # kernel upgrade. Skip the trees that hold most files and no dpkg data. /usr/lib itself stays: syft reads

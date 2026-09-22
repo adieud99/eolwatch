@@ -652,6 +652,36 @@ describe('SBOM 취약점 분석 흐름', () => {
     expect(findings.getByLabelText(`${newFinding.cve_id} 조치 상태`)).toHaveTextContent('미조치 2 / 3')
   })
 
+  it('실제 악용 확인과 악용 확률 배지를 CVE 행과 접힌 행에 표시한다', async () => {
+    data.findings = [{ ...newFinding, kev: true, epss: 0.42 }, { ...newFinding, link_id: 21, cve_id: 'CVE-2025-33333', component_name: 'second-package', epss: 0.003 }]
+    await openSecurity()
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '검사 20 CVE 보기' })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'CVE별로 보기' })) })
+    const findings = within(screen.getByRole('table', { name: '선택한 SBOM의 CVE' }))
+    expect(findings.getByText('실제 악용 확인 (KEV)')).toBeInTheDocument()
+    expect(findings.getByText('악용 확률 42%')).toBeInTheDocument()
+    expect(findings.queryByText(/악용 확률 0/)).not.toBeInTheDocument()   // below 1% stays quiet
+  })
+
+  it('AI 선별 결과를 판정별로 보여 주고 보낸 데이터를 미리 볼 수 있다', async () => {
+    const triage = { items: [{ cve: newFinding.cve_id, verdict: '해당', reason: '악용 확인', action: 'apt upgrade', pkg: 'current-package', ver: '1.0', fix: ['2.1'], sev: 'HIGH', epss: 0.42, kev: true, apt: 'UPDATE_AVAILABLE', kernel: false },
+                             { cve: 'CVE-2025-44444', verdict: '해당 없음 가능성', reason: '이 서버에 없는 장치', action: '확인 후 영향 없음으로 기록', pkg: 'drm', ver: '1', fix: [], sev: 'MEDIUM', epss: 0, kev: false, apt: null, kernel: true }],
+                     note: '급한 것 하나', counts: { '해당': 1, '확인 필요': 0, '해당 없음 가능성': 1 }, eligible: 2, sent: 2, cve_total: 2 }
+    data['/api/ai/analyses/20/triage'] = { id: 5, kind: 'triage', target_id: 20, provider: 'openai', model: 'gpt-5-mini', summary: JSON.stringify(triage), generated_at: '2026-09-22T10:00:00Z', input_tokens: 500, output_tokens: 120 }
+    data['/api/ai/analyses/20/triage/context'] = { kind: 'triage', prompt: '{"server":{"os":"Ubuntu"},"candidates":[]}', context: { sent: 2, eligible: 2 } }
+    await openSecurity()
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '검사 20 CVE 보기' })) })
+    const panel = within(await screen.findByRole('region', { name: 'AI 선별 · 먼저 볼 CVE' }))
+    const table = within(panel.getByRole('table', { name: 'AI 선별 결과' }))
+    expect(table.getAllByRole('row')).toHaveLength(3)
+    expect(table.getByText('해당')).toBeInTheDocument()
+    expect(table.getByText('이 서버에 없는 장치')).toBeInTheDocument()
+    expect(panel.getByText(/후보 2건 검토 · 급한 것 하나/)).toBeInTheDocument()
+    await act(async () => { fireEvent.click(panel.getByRole('button', { name: 'AI에 보내는 데이터 보기' })) })
+    expect(panel.getByText(/주소·호스트 이름·계정 정보는 들어가지 않습니다/)).toBeInTheDocument()
+    expect(panel.getByText('{"server":{"os":"Ubuntu"},"candidates":[]}')).toBeInTheDocument()
+  })
+
   it('조치 저장 충돌의 HTTP 상태를 패널로 전달하고 최신 내용을 확인하면서 초안을 유지한다', async () => {
     const defaultFetch = fetch.getMockImplementation()
     let conflicted = false

@@ -1,6 +1,10 @@
 from functools import lru_cache
+import os
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+SECRET_FIELDS = ("jwt_secret", "credential_key", "admin_password", "openai_api_key", "anthropic_api_key", "database_url")
 
 
 class Settings(BaseSettings):
@@ -19,7 +23,7 @@ class Settings(BaseSettings):
     jwt_secret: str = "local-development-secret-change-before-deployment"
     access_token_minutes: int = 480
     admin_username: str = "admin"
-    admin_password: str = "Eolwatch!2026"
+    admin_password: str = ""       # no built-in login: set ADMIN_PASSWORD (or ADMIN_PASSWORD_FILE); tests set it in conftest
     public_base_url: str = "http://localhost:8080"
     demo_target_ips: str = ""
     analysis_syft_path: str = "/opt/analysis-tools/syft"
@@ -62,6 +66,19 @@ class Settings(BaseSettings):
         return [address.strip() for address in self.demo_target_ips.split(",") if address.strip()]
 
 
+def _file_overrides() -> dict[str, str]:
+    """<NAME>_FILE=/run/secrets/<name> wins over <NAME>: the file never appears in `docker inspect`, process lists or crash dumps."""
+    values = {}
+    for field in SECRET_FIELDS:
+        path = os.environ.get(field.upper() + "_FILE")
+        if path:
+            try:
+                values[field] = Path(path).read_text(encoding="utf-8").strip()
+            except OSError as error:
+                raise RuntimeError(f"{field.upper()}_FILE을 읽을 수 없습니다: {path}") from error
+    return values
+
+
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    return Settings(**_file_overrides())

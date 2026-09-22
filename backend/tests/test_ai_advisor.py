@@ -121,7 +121,10 @@ def test_check_context_is_compact_but_keeps_the_facts_that_matter():
     assert context["packages"] == 669 and "packages" not in ai_advisor.build_prompt(context).split("\n", 1)[1][:0] or True
     assert len(context["disks"]) == ai_advisor.MAX_DISKS and len(context["top_proc"]) == ai_advisor.MAX_PROCESSES and len(context["ports"]) == ai_advisor.MAX_PORTS and len(context["services"]) == ai_advisor.MAX_SERVICES
     assert context["cloud"] == {"provider": "aws", "instance_type": "t3.small", "region": "ap-northeast-2"}
-    assert context["os"] == "Ubuntu 24.04 LTS" and context["ips"] == ["10.0.0.6/24"]
+    assert context["os"] == "Ubuntu 24.04 LTS"
+    # Data minimisation: no address, host name, account or instance identifier reaches the model.
+    assert "ips" not in context and "host" not in context and "ip" not in context
+    assert "10.0.0.6" not in ai_advisor.build_prompt(context) and "web-1" not in ai_advisor.build_prompt(context) and "i-1" not in ai_advisor.build_prompt(context)
     assert len(ai_advisor.build_prompt(context)) < 1500  # the 500-package inventory never reaches the model
 
 

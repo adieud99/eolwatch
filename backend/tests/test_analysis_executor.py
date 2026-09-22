@@ -188,7 +188,7 @@ def test_invalid_results_never_reach_import(tmp_path, mocked_pipeline, invalid, 
     elif invalid == "scope":
         state["raw"]["artifacts"][0]["type"] = "npm"
     elif invalid == "distro":
-        state["raw"]["distro"]["id"] = "debian"
+        state["raw"]["distro"]["id"] = "alpine"
     else:
         state["report"].pop("matches")
     with pytest.raises(executor.AnalysisExecutionError) as failure:

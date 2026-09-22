@@ -6,7 +6,8 @@ import hmac
 import json
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Any
+import logging
+from typing import Any, Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -84,11 +85,15 @@ def decode_access_token(token: str) -> dict[str, Any]:
         raise ValueError("유효하지 않은 인증 토큰입니다") from exc
 
 
-def ensure_admin(db: Session) -> models.User:
+def ensure_admin(db: Session) -> Optional[models.User]:
     settings = get_settings()
     user = db.scalar(select(models.User).where(models.User.username == settings.admin_username))
     if user:
         return user
+    if not settings.admin_password:
+        # Never create an account with an empty or built-in password; the operator sets ADMIN_PASSWORD first.
+        logging.getLogger(__name__).warning("ADMIN_PASSWORD is not set; no administrator account was created")
+        return None
     user = models.User(
         username=settings.admin_username,
         password_hash=hash_password(settings.admin_password),

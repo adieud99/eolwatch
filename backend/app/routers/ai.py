@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session, joinedload
 from .. import models, schemas
 from ..config import get_settings
 from ..db import get_db
-from ..services import ai_advisor
+from ..services import ai_advisor, ai_triage
+from ..services.vulnerability_actions import read_link
 
 
 router = APIRouter(prefix="/ai", tags=["ai advisor"])
@@ -45,6 +46,62 @@ def summarize_analysis(run_id: int, request: Request, force: bool = False, db: S
         raise HTTPException(status_code=404, detail="검사 결과가 없습니다.")
     context = ai_advisor.analysis_context(db, run)
     return _read(ai_advisor.generate_summary(db, "analysis", run_id, context, _username(request), force=force))
+
+
+@router.get("/analyses/{run_id}/context")
+def read_analysis_context(run_id: int, db: Session = Depends(get_db)):
+    """Exactly what the summary sends to the AI provider, so a reviewer can see it before pressing the button."""
+    run = db.get(models.AnalysisRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="검사 결과가 없습니다.")
+    context = ai_advisor.analysis_context(db, run)
+    return {"kind": "analysis", "prompt": ai_advisor.build_prompt(context), "context": context}
+
+
+@router.get("/analyses/{run_id}/triage", response_model=Optional[schemas.AiSummaryRead])
+def read_triage(run_id: int, db: Session = Depends(get_db)):
+    if not db.get(models.AnalysisRun, run_id):
+        raise HTTPException(status_code=404, detail="검사 결과가 없습니다.")
+    record = ai_advisor.latest_summary(db, "triage", run_id)
+    return _read(record) if record else None
+
+
+@router.get("/analyses/{run_id}/triage/context")
+def read_triage_context(run_id: int, db: Session = Depends(get_db)):
+    run = db.get(models.AnalysisRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="검사 결과가 없습니다.")
+    context = ai_triage.triage_context(db, run)
+    return {"kind": "triage", "prompt": ai_triage.triage_prompt(context), "context": context}
+
+
+@router.post("/analyses/{run_id}/triage", response_model=schemas.AiSummaryRead)
+def triage_analysis(run_id: int, request: Request, force: bool = False, db: Session = Depends(get_db)):
+    run = db.get(models.AnalysisRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="검사 결과가 없습니다.")
+    return _read(ai_triage.generate_triage(db, run, _username(request), force=force))
+
+
+@router.get("/vulnerabilities/{link_id}/advice", response_model=Optional[schemas.AiSummaryRead])
+def read_advice(link_id: int, db: Session = Depends(get_db)):
+    read_link(db, link_id)
+    record = ai_advisor.latest_summary(db, "advice", link_id)
+    return _read(record) if record else None
+
+
+@router.post("/vulnerabilities/{link_id}/advice", response_model=schemas.AiSummaryRead)
+def advise_vulnerability(link_id: int, request: Request, force: bool = False, db: Session = Depends(get_db)):
+    return _read(ai_triage.generate_advice(db, read_link(db, link_id), _username(request), force=force))
+
+
+@router.get("/checks/{job_id}/context")
+def read_check_context(job_id: int, db: Session = Depends(get_db)):
+    job = db.get(models.CollectionJob, job_id, options=[joinedload(models.CollectionJob.result), joinedload(models.CollectionJob.asset)])
+    if not job:
+        raise HTTPException(status_code=404, detail="점검 결과가 없습니다.")
+    context = ai_advisor.check_context(job)
+    return {"kind": "check", "prompt": ai_advisor.build_prompt(context), "context": context}
 
 
 @router.get("/checks/{job_id}", response_model=Optional[schemas.AiSummaryRead])

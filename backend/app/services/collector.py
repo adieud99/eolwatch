@@ -18,14 +18,17 @@ from ..config import get_settings
 from . import ai_collection, ssh_auth
 
 
+# Every command has a fallback for distributions that lack the first tool (procps `top` variants, no `ss`/`ip`,
+# no systemd, apk instead of dpkg/rpm). /proc and POSIX tools are the floor that every Linux provides.
 COMMANDS = {
     "uptime": "cut -d. -f1 /proc/uptime",
-    "cpu": "LC_ALL=C top -bn1 | awk '/Cpu\\(s\\)/ {print 100-$8; exit}'",
+    # procps top prints 'Cpu(s)'; busybox/BSD-style tops differ, so fall back to the cumulative counters in /proc/stat.
+    "cpu": "LC_ALL=C top -bn1 2>/dev/null | awk '/Cpu\\(s\\)/ {print 100-$8; f=1; exit} END{exit !f}' || awk 'NR==1{t=0; for(k=2;k<=NF;k++) t+=$k; if(t>0) printf \"%.2f\", (t-$5)*100/t}' /proc/stat",
     "memory": "awk '/MemTotal/{t=$2}/MemAvailable/{a=$2} END{if(t>0) printf \"%.2f\", (t-a)*100/t}' /proc/meminfo",
-    "disk": "df -P -x tmpfs -x devtmpfs | awk 'NR>1 {print $6 \"|\" $5}'",
-    "process": "ps -eo comm= | sort | uniq -c | sort -nr | head -20",
-    "packages": "if command -v dpkg-query >/dev/null 2>&1; then dpkg-query -W -f='${Package}|${Version}\\n'; elif command -v rpm >/dev/null 2>&1; then rpm -qa --qf '%{NAME}|%{VERSION}-%{RELEASE}\\n'; fi",
-    "os_release": "cat /etc/os-release",
+    "disk": "df -P -x tmpfs -x devtmpfs 2>/dev/null | awk 'NR>1 {print $6 \"|\" $5}' || df -P | awk 'NR>1 {print $6 \"|\" $5}'",
+    "process": "ps -eo comm= 2>/dev/null | sort | uniq -c | sort -nr | head -20 || ps | awk 'NR>1 {print $NF}' | sort | uniq -c | sort -nr | head -20",
+    "packages": "if command -v dpkg-query >/dev/null 2>&1; then dpkg-query -W -f='${Package}|${Version}\\n'; elif command -v rpm >/dev/null 2>&1; then rpm -qa --qf '%{NAME}|%{VERSION}-%{RELEASE}\\n'; elif command -v apk >/dev/null 2>&1; then apk info -v 2>/dev/null | sed -E 's/-([0-9][^-]*-r[0-9]+)$/|\\1/'; fi",
+    "os_release": "cat /etc/os-release 2>/dev/null || cat /usr/lib/os-release",
     "architecture": "uname -m",
 }
 
@@ -35,16 +38,16 @@ SERVER_INFO_COMMANDS = {
     "hostname": "hostname 2>/dev/null || true",
     "kernel": "uname -r 2>/dev/null || true",
     "cpu_model": "awk -F: '/model name/ {sub(/^ +/, \"\", $2); print $2; exit}' /proc/cpuinfo 2>/dev/null || true",
-    "cpu_cores": "nproc 2>/dev/null || true",
+    "cpu_cores": "nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || true",
     "memory_total": "awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || true",
     "disk_totals": "df -P -B1 -x tmpfs -x devtmpfs 2>/dev/null | awk 'NR>1 {print $6 \"|\" $2 \"|\" $3}' || true",
     "virtualization": "systemd-detect-virt 2>/dev/null || true",
     "dmi_vendor": "cat /sys/class/dmi/id/sys_vendor 2>/dev/null || true",
     "dmi_product": "cat /sys/class/dmi/id/product_name 2>/dev/null || true",
     "cloud_metadata": "T=$(curl -s -m 2 -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' 2>/dev/null); if [ -n \"$T\" ]; then curl -s -m 2 -H \"X-aws-ec2-metadata-token: $T\" http://169.254.169.254/latest/dynamic/instance-identity/document 2>/dev/null; fi; true",
-    "ip_addresses": "ip -4 -o addr show scope global 2>/dev/null | awk '{print $2 \"|\" $4}' || true",
-    "listening_ports": "ss -tlnH 2>/dev/null | awk '{print $1 \"|\" $4}' || true",
-    "services": "systemctl list-units --type=service --state=running --no-legend --plain 2>/dev/null | awk '{print $1}' | head -100 || true",
+    "ip_addresses": "ip -4 -o addr show scope global 2>/dev/null | awk '{print $2 \"|\" $4}' | grep . || hostname -I 2>/dev/null | tr ' ' '\\n' | awk 'NF {print \"unknown|\" $1 \"/32\"}' || true",
+    "listening_ports": "ss -tlnH 2>/dev/null | awk '{print $1 \"|\" $4}' | grep . || netstat -tln 2>/dev/null | awk 'NR>2 {print $1 \"|\" $4}' || true",
+    "services": "systemctl list-units --type=service --state=running --no-legend --plain 2>/dev/null | awk '{print $1}' | head -100 | grep . || rc-status -a 2>/dev/null | awk '/started/ {print $1 \".service\"}' | head -100 || service --status-all 2>/dev/null | awk '/\\[ \\+ \\]/ {print $4 \".service\"}' | head -100 || true",
 }
 
 

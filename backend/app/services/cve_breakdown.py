@@ -17,6 +17,8 @@ from .. import models
 link = models.ComponentVulnerability
 component = models.Component
 
+# EPSS probability at or above this is worth a human look (1%: roughly the top 10% of all CVEs).
+EPSS_ATTENTION = 0.01
 # fixed_versions is a JSON list; a link with any fixed version is actionable.
 HAS_FIX = and_(link.fixed_versions.isnot(None), cast(link.fixed_versions, String).notin_(("[]", "null", "")))
 # Ubuntu/Debian binary packages built from the kernel source carry upstream=linux… in their PURL.
@@ -34,20 +36,26 @@ def breakdown(db: Session, run_ids: list[int]) -> dict[int, dict[str, int]]:
 
     Grouped by the run's own links (not the SBOM) so OSV cross-check findings on the same SBOM do not leak in.
     """
-    empty = lambda: {"fixable_cve_count": 0, "kernel_cve_count": 0, "kernel_fixable_cve_count": 0, "verified_fixable_cve_count": 0, "suspect_cve_count": 0}
+    empty = lambda: {"fixable_cve_count": 0, "kernel_cve_count": 0, "kernel_fixable_cve_count": 0, "verified_fixable_cve_count": 0, "suspect_cve_count": 0,
+                     "kev_cve_count": 0, "epss_cve_count": 0}
     result = {run_id: empty() for run_id in run_ids}
     if not run_ids:
         return result
     rows = db.execute(
         # max() over 1/0 rather than booleans: PostgreSQL has no max(boolean).
         select(link.analysis_run_id, link.vulnerability_id, func.max(case((HAS_FIX, 1), else_=0)), func.max(case((IS_KERNEL, 1), else_=0)),
-               func.max(case((link.fix_check == "UPDATE_AVAILABLE", 1), else_=0)), func.max(case((link.fix_check == "NO_UPDATE_FOUND", 1), else_=0)))
+               func.max(case((link.fix_check == "UPDATE_AVAILABLE", 1), else_=0)), func.max(case((link.fix_check == "NO_UPDATE_FOUND", 1), else_=0)),
+               func.max(case((link.kev.is_(True), 1), else_=0)), func.max(case((link.epss >= EPSS_ATTENTION, 1), else_=0)))
         .join(component, link.component_id == component.id)
         .where(link.analysis_run_id.in_(run_ids))
         .group_by(link.analysis_run_id, link.vulnerability_id)
     ).all()
-    for run_id, _vulnerability_id, fixed, kernel, verified, suspect in rows:
+    for run_id, _vulnerability_id, fixed, kernel, verified, suspect, kev, epss in rows:
         counts = result.setdefault(run_id, empty())
+        if kev:
+            counts["kev_cve_count"] += 1
+        if epss:
+            counts["epss_cve_count"] += 1
         if verified:
             counts["verified_fixable_cve_count"] += 1
         if suspect:

@@ -32,6 +32,8 @@ from .package_updates import REMOTE_COMMAND as PACKAGE_UPDATES_COMMAND, parse_up
 
 
 SCAN_SCOPE = DEFAULT_SCAN_SCOPE
+# dpkg distributions grype has distro fix data for; the version string must be numeric (e.g. 24.04, 12).
+SUPPORTED_DPKG_DISTROS = ("ubuntu", "debian")
 EXCLUSIONS = list(ANALYSIS_PROFILES[DEFAULT_SCAN_SCOPE].exclusions)
 SYFT_CONFIG = {"file": {"metadata": {"selection": "none"}},
                "relationships": {"package-file-ownership": False},
@@ -616,9 +618,9 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
         distro = raw.get("distro") or {}
         if not distro.get("id") and os_release.get("id"):
             distro = {"id": os_release["id"], "versionID": os_release.get("versionID", ""), "prettyName": os_release.get("prettyName", "")}
-        if run.profile == DEFAULT_SCAN_SCOPE and (distro.get("id") != "ubuntu"
+        if run.profile == DEFAULT_SCAN_SCOPE and (distro.get("id") not in SUPPORTED_DPKG_DISTROS
                 or not re.fullmatch(r"[0-9]+(?:\.[0-9]+)*", str(distro.get("versionID", "")))):
-            raise AnalysisExecutionError("DISTRO_UNSUPPORTED", "현재 분석은 배포판 버전을 식별할 수 있는 Ubuntu 서버를 지원합니다.")
+            raise AnalysisExecutionError("DISTRO_UNSUPPORTED", "현재 분석은 배포판 버전을 식별할 수 있는 Ubuntu 또는 Debian 서버를 지원합니다.")
         if not ai_reference and run.profile in SOURCE_SCAN_SCOPES and raw.get("source", {}).get("metadata", {}).get("path") != directory:
             raise AnalysisExecutionError("SCOPE_MISMATCH", "수집 결과의 경로가 검사한 소스 디렉터리와 다릅니다.")
         run.manifest.update(distro=distro, package_count=len(packages), catalogers=catalogers)
@@ -644,7 +646,7 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
         grype_config.write_text(GRYPE_CONFIG, encoding="utf-8")
         grype_arguments = [str(grype), "sbom:" + str(spdx_path), "--config", str(grype_config)]
         if run.profile == DEFAULT_SCAN_SCOPE:
-            grype_arguments.extend(["--distro", "ubuntu:" + distro["versionID"]])
+            grype_arguments.extend(["--distro", distro["id"] + ":" + distro["versionID"]])
         grype_arguments.extend(["--by-cve", "-o", "json"])
         report_path = run.local("grype-scan", grype_arguments,
                                settings.analysis_scan_timeout_seconds, env, output="grype.json")

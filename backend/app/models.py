@@ -218,6 +218,11 @@ class ComponentVulnerability(Base):
     finding_severity: Mapped[Optional[str]] = mapped_column(String(20))
     fixed_versions: Mapped[list[Any]] = mapped_column(JSON, default=list)
     fix_check: Mapped[Optional[str]] = mapped_column(String(30))  # package_updates.fix_check verdict
+    # Exploitation evidence copied from the scanner report: EPSS probability/percentile (FIRST), CISA KEV membership, Grype risk score.
+    epss: Mapped[Optional[float]] = mapped_column(Float)
+    epss_percentile: Mapped[Optional[float]] = mapped_column(Float)
+    kev: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    risk: Mapped[Optional[float]] = mapped_column(Float)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     component: Mapped[Component] = relationship()

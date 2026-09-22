@@ -405,3 +405,29 @@ def test_same_os_package_on_two_ubuntu_releases_is_one_product(client, bundle):
     bundle["sbom"]["packages"][-1] = package("24.04")
     second = client.post("/api/analyses/import", json=bundle)
     assert second.status_code == 200, second.text
+
+
+def test_import_keeps_exploit_evidence_and_counts_kev_and_epss(client, bundle):
+    """EPSS, CISA KEV and the risk score ride along from the grype report so the urgent handful can be shown first."""
+    artifact = bundle["report"]["matches"][0]["artifact"]
+    bundle["report"]["matches"] += [
+        {"artifact": artifact, "vulnerability": {"id": "CVE-2026-30001", "severity": "High", "fix": {"state": "fixed", "versions": ["9.9"]},
+                                                 "epss": [{"cve": "CVE-2026-30001", "epss": 0.42, "percentile": 0.97}],
+                                                 "knownExploited": [{"cve": "CVE-2026-30001", "vendorProject": "x", "product": "y"}], "risk": 78.7},
+         "relatedVulnerabilities": []},
+        {"artifact": artifact, "vulnerability": {"id": "CVE-2026-30002", "severity": "Low", "fix": {"state": "not-fixed", "versions": []},
+                                                 "epss": [{"cve": "CVE-2026-30002", "epss": 0.0004, "percentile": 0.1}], "risk": 0.2},
+         "relatedVulnerabilities": []},
+    ]
+    imported = client.post("/api/analyses/import", json=bundle)
+    assert imported.status_code == 200, imported.text
+    body = imported.json()
+    assert body["kev_cve_count"] == 1 and body["epss_cve_count"] == 1
+    rows = {row["cve_id"]: row for row in client.get("/api/vulnerabilities", params={"sbom_id": body["sbom_id"]}).json()}
+    assert rows["CVE-2026-30001"]["kev"] is True and rows["CVE-2026-30001"]["epss"] == 0.42 and rows["CVE-2026-30001"]["risk"] == 78.7
+    assert rows["CVE-2026-30002"]["kev"] is False and rows["CVE-2026-30002"]["epss"] == 0.0004
+    # Reports from older grype versions carry none of it and still import.
+    assert rows[bundle["report"]["matches"][0]["vulnerability"]["id"]]["epss"] is None
+    # The per-CVE list puts the known-exploited one first regardless of severity ordering ties.
+    grouped = client.get("/api/vulnerability-work/cves", params={"sbom_id": body["sbom_id"], "status": "ALL"}).json()
+    assert grouped["items"][0]["cve_id"] == "CVE-2026-30001" and grouped["items"][0]["kev"] is True

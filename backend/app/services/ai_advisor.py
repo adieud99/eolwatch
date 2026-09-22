@@ -101,19 +101,20 @@ def check_context(job: models.CollectionJob) -> dict[str, Any]:
     raw = (result.raw_metrics or {}) if result else {}
     info = raw.get("server_info") or {}
     ports = info.get("listening_ports") or []
+    # Data minimisation: the model gets facts it needs to judge the machine (OS, hardware class, ports, services)
+    # but never its address, host name, account or instance identifiers.
     return {
-        "kind": "check", "job": job.id, "status": job.status, "target": job.asset.asset_tag, "ip": job.asset.ip_address,
+        "kind": "check", "job": job.id, "status": job.status, "target": job.asset.asset_tag,
         "usage": {"cpu": result.cpu_percent, "mem": result.memory_percent, "disk_max": result.max_disk_percent,
                   "uptime_h": round((result.uptime_seconds or 0) / 3600, 1), "health": result.health_level} if result else None,
         "disks": [{"m": d.get("mount"), "used": d.get("used_percent")} for d in (result.disk_details or [])[:MAX_DISKS]] if result else [],
         "top_proc": [p.get("name") for p in (result.process_details or [])[:MAX_PROCESSES]] if result else [],
         "packages": raw.get("package_count"),
         "os": (raw.get("package_context") or {}).get("pretty_name") or info.get("os_name"),
-        "host": info.get("hostname"), "kernel": info.get("kernel"), "arch": info.get("architecture"),
+        "kernel": info.get("kernel"), "arch": info.get("architecture"),
         "cpu": {"model": info.get("cpu_model"), "cores": info.get("cpu_cores")}, "mem_mb": info.get("memory_total_mb"),
         "platform": info.get("platform"), "virt": info.get("virtualization"), "dmi": " ".join(filter(None, [info.get("dmi_vendor"), info.get("dmi_product")])) or None,
         "cloud": {k: v for k, v in (info.get("cloud") or {}).items() if k in ("provider", "instance_type", "region")} or None,
-        "ips": [a.get("address") for a in (info.get("ip_addresses") or [])],
         "ports": sorted({p.get("port") for p in ports if p.get("port") is not None})[:MAX_PORTS],
         "services": (info.get("services") or [])[:MAX_SERVICES],
         "agent": [{"id": r.get("id"), "out": (r.get("output") or "")[:MAX_AGENT_OUTPUT_CHARS]} for r in ((info.get("ai_collection") or {}).get("results") or [])[:MAX_AGENT_RESULTS]] or None,
@@ -156,6 +157,20 @@ def ai_available() -> bool:
     return False
 
 
+def _error_payload(response) -> dict[str, Any]:
+    """The error object of an OpenAI-style reply. Gemini's compatible endpoint wraps it in a list, so accept both."""
+    try:
+        payload = response.json()
+    except ValueError:
+        return {}
+    if isinstance(payload, list):
+        payload = payload[0] if payload and isinstance(payload[0], dict) else {}
+    if not isinstance(payload, dict):
+        return {}
+    error = payload.get("error")
+    return error if isinstance(error, dict) else {}
+
+
 def _complete_openai(prompt: str, system: str, json_mode: bool, max_tokens: int) -> tuple[str, str, dict[str, int]]:
     """OpenAI chat completions over plain HTTPS; OPENAI_BASE_URL also lets any OpenAI-compatible server answer."""
     settings = get_settings()
@@ -184,25 +199,16 @@ def _complete_openai(prompt: str, system: str, json_mode: bool, max_tokens: int)
         if response.status_code == 401:
             raise HTTPException(status_code=503, detail="OpenAI 인증에 실패했습니다. OPENAI_API_KEY를 확인하세요.")
         if response.status_code == 429:
-            try:
-                reason = str(((response.json() or {}).get("error") or {}).get("message") or "")
-            except ValueError:
-                reason = ""
+            reason = str(_error_payload(response).get("message") or "")
             hint = "무료 등급의 하루 요청 한도에 걸렸습니다. 내일 초기화되거나, 결제를 켜거나, 다른 모델(OPENAI_MODEL)을 쓰세요." if "free_tier" in reason or "PerDay" in reason else "잠시 후 다시 시도하세요."
             raise HTTPException(status_code=429, detail=f"AI 요청 한도를 초과했습니다. {hint}" + (f" 제공자 메시지: {reason.splitlines()[0][:120]}" if reason else ""))
         if response.status_code in (400, 404):
-            try:
-                error = (response.json() or {}).get("error") or {}
-            except ValueError:
-                error = {}
+            error = _error_payload(response)
             if response.status_code == 404 or error.get("param") == "model" or "model" in str(error.get("code", "")):
                 raise HTTPException(status_code=503, detail=f"OpenAI 모델 '{settings.openai_model}'을(를) 쓸 수 없습니다. OPENAI_MODEL을 확인하세요.")
             raise HTTPException(status_code=502, detail=f"OpenAI가 요청을 거부했습니다: {str(error.get('message') or response.text)[:160]}")
         if response.status_code >= 500 or response.status_code == 429:
-            try:
-                reason = str(((response.json() or {}).get("error") or {}).get("message") or "")[:140]
-            except ValueError:
-                reason = ""
+            reason = str(_error_payload(response).get("message") or "")[:140]
             logger.warning("AI provider unavailable after %s attempts: %s %s", OPENAI_ATTEMPTS, response.status_code, reason)
             raise HTTPException(status_code=503, detail="AI 서비스가 지금 혼잡합니다(모델 과부하). 잠시 후 다시 시도하세요." + (f" 제공자 메시지: {reason}" if reason else ""))
         response.raise_for_status()
@@ -308,7 +314,12 @@ def latest_summary(db: Session, kind: str, target_id: int) -> Optional[models.Ai
 
 
 def generate_summary(db: Session, kind: str, target_id: int, context: dict[str, Any], username: Optional[str], *, force: bool = False) -> models.AiSummary:
-    prompt = build_prompt(context)
+    return generate_record(db, kind, target_id, build_prompt(context), username, force=force)
+
+
+def generate_record(db: Session, kind: str, target_id: int, prompt: str, username: Optional[str], *, force: bool = False,
+                    system: str = SYSTEM_PROMPT, json_mode: bool = False, max_tokens: int = 700) -> models.AiSummary:
+    """Ask once per (provider, model, prompt) and keep the answer; every AI feature goes through here."""
     digest = hashlib.sha256((provider_name() + ":" + current_model() + ":" + prompt).encode("utf-8")).hexdigest()
     if not force:
         # Same data, same model: reuse the stored answer instead of spending tokens again.
@@ -316,7 +327,8 @@ def generate_summary(db: Session, kind: str, target_id: int, context: dict[str, 
                                                           models.AiSummary.prompt_sha256 == digest).order_by(models.AiSummary.id.desc()).limit(1))
         if cached:
             return cached
-    text, model, usage = complete(prompt)
+    extra = {} if (system == SYSTEM_PROMPT and not json_mode and max_tokens == 700) else {"system": system, "json_mode": json_mode, "max_tokens": max_tokens}
+    text, model, usage = complete(prompt, **extra)
     record = models.AiSummary(kind=kind, target_id=target_id, provider=provider_name(), model=model, prompt_sha256=digest, summary=text,
                               prompt_chars=len(prompt), input_tokens=usage.get("input_tokens"), output_tokens=usage.get("output_tokens"),
                               generated_at=_now(), generated_by=username)

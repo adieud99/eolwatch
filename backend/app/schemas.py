@@ -268,6 +268,10 @@ class VulnerabilityRead(BaseModel):
     fixed_version: Optional[str]
     fixed_versions: list[str] = Field(default_factory=list)
     fix_check: Optional[str] = None
+    epss: Optional[float] = None
+    epss_percentile: Optional[float] = None
+    kev: bool = False
+    risk: Optional[float] = None
     finding_source: Optional[str] = None
     analysis_run_id: Optional[int] = None
     vex_status: str
@@ -368,6 +372,8 @@ class AnalysisRead(BaseModel):
     kernel_fixable_cve_count: int = 0
     verified_fixable_cve_count: int = 0  # fixable CVEs whose fix the package manager really offers
     suspect_cve_count: int = 0           # fixable CVEs with no update in the repository (possible false positives)
+    kev_cve_count: int = 0               # distinct CVEs on the CISA Known Exploited Vulnerabilities list
+    epss_cve_count: int = 0              # distinct CVEs with EPSS >= 1%
     package_updates: Optional[dict[str, Any]] = None
     database_info: dict[str, Any]
     imported_at: datetime
@@ -420,7 +426,7 @@ class AiStatus(BaseModel):
 
 class AiSummaryRead(BaseModel):
     id: int
-    kind: Literal["analysis", "check"]
+    kind: Literal["analysis", "check", "triage", "advice"]
     target_id: int
     provider: str = "anthropic"
     model: str

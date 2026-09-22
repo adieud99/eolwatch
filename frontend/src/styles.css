@@ -255,6 +255,21 @@ tr.nested th { padding: 8px 12px; font-size: 12px; }
 }
 
 .ai-panel { margin-top: 14px; border-left: 4px solid var(--green); }
+.ai-payload { margin: 0 0 14px; padding: 12px 14px; border: 1px dashed var(--rule); border-radius: 6px; background: var(--bg); }
+.ai-payload small { display: block; margin-bottom: 6px; color: var(--muted); font-size: 12px; }
+.ai-payload pre { margin: 0; max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-all; font-size: 12px; line-height: 1.5; color: var(--ink); }
+.exploit { display: block; margin-top: 4px; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; width: fit-content; }
+.exploit-kev { background: #9b3b34; color: #ffffff; }
+.exploit-epss { background: #f4ecd9; color: #8a6516; }
+.exploit-summary { display: block; margin-top: 4px; color: #9b3b34; font-weight: 600; }
+.verdict { display: inline-block; padding: 4px 10px; border-radius: 4px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.verdict-hit { background: #f5e3e1; color: #9b3b34; }
+.verdict-check { background: #f4ecd9; color: #8a6516; }
+.verdict-clear { background: #e6efe9; color: #3f6a50; }
+.triage-counts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
+.triage-counts small { color: var(--muted); font-size: 12px; }
+.ai-triage td { vertical-align: top; }
+.action-advice { margin: 0 0 16px; }
 .ai-summary pre { margin: 0; white-space: pre-wrap; font: inherit; line-height: 1.8; color: var(--ink); }
 .ai-summary small { display: block; margin-top: 12px; color: var(--muted); font-size: 12px; }
 

@@ -20,9 +20,10 @@ services:
       CORS_ORIGINS: http://localhost:5173,http://localhost:8080
       AUTO_CREATE_SCHEMA: "false"
       CREDENTIAL_KEY: ${CREDENTIAL_KEY:-}
-      JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-before-deployment}
+      # Both come from .env (or *_FILE secrets, see docs/SECRETS.md); no built-in default.
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required (.env)}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Eolwatch!2026}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required (.env)}
       AI_PROVIDER: ${AI_PROVIDER:-openai}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
@@ -61,7 +62,7 @@ services:
     command: ["python", "-m", "app.worker"]
     environment:
       CREDENTIAL_KEY: ${CREDENTIAL_KEY:-}
-      JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-before-deployment}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required (.env)}
       AI_PROVIDER: ${AI_PROVIDER:-openai}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
