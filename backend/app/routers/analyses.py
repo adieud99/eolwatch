@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, defer, joinedload
@@ -103,7 +103,9 @@ def read(run: models.AnalysisRun, counts: Optional[dict[str, int]] = None) -> sc
         component_count=run.sbom.component_count, match_count=run.match_count,
         cve_count=run.cve_count, link_count=run.link_count, ignored_non_cve=run.ignored_non_cve,
         # database_info stays the scanner DB descriptor; our own bookkeeping (counts, package_updates) lives beside it
-        database_info={k: v for k, v in (run.database_info or {}).items() if k not in ('counts', 'package_updates')} if isinstance(run.database_info, dict) else run.database_info,
+        database_info={k: v for k, v in (run.database_info or {}).items() if k not in ('counts', 'package_updates', 'verification', 'host', 'distro')} if isinstance(run.database_info, dict) else run.database_info,
+        verification=(run.database_info or {}).get('verification') if isinstance(run.database_info, dict) else None,
+        host=({**(run.database_info or {}).get('host', {}), 'modules': len((run.database_info or {}).get('host', {}).get('modules') or [])} if isinstance(run.database_info, dict) and (run.database_info or {}).get('host') else None),
         imported_at=run.imported_at,
     )
 
@@ -130,6 +132,23 @@ def import_bundle(payload: schemas.AnalysisImport, db: Session = Depends(get_db)
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail='기존 데이터와 식별자가 충돌합니다. 분석 원본을 확인하세요.') from exc
+
+
+@router.post('/{run_id}/verify', response_model=schemas.AnalysisRead)
+def verify_run_endpoint(run_id: int, budget: int = Query(120, ge=10, le=900), db: Session = Depends(get_db)):
+    """Second opinion for one scan: Ubuntu tracker status and kernel source-file relevance. Cached lookups make repeats fast."""
+    from ..services.verification import verify_run
+    if not db.get(models.AnalysisRun, run_id):
+        raise HTTPException(status_code=404, detail='분석 이력이 없습니다')
+    try:
+        verify_run(db, run_id, budget_seconds=budget)
+    except Exception as error:
+        db.rollback()
+        raise HTTPException(status_code=502, detail=f'2차 검증 중 외부 조회에 실패했습니다: {type(error).__name__}') from error
+    run = db.scalar(select(models.AnalysisRun).options(defer(models.AnalysisRun.raw_report),
+                    joinedload(models.AnalysisRun.sbom).defer(models.SbomDocument.raw_document).joinedload(models.SbomDocument.asset))
+                    .where(models.AnalysisRun.id == run_id))
+    return read(run, (run.database_info or {}).get('counts') or breakdown(db, [run.id])[run.id])
 
 
 @router.get('/{base_id}/compare/{target_id}')

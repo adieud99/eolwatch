@@ -95,6 +95,19 @@ def advise_vulnerability(link_id: int, request: Request, force: bool = False, db
     return _read(ai_triage.generate_advice(db, read_link(db, link_id), _username(request), force=force))
 
 
+@router.get("/vulnerabilities/{link_id}/verify", response_model=Optional[schemas.AiSummaryRead])
+def read_verify(link_id: int, db: Session = Depends(get_db)):
+    read_link(db, link_id)
+    record = ai_advisor.latest_summary(db, "verify", link_id)
+    return _read(record) if record else None
+
+
+@router.post("/vulnerabilities/{link_id}/verify", response_model=schemas.AiSummaryRead)
+def verify_vulnerability(link_id: int, request: Request, force: bool = False, db: Session = Depends(get_db)):
+    """AI second review of one finding: is this CVE valid on this server, given tracker status, kernel files and host facts."""
+    return _read(ai_triage.generate_verify(db, read_link(db, link_id), _username(request), force=force))
+
+
 @router.get("/checks/{job_id}/context")
 def read_check_context(job_id: int, db: Session = Depends(get_db)):
     job = db.get(models.CollectionJob, job_id, options=[joinedload(models.CollectionJob.result), joinedload(models.CollectionJob.asset)])

@@ -30,6 +30,18 @@ const bytesText = (value) => value == null ? '-' : `${(value / (1024 ** 3)).toFi
 const latestServerInfo = (checks, assetId) => checks.find((job) => job.asset_id === assetId && job.status === 'SUCCESS' && job.server_info)
 
 const fixCheckText = { UPDATE_AVAILABLE: '저장소에 업데이트 있음', UPDATE_BELOW_FIX: '업데이트는 있지만 수정판 미만', NO_UPDATE_FOUND: '저장소에 업데이트 없음 · 오탐 의심' }
+const trackerText = { released: '배포판 정식 수정판 있음', pending: '다음 패키지에서 수정 예정', needed: '업스트림만 수정 · 배포판 대기', deferred: '배포판이 보류', ignored: '배포판이 안 고치기로 함', 'not-affected': '배포판 판단: 해당 없음', DNE: '이 릴리스에 없음', 'needs-triage': '배포판 검토 중', 'not-listed': '추적기에 없음', unknown: '추적기 조회 실패' }
+const hostText = { CORE: '실행 커널 핵심 코드', LOADED_MODULE: '로드된 모듈', UNLOADED_MODULE: '미로드 드라이버 (해당 없음 추정)', OTHER_ARCH: '다른 아키텍처 (해당 없음)', FS_NOT_USED: '미사용 파일시스템 (해당 없음 추정)', UNKNOWN: '위치 확인 필요' }
+const hostNotHere = ['UNLOADED_MODULE', 'OTHER_ARCH', 'FS_NOT_USED']
+
+// 2차 검증 배지: 배포판 추적기 상태와 커널 코드 위치. 글자로 뜻을 전한다.
+function VerifyBadge({ item }) {
+  if (!item) return null
+  const tracker = item.tracker_status && item.tracker_status !== 'released' ? <small className={`verify verify-tracker-${item.tracker_status === 'pending' ? 'pending' : item.tracker_status === 'not-affected' || item.tracker_status === 'DNE' ? 'clear' : 'open'}`}>{trackerText[item.tracker_status] || item.tracker_status}{item.tracker_status === 'pending' && item.tracker_fix ? ` ${item.tracker_fix}` : ''}</small> : null
+  const host = item.host_relevance ? <small className={`verify verify-host-${hostNotHere.includes(item.host_relevance) ? 'clear' : item.host_relevance === 'UNKNOWN' ? 'check' : 'here'}`}>{hostText[item.host_relevance] || item.host_relevance}</small> : null
+  return <>{tracker}{host}</>
+}
+
 // KEV = CISA가 실제 악용을 확인한 목록, EPSS = 30일 안에 악용될 확률. 색이 아니라 글자로 뜻을 전한다.
 function ExploitBadge({ item }) {
   if (!item) return null
@@ -485,6 +497,16 @@ function AiSummaryPanel({ kind, targetId, canEdit, title = 'AI 요약' }) {
 
 const triageVerdictClass = { '해당': 'verdict-hit', '확인 필요': 'verdict-check', '해당 없음 가능성': 'verdict-clear' }
 
+// 실무자 요약: 수정판 없는 커널 CVE를 "배포판이 어디까지 했나"와 "이 서버에 해당하나"로 나눠 보여 준다.
+function VerificationSummary({ run }) {
+  const v = run.verification
+  if (!v) return <small className="verify-summary subtle">2차 검증 전 · 검사 결과 아래 "2차 검증 실행"</small>
+  const t = v.tracker || {}, h = v.host || {}
+  const notHere = (h.UNLOADED_MODULE || 0) + (h.OTHER_ARCH || 0) + (h.FS_NOT_USED || 0)
+  const waiting = (t.pending || 0) + (t.needed || 0) + (t.deferred || 0) + (t.ignored || 0) + (t['needs-triage'] || 0)
+  return <small className="verify-summary">배포판 추적기 {v.checked_cves?.toLocaleString() ?? 0}건 대조 · 수정 예정 {t.pending || 0} · 업스트림만 수정 {t.needed || 0}{t.deferred || t.ignored ? ` · 보류·미수정 결정 ${(t.deferred || 0) + (t.ignored || 0)}` : ''}{v.fixed_already ? ` · 이미 수정됨(DB 지연) ${v.fixed_already}` : ''}{Object.keys(h).length ? ` | 커널 코드 위치: 핵심·로드됨 ${(h.CORE || 0) + (h.LOADED_MODULE || 0)} · 이 서버 미해당 추정 ${notHere} · 확인 필요 ${h.UNKNOWN || 0}` : ''}{v.partial ? ' · (일부만 조회됨, 다시 실행하면 이어서)' : ''}</small>
+}
+
 // AI 선별: KEV·EPSS·수정판·심각도로 고른 후보만 서버 사실과 함께 보내 '해당 / 확인 필요 / 해당 없음 가능성'을 받는다. 조치 상태는 바꾸지 않는다.
 function AiTriagePanel({ runId, canEdit }) {
   const [status, setStatus] = useState(null)
@@ -538,7 +560,15 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
   const [cveRead, setCveRead] = useState(null)
   const [selectedFinding, setSelectedFinding] = useState(null)
   const [bundle, setBundle] = useState(null)
-  const [cveFilter, setCveFilter] = useState({ fix: 'ALL', kernel: false, resolved: false })   // resolved: show 조치 완료·영향 없음 too
+  const [verifying, setVerifying] = useState(null)   // run id whose second-opinion verification is running
+  async function verifyRun(run) {
+    if (verifying) return
+    setVerifying(run.id)
+    try { await api(`/analyses/${run.id}/verify?budget=120`, { method: 'POST' }); onChanged('2차 검증을 갱신했습니다. 추적기·커널 코드 위치 결과가 표시됩니다.'); refreshCves() }
+    catch (reason) { onChanged(`2차 검증 실패: ${reason.message}`) }
+    finally { setVerifying(null) }
+  }
+  const [cveFilter, setCveFilter] = useState({ fix: 'ALL', kernel: false, resolved: false, relevance: 'actionable' })   // resolved: show 조치 완료·영향 없음 too; relevance: what a practitioner looks at first
   const [cveView, setCveView] = useState('components')   // one row per component, CVEs folded under it
   const [expanded, setExpanded] = useState({})            // component_id -> { status, items, total }
   const [expandedCves, setExpandedCves] = useState({})    // cve_id -> true when its package links are shown
@@ -547,7 +577,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
   const cveSection = useRef(null)
   const pageSize = 100
   const currentPage = page.sbomId === sbomId ? page.number : 0
-  const cveKey = `${sbomId}:${currentPage}:${cveRevision}:${cveFilter.fix}:${cveFilter.kernel}:${cveFilter.resolved}:${cveView}`
+  const cveKey = `${sbomId}:${currentPage}:${cveRevision}:${cveFilter.fix}:${cveFilter.kernel}:${cveFilter.resolved}:${cveFilter.relevance}:${cveView}`
   const currentRead = cveRead?.key === cveKey ? cveRead : null
   const cveLoading = Boolean(sbomId && (!currentRead || currentRead.status === 'loading'))
   const cveError = currentRead?.error || ''
@@ -561,7 +591,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
     if (!sbomId) return
     const controller = new AbortController()
     setCveRead({ key: cveKey, status: 'loading' })
-    const params = new URLSearchParams({ sbom_id: String(sbomId), status: cveFilter.resolved ? 'ALL' : 'OPEN', fix: cveFilter.fix, kernel: String(cveFilter.kernel), limit: String(pageSize), offset: String(currentPage * pageSize) })
+    const params = new URLSearchParams({ sbom_id: String(sbomId), status: cveFilter.resolved ? 'ALL' : 'OPEN', fix: cveFilter.fix, kernel: String(cveFilter.kernel), relevance: cveFilter.relevance, limit: String(pageSize), offset: String(currentPage * pageSize) })
     api(cveView === 'components' ? `/vulnerability-work/components?${params}` : `/vulnerability-work/cves?${params}`, { signal: controller.signal }).then((result) => {
       if (controller.signal.aborted) return
       if (currentPage && currentPage * pageSize >= result.total) {
@@ -591,7 +621,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
     const controller = new AbortController()
     setExpanded((current) => ({ ...current, ...Object.fromEntries(ids.filter((id) => id in current).map((id) => [id, { ...current[id], status: 'loading' }])) }))
     ids.forEach((id) => {
-      const params = new URLSearchParams({ sbom_id: String(sbomId), component_id: id, status: cveFilter.resolved ? 'ALL' : 'OPEN', fix: cveFilter.fix, kernel: String(cveFilter.kernel), limit: '100', offset: '0' })
+      const params = new URLSearchParams({ sbom_id: String(sbomId), component_id: id, status: cveFilter.resolved ? 'ALL' : 'OPEN', fix: cveFilter.fix, kernel: String(cveFilter.kernel), relevance: cveFilter.relevance, limit: '100', offset: '0' })
       api(`/vulnerability-work?${params}`, { signal: controller.signal })
         .then((result) => { if (!controller.signal.aborted) setExpanded((current) => (id in current ? { ...current, [id]: { status: 'success', items: result.items || [], total: result.total || 0 } } : current)) })
         .catch((reason) => { if (!controller.signal.aborted) setExpanded((current) => (id in current ? { ...current, [id]: { status: 'error', error: reason.message } } : current)) })
@@ -612,7 +642,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
       {!nested && <td><strong>{item.asset_tag || '미연결'}</strong><small>{item.asset_name || '대상 없음'}</small></td>}
       {!nested && <td><strong>{item.component_name}</strong><small>검사 당시 {item.component_version || '버전 미상'}</small></td>}
       <td><strong>{item.fixed_versions?.length ? item.fixed_versions.join(', ') : item.fixed_version || '확인 필요'}</strong><FixCheck value={item.fix_check} /></td>
-      <td><span className={`severity severity-${item.severity.toLowerCase()}`}>{item.severity}</span><ExploitBadge item={item} /></td>
+      <td><span className={`severity severity-${item.severity.toLowerCase()}`}>{item.severity}</span><ExploitBadge item={item} /><VerifyBadge item={item} /></td>
       <td><span aria-label={`${item.cve_id} ${item.component_name} 조치 상태`}>{vexStatusText[item.vex_status] || item.vex_status}</span><button className="table-button" aria-label={`${item.cve_id} ${item.component_name} ${canEdit ? '조치 관리' : '조치 이력'}`} onClick={() => setSelectedFinding(item)}>{canEdit ? '조치 관리' : '조치 이력'}</button></td></tr>
   }
 
@@ -648,8 +678,8 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
           <td>{new Date(run.imported_at).toLocaleString('ko-KR')}<small>검사 #{run.id} · SBOM #{run.sbom_id}</small></td>
           <td><strong>{run.asset_tag} · {run.asset_name}</strong><small>{analysisScopeText[run.scan_scope] || scopeLabel(run.scan_scope)}</small></td>
           <td><strong>{run.scanner} {run.scanner_version}</strong><small>SBOM 생성: {run.generator?.includes('AI-Library-Reference') ? <span className="chip chip-ai">AI 라이브러리 참조 · 버전 추정</span> : (run.generator || '미상')}</small>{(run.database_info?.built || run.database_info?.status?.built) && <small>DB 기준: {new Date(run.database_info.built || run.database_info.status.built).toLocaleString('ko-KR')}</small>}</td>
-          <td><strong>지금 고칠 수 있는 CVE {(run.fixable_cve_count ?? 0) - (run.kernel_fixable_cve_count ?? 0)}개{run.kernel_cve_count ? ' (커널 제외)' : ''}</strong>{(run.kev_cve_count || run.epss_cve_count) ? <small className="exploit-summary">실제 악용 확인 {run.kev_cve_count ?? 0}개 · 악용 확률 1% 이상 {run.epss_cve_count ?? 0}개</small> : null}<small>{run.kernel_cve_count ? `커널(linux) 업데이트로 ${run.kernel_fixable_cve_count ?? 0}개 더 · 커널 전체 ${run.kernel_cve_count}개 · ` : ''}수정판 없음 {run.cve_count - (run.fixable_cve_count ?? 0)}개 · 전체 CVE {run.cve_count}개 · 구성요소 연결 {run.link_count}건</small>{run.package_updates?.manager && <small className="fix-check-summary">{run.package_updates.manager === 'apt' ? 'apt' : 'dnf'} 대조: 저장소에 업데이트 있음 {run.verified_fixable_cve_count ?? 0}개 · 오탐 의심 {run.suspect_cve_count ?? 0}개{run.package_updates.refreshed ? '' : ' · 패키지 목록 갱신 못 함'}</small>}<small>구성요소 {run.component_count}개 · 전체 탐지 {run.match_count}건 · CVE 외 {run.ignored_non_cve}건</small></td>
-          <td><div className="action-row"><button className="table-button" aria-label={`검사 ${run.id} CVE 보기`} onClick={() => selectSbom(String(run.sbom_id), true)}>CVE 보기</button><button className="table-button" aria-label={`검사 ${run.id} 원본 보기`} aria-pressed={bundle?.run?.id === run.id} onClick={() => viewBundle(run)}>원본 보기</button></div></td>
+          <td><strong>지금 고칠 수 있는 CVE {(run.fixable_cve_count ?? 0) - (run.kernel_fixable_cve_count ?? 0)}개{run.kernel_cve_count ? ' (커널 제외)' : ''}</strong>{(run.kev_cve_count || run.epss_cve_count) ? <small className="exploit-summary">실제 악용 확인 {run.kev_cve_count ?? 0}개 · 악용 확률 1% 이상 {run.epss_cve_count ?? 0}개</small> : null}<VerificationSummary run={run} /><small>{run.kernel_cve_count ? `커널(linux) 업데이트로 ${run.kernel_fixable_cve_count ?? 0}개 더 · 커널 전체 ${run.kernel_cve_count}개 · ` : ''}수정판 없음 {run.cve_count - (run.fixable_cve_count ?? 0)}개 · 전체 CVE {run.cve_count}개 · 구성요소 연결 {run.link_count}건</small>{run.package_updates?.manager && <small className="fix-check-summary">{run.package_updates.manager === 'apt' ? 'apt' : 'dnf'} 대조: 저장소에 업데이트 있음 {run.verified_fixable_cve_count ?? 0}개 · 오탐 의심 {run.suspect_cve_count ?? 0}개{run.package_updates.refreshed ? '' : ' · 패키지 목록 갱신 못 함'}</small>}<small>구성요소 {run.component_count}개 · 전체 탐지 {run.match_count}건 · CVE 외 {run.ignored_non_cve}건</small></td>
+          <td><div className="action-row"><button className="table-button" aria-label={`검사 ${run.id} CVE 보기`} onClick={() => selectSbom(String(run.sbom_id), true)}>CVE 보기</button><button className="table-button" aria-label={`검사 ${run.id} 원본 보기`} aria-pressed={bundle?.run?.id === run.id} onClick={() => viewBundle(run)}>원본 보기</button>{canEdit && <button className="table-button" aria-label={`검사 ${run.id} 2차 검증`} disabled={verifying === run.id} onClick={() => verifyRun(run)}>{verifying === run.id ? '검증 중…' : run.verification ? '2차 검증 다시' : '2차 검증 실행'}</button>}</div></td>
         </tr>)}{!analyses.length && <tr><td colSpan="5" className="empty">저장된 검사 결과가 없습니다.</td></tr>}</tbody>
       </table></div>
     </section>
@@ -668,7 +698,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
     {selectedFinding && <VulnerabilityActions key={selectedFinding.link_id} finding={selectedFinding} canEdit={canEdit} request={api} onSaved={() => { setSelectedFinding(null); refreshCves(); return onChanged('조치 내용과 이력을 저장했습니다.') }} onClose={() => setSelectedFinding(null)} />}
     {cveLoading && <p role="status">CVE 결과를 불러오는 중…</p>}
     {cveError && <div role="alert"><p className="form-error">CVE 결과 조회 실패: {cveError}</p><button className="secondary" type="button" onClick={refreshCves}>CVE 조회 다시 시도</button></div>}
-    {sbomId && <div className="cve-filters" role="group" aria-label="CVE 표시 조건"><label>표시<select aria-label="수정판 기준" value={cveFilter.fix} onChange={(event) => { setCveFilter({ ...cveFilter, fix: event.target.value }); setPage({ sbomId, number: 0 }) }}><option value="ALL">전체</option><option value="FIXED">수정판 있는 CVE만</option><option value="UNFIXED">수정판 없는 CVE만</option></select></label><label className="check"><input type="checkbox" checked={cveFilter.kernel} onChange={(event) => { setCveFilter({ ...cveFilter, kernel: event.target.checked }); setPage({ sbomId, number: 0 }) }} />커널(linux) CVE 포함</label><label className="check"><input type="checkbox" checked={cveFilter.resolved} onChange={(event) => { setCveFilter({ ...cveFilter, resolved: event.target.checked }); setPage({ sbomId, number: 0 }) }} />해결된 CVE 포함</label><small>기본은 아직 조치하지 않은 CVE만, 커널(linux)은 제외해 보여 줍니다. '조치 완료'·'영향 없음'으로 기록한 것은 '해결된 CVE 포함'을 켜야 보입니다.</small></div>}
+    {sbomId && <div className="cve-filters" role="group" aria-label="CVE 표시 조건"><label>범위<select aria-label="표시 범위" value={cveFilter.relevance} onChange={(event) => { setCveFilter({ ...cveFilter, relevance: event.target.value, kernel: event.target.value === 'actionable' ? cveFilter.kernel : true }); setPage({ sbomId, number: 0 }) }}><option value="actionable">조치 대상만 (수정판·악용 확인·악용 확률)</option><option value="relevant">이 서버에 해당하는 것 (미로드 드라이버 제외)</option><option value="all">전체</option></select></label><label>표시<select aria-label="수정판 기준" value={cveFilter.fix} onChange={(event) => { setCveFilter({ ...cveFilter, fix: event.target.value }); setPage({ sbomId, number: 0 }) }}><option value="ALL">전체</option><option value="FIXED">수정판 있는 CVE만</option><option value="UNFIXED">수정판 없는 CVE만</option></select></label><label className="check"><input type="checkbox" checked={cveFilter.kernel} onChange={(event) => { setCveFilter({ ...cveFilter, kernel: event.target.checked }); setPage({ sbomId, number: 0 }) }} />커널(linux) CVE 포함</label><label className="check"><input type="checkbox" checked={cveFilter.resolved} onChange={(event) => { setCveFilter({ ...cveFilter, resolved: event.target.checked }); setPage({ sbomId, number: 0 }) }} />해결된 CVE 포함</label><small>기본은 아직 조치하지 않은 CVE만, 커널(linux)은 제외해 보여 줍니다. '조치 완료'·'영향 없음'으로 기록한 것은 '해결된 CVE 포함'을 켜야 보입니다.</small></div>}
     <div className="view-toggle" role="group" aria-label="CVE 보기 방식"><button type="button" className="table-button" aria-pressed={cveView === 'components'} onClick={() => { setCveView('components'); setPage({ sbomId, number: 0 }) }}>구성요소별로 보기</button><button type="button" className="table-button" aria-pressed={cveView === 'cves'} onClick={() => { setCveView('cves'); setPage({ sbomId, number: 0 }) }}>CVE별로 보기</button></div>
     {cveView === 'components' ? <div className="table-wrap"><table aria-label="구성요소별 CVE"><thead><tr><th>구성요소</th><th>영향 대상</th><th>CVE</th><th>최고 심각도</th><th>수정 버전</th><th>확인</th></tr></thead>
       <tbody>{visibleGroups.flatMap((group) => {
@@ -695,7 +725,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
           <td><strong>{first.asset_tag || '미연결'}</strong><small>{first.asset_name || '대상 없음'}</small></td>
           <td><strong>패키지 {links.length}개</strong><small>{links.slice(0, 3).map((item) => item.component_name).join(', ')}{links.length > 3 ? ` 외 ${links.length - 3}` : ''}</small></td>
           <td><strong>{group.fixed_versions?.length ? group.fixed_versions.join(', ') : '확인 필요'}</strong>{group.update_available_count ? <small className="fix-check fix-check-update_available">저장소에 업데이트 있음 {group.update_available_count}건</small> : null}{group.no_update_count ? <small className="fix-check fix-check-no_update_found">저장소에 업데이트 없음 · 오탐 의심 {group.no_update_count}건</small> : null}</td>
-          <td><span className={`severity severity-${(group.severity || 'unknown').toLowerCase()}`}>{group.severity}</span><ExploitBadge item={group} /></td>
+          <td><span className={`severity severity-${(group.severity || 'unknown').toLowerCase()}`}>{group.severity}</span><ExploitBadge item={group} /><VerifyBadge item={group} /></td>
           <td><span aria-label={`${group.cve_id} 조치 상태`}>미조치 {group.open_count} / {links.length}</span><button className="table-button" aria-expanded={open} aria-label={`${group.cve_id} 패키지 ${links.length}개 ${open ? '접기' : '펼치기'}`} onClick={() => toggleCve(group.cve_id)}>{open ? '접기' : `패키지 ${links.length}개 펼치기`}</button></td></tr>
         if (!open) return [row]
         const detail = <tr key={`cve-${group.cve_id}-links`} className="nested"><td colSpan="6">

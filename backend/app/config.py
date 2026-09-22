@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     analysis_scan_timeout_seconds: int = 900
     analysis_job_lease_seconds: int = 180
     analysis_poll_seconds: int = 3
+    verification_budget_seconds: int = 600   # tracker + kernel.org lookups after an import; 0 disables
     analysis_uploads_dir: str = "/var/lib/eolwatch/uploads"
     ai_provider: str = "openai"
     anthropic_api_key: str = ""

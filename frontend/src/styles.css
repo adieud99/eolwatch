@@ -262,6 +262,16 @@ tr.nested th { padding: 8px 12px; font-size: 12px; }
 .exploit-kev { background: #9b3b34; color: #ffffff; }
 .exploit-epss { background: #f4ecd9; color: #8a6516; }
 .exploit-summary { display: block; margin-top: 4px; color: #9b3b34; font-weight: 600; }
+.verify { display: block; margin-top: 4px; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; width: fit-content; }
+.verify-tracker-pending { background: #e6efe9; color: #3f6a50; }
+.verify-tracker-open { background: #f0efef; color: var(--muted); }
+.verify-tracker-clear, .verify-host-clear { background: #e6efe9; color: #3f6a50; }
+.verify-host-here { background: #f5e3e1; color: #9b3b34; }
+.verify-host-check { background: #f4ecd9; color: #8a6516; }
+.verify-summary { display: block; margin-top: 4px; color: var(--muted); }
+.action-evidence { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0 0 12px; font-size: 13px; }
+.action-evidence dt { color: var(--muted); }
+.action-evidence dd { margin: 0; }
 .verdict { display: inline-block; padding: 4px 10px; border-radius: 4px; font-size: 13px; font-weight: 600; white-space: nowrap; }
 .verdict-hit { background: #f5e3e1; color: #9b3b34; }
 .verdict-check { background: #f4ecd9; color: #8a6516; }

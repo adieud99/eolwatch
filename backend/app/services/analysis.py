@@ -134,6 +134,12 @@ def import_analysis(db: Session, payload: schemas.AnalysisImport, *, commit: boo
     )
     if payload.package_updates:
         run.database_info = {**(run.database_info or {}), 'package_updates': {k: v for k, v in payload.package_updates.items() if k != 'packages'} | {'package_count': len(payload.package_updates.get('packages') or {})}}
+    if payload.distro:
+        run.database_info = {**(run.database_info or {}), 'distro': {k: payload.distro.get(k) for k in ('id', 'versionID', 'codename', 'prettyName') if payload.distro.get(k)}}
+    if payload.host:
+        host = payload.host
+        run.database_info = {**(run.database_info or {}), 'host': {'arch': host.get('arch'), 'modules': list(host.get('modules') or [])[:400],
+                                                                   'filesystems': list(host.get('filesystems') or [])[:60], 'rootfs': host.get('rootfs')}}
     db.add(run)
     db.flush()
     seen, cves = set(), set()

@@ -165,7 +165,8 @@ def test_pipeline_scans_exact_spdx_and_records_hashes(tmp_path, mocked_pipeline)
     settings, state = mocked_pipeline
     directory = tmp_path / "job"
     result = executor.execute_analysis({"id": 9, "ip_address": "10.77.0.21"}, directory, settings, state["stages"].append)
-    assert {k: v for k, v in result.items() if k != "package_updates"} == {"sbom": state["sbom"], "report": state["report"], "scan_scope": "ubuntu-dpkg-installed"}
+    assert {k: v for k, v in result.items() if k not in ("package_updates", "distro", "host")} == {"sbom": state["sbom"], "report": state["report"], "scan_scope": "ubuntu-dpkg-installed"}
+    assert result["distro"]["id"] == "ubuntu" and result["distro"]["versionID"] == "24.04"
     assert result["package_updates"]["manager"] is None and result["package_updates"]["packages"] == {}
     assert state["stages"] == ["COLLECTING", "SCANNING", "IMPORTING"]
     grype = next(argv for name, argv in state["local_commands"] if name == "grype-scan")

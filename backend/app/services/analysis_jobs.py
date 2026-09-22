@@ -347,7 +347,8 @@ def process_next_analysis_job() -> Optional[int]:
                 raise JobLeaseLost('Analysis worker no longer owns this job')
             _check_target(db, snapshot)
             payload = schemas.AnalysisImport(asset_id=job.asset_id, sbom=bundle['sbom'], report=bundle['report'],
-                                            scan_scope=bundle['scan_scope'], package_updates=bundle.get('package_updates'))
+                                            scan_scope=bundle['scan_scope'], package_updates=bundle.get('package_updates'),
+                                            distro=bundle.get('distro'), host=bundle.get('host'))
             run = import_analysis(db, payload, commit=False)
             if bundle.get('learned_host_key'):
                 target = db.get(models.Asset, job.asset_id)
@@ -360,6 +361,15 @@ def process_next_analysis_job() -> Optional[int]:
             job.finished_at = models.utcnow()
             job.heartbeat_at = job.finished_at
             db.commit()
+            run_id = run.id
+        # Second opinion (Ubuntu tracker, kernel source files) after the result is safely stored; never fails the job.
+        try:
+            from .verification import verify_run
+            if get_settings().verification_budget_seconds > 0:
+                with SessionLocal() as db:
+                    verify_run(db, run_id, budget_seconds=get_settings().verification_budget_seconds)
+        except Exception:
+            logger.exception('Verification of run %s failed; the scan result stands', run_id)
     except JobCancellationRequested:
         _finish_cancellation(job_id, token, no_execution=not execution_started)
     except JobLeaseLost:

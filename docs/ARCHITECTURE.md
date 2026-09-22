@@ -83,7 +83,8 @@ QUEUED → COLLECTING → SCANNING → IMPORTING → SUCCESS
 3. **apt 대조**(`package_updates.py`): 서버 저장소가 실제로 올릴 수 있는 버전과 수정판을 dpkg 규칙으로 비교해 `UPDATE_AVAILABLE / UPDATE_BELOW_FIX / NO_UPDATE_FOUND`를 남긴다.
 4. **분리 집계**(`cve_breakdown.py`): 수정판 있음, 커널(linux 소스), 저장소 확인, 오탐 의심, **KEV, EPSS 1% 이상**을 검사마다 고정 저장한다.
 5. **화면**: 결과 표 첫 줄에 "CVE 전체 / 지금 고칠 수 있는 CVE(커널 제외) / 실제 악용 확인 n / 악용 확률 1% 이상 n". CVE별 보기는 같은 CVE가 형제 패키지에 붙은 것을 한 줄로 접고 KEV → 심각도 → EPSS 순으로 정렬한다.
-6. **AI 선별**(`ai_triage.py`): KEV·EPSS·수정판·심각도로 고른 후보 40건과 서버 사실만 보내 `해당 / 확인 필요 / 해당 없음 가능성`과 조치를 받는다. 조치 상태는 바꾸지 않는다.
+6. **2차 검증**(`verification.py`, 검사 직후 worker가 자동 실행): Ubuntu 보안 추적기로 CVE마다 `released/pending/needed/…` 상태와 버전을, 커널 CNA(kernel.org)로 커널 CVE의 영향 소스 파일을 받아 서버의 `lsmod`·파일시스템·아키텍처와 대조한다. 결과는 연결마다 `tracker_status`·`host_relevance`로, 검사마다 집계로 저장되고 캐시된다.
+7. **AI 선별·AI 2차 검토**(`ai_triage.py`): 후보 40건과 서버 사실(+위 근거)을 보내 `해당 / 확인 필요 / 해당 없음 가능성`과 조치를 받고, CVE 하나는 `유효 / 오탐 가능성 / 해당 없음 가능성 / 확인 필요`로 검토받는다. 조치 상태는 바꾸지 않는다.
 
 숫자가 큰 이유와 검증 결과는 [커널 CVE 검증](KERNEL_CVE_VERIFICATION_2026-09-22.md)에 있다. CVSS를 따로 계산하지 않으며 심각도는 Grype 값을 쓴다.
 

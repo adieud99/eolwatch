@@ -32,7 +32,9 @@ TRIAGE_SYSTEM = (
     "'해당 없음 가능성'(이 서버 유형에 없는 장치·서브시스템, 실행되지 않는 커널, 이미 고쳐진 정황 등 근거가 있을 때만) 중 하나로 판정한다. "
     "근거 없는 판정을 하지 않고, 확신이 없으면 '확인 필요'로 둔다. 데이터에 없는 CVE·버전·서버 정보는 지어내지 않는다. "
     "키 뜻: cve 번호, pkg 패키지, ver 설치 버전, fix 수정판, sev 심각도, epss 30일 내 악용 확률, kev CISA 악용 확인, "
-    "apt 저장소 대조(UPDATE_AVAILABLE 올릴 수 있음/NO_UPDATE_FOUND 올릴 것 없음), kernel 커널 패키지 여부, running 실행 중 커널에 속하는지, sub 서브시스템 힌트. "
+    "apt 저장소 대조(UPDATE_AVAILABLE 올릴 수 있음/NO_UPDATE_FOUND 올릴 것 없음), kernel 커널 패키지 여부, running 실행 중 커널에 속하는지, "
+    "tracker 배포판 추적기 상태(released 정식 배포됨/pending 다음 패키지에서 수정 예정/needed 업스트림만 수정/not-affected 해당 없음), tracker_fix 그 버전, "
+    "host 커널 코드 위치 판정(CORE 핵심/LOADED_MODULE 로드된 모듈/UNLOADED_MODULE 미로드 드라이버/OTHER_ARCH 다른 아키텍처/FS_NOT_USED 미사용 파일시스템), files 영향 소스 파일. "
     'JSON 객체 하나만 답한다: {"items":[{"cve":"...","verdict":"해당|확인 필요|해당 없음 가능성","reason":"한 문장","action":"한 문장 (명령 포함 가능)"}],"note":"전체 한 줄 평"}'
 )
 ADVICE_SYSTEM = (
@@ -92,7 +94,9 @@ def candidates(db: Session, run: models.AnalysisRun) -> tuple[list[dict[str, Any
         entry = per.setdefault(vulnerability.osv_id, {"cve": vulnerability.osv_id, "pkg": comp.name, "ver": comp.version, "fix": sorted(item.fixed_versions or [])[:2],
                                                        "sev": severity, "epss": round(item.epss or 0, 4), "kev": bool(item.kev), "apt": item.fix_check,
                                                        "kernel": kernel, "running": _running_kernel(comp.name, comp.purl, facts.get("kernel_running")),
-                                                       "sub": (vulnerability.summary or "")[:60] or None, "why": set(), "link_id": item.id})
+                                                       "sub": (vulnerability.summary or "")[:60] or None, "why": set(), "link_id": item.id,
+                                                       "tracker": item.tracker_status, "tracker_fix": item.tracker_fix, "host": item.host_relevance,
+                                                       "files": list(item.kernel_files or [])[:3]})
         entry["why"].update(reasons)
         if severity_rank(severity) > severity_rank(entry["sev"]):
             entry["sev"] = severity
@@ -174,7 +178,46 @@ def advice_context(db: Session, link: models.ComponentVulnerability) -> dict[str
     return {"cve": link.vulnerability.osv_id, "summary": (link.vulnerability.summary or "")[:200] or None, "pkg": comp.name, "ver": comp.version,
             "purl": comp.purl, "fix": sorted(link.fixed_versions or [])[:3], "sev": (link.finding_severity or link.vulnerability.severity or "UNKNOWN").upper(),
             "epss": link.epss, "kev": bool(link.kev), "apt": link.fix_check, "status": link.vex_status,
-            "kernel": is_kernel_package(comp.name, comp.purl), "server": _server_facts(db, sbom.asset_id if sbom else None)}
+            "kernel": is_kernel_package(comp.name, comp.purl), "tracker": link.tracker_status, "tracker_fix": link.tracker_fix,
+            "host": link.host_relevance, "files": list(link.kernel_files or [])[:5], "server": _server_facts(db, sbom.asset_id if sbom else None)}
+
+
+VERIFY_SYSTEM = (
+    "너는 취약점 검사 결과의 2차 검토자다. 도구가 잡은 CVE 하나에 대해, 주어진 근거만으로 이 서버에서 그 판정이 맞는지 평가한다. "
+    "근거의 뜻: fix 배포판 수정판(비어 있으면 도구가 수정판을 모름), tracker 배포판 추적기 상태(released/pending/needed/not-affected/DNE), tracker_fix 그 버전, "
+    "apt 저장소 대조, kernel 커널 패키지 여부, host 커널 코드 위치(CORE/LOADED_MODULE/UNLOADED_MODULE/OTHER_ARCH/FS_NOT_USED), files 영향 소스 파일, "
+    "server 실행 중 커널·플랫폼·포트·서비스, epss 악용 확률, kev 실제 악용 확인. "
+    "판정은 '유효'(이 서버에 해당하는 실제 취약점), '오탐 가능성'(추적기가 not-affected/DNE이거나 설치 버전이 이미 수정판 이상), "
+    "'해당 없음 가능성'(이 서버에 없는 장치·아키텍처·미사용 파일시스템 코드, 실행되지 않는 커널), '확인 필요'(근거 부족) 중 하나다. "
+    "근거 없는 단정은 하지 않는다. "
+    'JSON 객체 하나만 답한다: {"verdict":"유효|오탐 가능성|해당 없음 가능성|확인 필요","confidence":"high|medium|low","reason":"두 문장 이내","next":"담당자가 할 일 한 문장"}'
+)
+VERIFY_VERDICTS = ("유효", "오탐 가능성", "해당 없음 가능성", "확인 필요")
+
+
+def generate_verify(db: Session, link: models.ComponentVulnerability, username: Optional[str], *, force: bool = False) -> models.AiSummary:
+    context = advice_context(db, link)
+    prompt = "이 CVE 판정이 이 서버에서 맞는지 2차 검토하라.\n" + ai_advisor._dumps(context)
+    record = ai_advisor.generate_record(db, "verify", link.id, prompt, username, force=force, system=VERIFY_SYSTEM, json_mode=True, max_tokens=600)
+    try:
+        answer = json.loads(record.summary)
+    except ValueError:
+        cleaned = record.summary.strip(); start, end = cleaned.find("{"), cleaned.rfind("}")
+        try:
+            answer = json.loads(cleaned[start:end + 1]) if start >= 0 else {}
+        except ValueError:
+            answer = {}
+    verdict = str((answer or {}).get("verdict", "")).strip()
+    if verdict not in VERIFY_VERDICTS:
+        verdict = "확인 필요"
+    confidence = str((answer or {}).get("confidence", "low")).lower()
+    result = {"verdict": verdict, "confidence": confidence if confidence in ("high", "medium", "low") else "low",
+              "reason": str((answer or {}).get("reason", ""))[:400], "next": str((answer or {}).get("next", ""))[:300],
+              "evidence": {k: context[k] for k in ("tracker", "tracker_fix", "host", "apt", "kev", "epss", "fix")}}
+    if record.summary != json.dumps(result, ensure_ascii=False):
+        record.summary = json.dumps(result, ensure_ascii=False)
+        db.commit(); db.refresh(record)
+    return record
 
 
 def generate_advice(db: Session, link: models.ComponentVulnerability, username: Optional[str], *, force: bool = False) -> models.AiSummary:

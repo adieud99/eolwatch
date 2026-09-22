@@ -510,7 +510,23 @@ def _parse_os_release(text: str) -> dict:
             values[key.strip()] = value.strip().strip('"').strip("'")
     if not values.get("ID"):
         return {}
-    return {"id": values["ID"].lower(), "versionID": values.get("VERSION_ID", ""), "prettyName": values.get("PRETTY_NAME", "")}
+    return {"id": values["ID"].lower(), "versionID": values.get("VERSION_ID", ""), "prettyName": values.get("PRETTY_NAME", ""),
+            "codename": values.get("VERSION_CODENAME", "").lower() or None}
+
+
+HOST_FACTS_COMMAND = ("uname -m; echo ---; lsmod 2>/dev/null | awk 'NR>1 {print $1}'; echo ---; "
+                      "awk '$1 != \"nodev\" {print $2}' /proc/filesystems 2>/dev/null; echo ---; findmnt -no FSTYPE / 2>/dev/null || true")
+
+
+def _parse_host_facts(text: str) -> dict:
+    """Architecture, loaded kernel modules, usable filesystems and the root filesystem type, for kernel CVE relevance."""
+    sections = text.split("---")
+    if len(sections) < 3:
+        return {}
+    def lines(index):
+        return [line.strip() for line in sections[index].splitlines() if line.strip()] if len(sections) > index else []
+    arch = (lines(0) or [""])[0]
+    return {"arch": arch, "modules": lines(1)[:400], "filesystems": lines(2)[:60], "rootfs": (lines(3) or [None])[0]}
 
 
 def _environment(settings) -> dict:
@@ -537,6 +553,7 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
     remote_config = None
     package_updates = None
     os_release: dict = {}
+    host_facts: dict = {}
     try:
         run.heartbeat("COLLECTING")
         profile = ANALYSIS_PROFILES.get(run.profile)
@@ -591,6 +608,12 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
                     os_release = _parse_os_release(run.remote(client, "os-release", ["cat", "/etc/os-release"], 10).read_text(errors="replace"))
                 except AnalysisExecutionError:
                     os_release = {}
+                # What this kernel actually runs: needed to tell a CVE in an unloaded driver from one in core code.
+                try:
+                    host_facts = _parse_host_facts(run.remote(client, "host-facts", ["sh", "-c", HOST_FACTS_COMMAND], 20).read_text(errors="replace"))
+                except AnalysisExecutionError:
+                    host_facts = {}
+                run.manifest["host_facts"] = {k: (len(v) if isinstance(v, list) else v) for k, v in host_facts.items()}
                 # Ask apt/dnf what it would upgrade, so each 'fixed' CVE can be checked against the real repository.
                 try:
                     package_updates = parse_updates(run.remote(client, "package-updates", ["sh", "-c", PACKAGE_UPDATES_COMMAND], 180).read_text(errors="replace"))
@@ -618,6 +641,8 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
         distro = raw.get("distro") or {}
         if not distro.get("id") and os_release.get("id"):
             distro = {"id": os_release["id"], "versionID": os_release.get("versionID", ""), "prettyName": os_release.get("prettyName", "")}
+        if os_release.get("codename") and not distro.get("codename"):
+            distro = {**distro, "codename": os_release["codename"]}
         if run.profile == DEFAULT_SCAN_SCOPE and (distro.get("id") not in SUPPORTED_DPKG_DISTROS
                 or not re.fullmatch(r"[0-9]+(?:\.[0-9]+)*", str(distro.get("versionID", "")))):
             raise AnalysisExecutionError("DISTRO_UNSUPPORTED", "현재 분석은 배포판 버전을 식별할 수 있는 Ubuntu 또는 Debian 서버를 지원합니다.")
@@ -656,9 +681,11 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
         run.manifest.update(match_count=len(report["matches"]), grype_db=report.get("descriptor", {}).get("db"))
         run.heartbeat("IMPORTING")
         run.manifest["status"] = "ready_for_import"
-        result = {"sbom": sbom, "report": report, "scan_scope": run.scan_scope}
+        result = {"sbom": sbom, "report": report, "scan_scope": run.scan_scope, "distro": distro}
         if package_updates is not None:
             result["package_updates"] = package_updates
+        if host_facts:
+            result["host"] = host_facts
         if run.manifest.get("git_commit"):
             result["git_commit"] = run.manifest["git_commit"]
         learned = getattr(client, "eolwatch_learned_host_key", None) if client is not None else None

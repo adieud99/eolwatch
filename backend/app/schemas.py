@@ -272,6 +272,10 @@ class VulnerabilityRead(BaseModel):
     epss_percentile: Optional[float] = None
     kev: bool = False
     risk: Optional[float] = None
+    tracker_status: Optional[str] = None
+    tracker_fix: Optional[str] = None
+    host_relevance: Optional[str] = None
+    kernel_files: list[str] = Field(default_factory=list)
     finding_source: Optional[str] = None
     analysis_run_id: Optional[int] = None
     vex_status: str
@@ -345,6 +349,9 @@ class AuditLogRead(BaseModel):
 
 
 class AnalysisImport(BaseModel):
+    distro: Optional[dict[str, Any]] = None   # {id, versionID, codename} the server reported (OS scans)
+    host: Optional[dict[str, Any]] = None     # {arch, modules, filesystems, rootfs} for kernel CVE relevance
+
     asset_id: int = Field(gt=0)
     sbom: dict[str, Any]
     report: dict[str, Any]
@@ -375,6 +382,8 @@ class AnalysisRead(BaseModel):
     kev_cve_count: int = 0               # distinct CVEs on the CISA Known Exploited Vulnerabilities list
     epss_cve_count: int = 0              # distinct CVEs with EPSS >= 1%
     package_updates: Optional[dict[str, Any]] = None
+    verification: Optional[dict[str, Any]] = None   # services/verification.py counts: tracker statuses, host relevance, checked_at
+    host: Optional[dict[str, Any]] = None           # {arch, modules(count), filesystems, rootfs}
     database_info: dict[str, Any]
     imported_at: datetime
 
@@ -426,7 +435,7 @@ class AiStatus(BaseModel):
 
 class AiSummaryRead(BaseModel):
     id: int
-    kind: Literal["analysis", "check", "triage", "advice"]
+    kind: Literal["analysis", "check", "triage", "advice", "verify"]
     target_id: int
     provider: str = "anthropic"
     model: str

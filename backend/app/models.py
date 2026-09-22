@@ -223,6 +223,11 @@ class ComponentVulnerability(Base):
     epss_percentile: Mapped[Optional[float]] = mapped_column(Float)
     kev: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     risk: Mapped[Optional[float]] = mapped_column(Float)
+    # Second opinion (services/verification.py): what the distribution tracker says and whether the kernel code is reachable here.
+    tracker_status: Mapped[Optional[str]] = mapped_column(String(24))   # released / pending / needed / deferred / ignored / not-affected / DNE / not-listed / unknown
+    tracker_fix: Mapped[Optional[str]] = mapped_column(String(160))     # released or pending package version from the tracker
+    host_relevance: Mapped[Optional[str]] = mapped_column(String(24))   # CORE / LOADED_MODULE / UNLOADED_MODULE / OTHER_ARCH / FS_NOT_USED / UNKNOWN (kernel CVEs only)
+    kernel_files: Mapped[list[Any]] = mapped_column(JSON, default=list)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     component: Mapped[Component] = relationship()
@@ -310,6 +315,34 @@ class AnalysisUpload(Base):
     project_name: Mapped[str] = mapped_column(String(80))
     size_bytes: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class TrackerCache(Base):
+    """One distribution tracker answer per (CVE, distro, release, source package); refreshed after 24 hours."""
+    __tablename__ = "tracker_cache"
+    __table_args__ = (UniqueConstraint("cve", "distro_id", "release", "package", name="uq_tracker_cache"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cve: Mapped[str] = mapped_column(String(40), index=True)
+    distro_id: Mapped[str] = mapped_column(String(40))
+    release: Mapped[str] = mapped_column(String(40))
+    package: Mapped[str] = mapped_column(String(200))
+    status: Mapped[str] = mapped_column(String(24))
+    fix: Mapped[Optional[str]] = mapped_column(String(160))
+    priority: Mapped[Optional[str]] = mapped_column(String(20))
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class KernelCveFiles(Base):
+    """The kernel CNA's record of which source files a kernel CVE touches (kernel.org vulns repository)."""
+    __tablename__ = "kernel_cve_files"
+
+    cve: Mapped[str] = mapped_column(String(40), primary_key=True)
+    files: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    fixed_versions: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    title: Mapped[Optional[str]] = mapped_column(String(160))
+    missing: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class AiSummary(Base):

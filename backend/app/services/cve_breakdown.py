@@ -69,9 +69,19 @@ def breakdown(db: Session, run_ids: list[int]) -> dict[int, dict[str, int]]:
     return result
 
 
-def filters(fix: str, kernel: bool) -> list[Any]:
-    """WHERE clauses for a link query joined to Component: fix in ALL/FIXED/UNFIXED, kernel True keeps kernel packages."""
+NOT_HERE = ("UNLOADED_MODULE", "OTHER_ARCH", "FS_NOT_USED")
+# 'actionable': something can be done now (a fix exists, or exploitation evidence); 'relevant': also kernel code this host runs.
+ACTIONABLE = or_(HAS_FIX, link.kev.is_(True), link.epss >= EPSS_ATTENTION)
+
+
+def filters(fix: str, kernel: bool, relevance: str = "all") -> list[Any]:
+    """WHERE clauses for a link query joined to Component: fix in ALL/FIXED/UNFIXED, kernel True keeps kernel packages,
+    relevance actionable/relevant/all narrows to what a practitioner should look at first."""
     clauses = []
+    if relevance == "actionable":
+        clauses.append(ACTIONABLE)
+    elif relevance == "relevant":
+        clauses.append(or_(ACTIONABLE, ~IS_KERNEL, link.host_relevance.is_(None), link.host_relevance.notin_(NOT_HERE)))
     if fix == "FIXED":
         clauses.append(HAS_FIX)
     elif fix == "UNFIXED":
