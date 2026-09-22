@@ -190,7 +190,7 @@ def test_project_groups_separate_assets_scopes_versions_and_use_latest_time(clie
     first = put_source(client, asset).json()
     complete_job(factory, first['id'])
     assert put_source(client, asset, payload=source_zip(content=b'Jinja2==3.1.6\n')).status_code == 202
-    other = client.post('/api/assets', json={'asset_tag': 'PROJECT-02', 'name': 'same name other asset', 'asset_type': 'other'}).json()['id']
+    other = client.post('/api/assets', json={'asset_tag': 'PROJECT-02', 'name': 'same name other asset', 'asset_type': 'server'}).json()['id']
     assert put_source(client, other).status_code == 202
     with factory() as db:
         add_run(db, 1, asset, at=datetime(2026, 9, 16, tzinfo=timezone.utc))

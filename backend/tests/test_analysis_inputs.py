@@ -112,7 +112,7 @@ def test_bad_project_paths_rejected_before_enqueue(client, factory, asset, path)
 
 
 def test_zip_upload_needs_no_ssh_and_survives_session_restart(client, factory, settings):
-    response = client.post('/api/assets', json={'asset_tag': 'ZIP-01', 'name': '소스 프로젝트', 'asset_type': 'other'})
+    response = client.post('/api/assets', json={'asset_tag': 'ZIP-01', 'name': '소스 프로젝트', 'asset_type': 'server'})
     asset_id = response.json()['id']
     archive = source_zip()
     response = client.post(f'/api/analyses/assets/{asset_id}/uploads',
@@ -324,7 +324,7 @@ def test_two_schedule_workers_claim_one_occurrence(client, factory, asset):
 
 
 def test_zip_job_worker_imports_and_api_returns_completed_result(client, factory, settings, monkeypatch):
-    asset_id = client.post('/api/assets', json={'asset_tag': 'WORKER-ZIP', 'name': 'ZIP 프로젝트', 'asset_type': 'other'}).json()['id']
+    asset_id = client.post('/api/assets', json={'asset_tag': 'WORKER-ZIP', 'name': 'ZIP 프로젝트', 'asset_type': 'server'}).json()['id']
     job = client.post(f'/api/analyses/assets/{asset_id}/uploads', data={'project_name': 'service'},
         files={'file': ('source.zip', source_zip(), 'application/zip')}).json()
     def execute(snapshot, directory, _settings, callback):

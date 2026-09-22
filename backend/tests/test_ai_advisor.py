@@ -31,7 +31,7 @@ def client():
 
 
 def _import_run(client) -> int:
-    asset = client.post("/api/assets", json={"asset_tag": "AI-01", "name": "AI 대상", "asset_type": "other"}).json()
+    asset = client.post("/api/assets", json={"asset_tag": "AI-01", "name": "AI 대상", "asset_type": "server"}).json()
     document = json.loads((Path(__file__).parents[2] / "samples" / "spdx-2.3-blackduck-compatible.json").read_text())
     document["documentNamespace"] = "https://eolwatch.test/ai/" + str(uuid4())
     report = {"descriptor": {"name": "grype", "version": "0.118.0", "db": {}}, "source": {"type": "sbom"}, "matches": [{

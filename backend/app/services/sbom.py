@@ -19,6 +19,7 @@ from .. import models
 
 SUPPORTED_SPEC_VERSIONS = {"1.4", "1.5", "1.6", "1.7"}
 SUPPORTED_SPDX_VERSIONS = {"SPDX-2.3"}
+INSTALL_QUALIFIERS = {"distro", "arch"}
 CYCLONEDX_TYPE_MAP = {
     "operating-system": "OS",
     "firmware": "FIRMWARE",
@@ -148,6 +149,10 @@ def _normalize_product(db: Session, item: dict[str, Any]) -> models.ProductRelea
                 if parsed.type != "pypi" or Version(parsed.version) != Version(installed):
                     fail("PURL 버전과 구성요소 버전이 다릅니다.")
             effective = parsed.version or installed
+            # The same OS package version seen on two releases (distro=ubuntu-24.04 vs 26.04) or two CPU
+            # architectures is one product: those qualifiers describe where it was installed, not what it is.
+            qualifiers = {k: v for k, v in (parsed.qualifiers or {}).items() if k not in INSTALL_QUALIFIERS} or None
+            parsed = parsed._replace(qualifiers=qualifiers)
             return parsed._replace(version=effective).to_string(), effective, parsed._replace(version=None).to_string()
         except (ValueError, TypeError, AttributeError, InvalidVersion):
             fail("PURL 형식 또는 버전이 올바르지 않습니다.")

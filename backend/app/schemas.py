@@ -9,7 +9,7 @@ from typing import Any, Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-AssetType = Literal["server", "storage", "network", "security", "vm", "cloud", "other"]
+AssetType = Literal["server", "vm", "cloud"]  # what SSH scans actually meet: a box, a VM, or a cloud instance
 
 
 HOSTNAME_PATTERN = re.compile(r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*$")

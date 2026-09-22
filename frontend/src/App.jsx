@@ -18,7 +18,7 @@ const EMPTY_SUMMARY = {
   latest_analyses: [],
 }
 
-const typeText = { server: '서버', storage: '스토리지', network: '네트워크', security: '보안장비', vm: '가상머신', cloud: '클라우드', other: '기타' }
+const typeText = { server: '서버', vm: '가상머신', cloud: '클라우드' }
 const analysisJobText = { QUEUED: '대기', COLLECTING: '수집', SCANNING: '분석', IMPORTING: '저장', SUCCESS: '완료', FAILED: '실패', CANCEL_REQUESTED: '취소 중', CANCELLED: '취소됨' }
 const analysisScopeText = { 'ubuntu-dpkg-installed': 'OS 설치 패키지', 'demo-python-venv': '데모 앱 (Python)' }
 const comparisonStatusText = { PERSISTENT: '계속 검출', NEW: '새로 검출', NO_LONGER_DETECTED: '재검사 미검출', COMPONENT_REMOVED: '구성요소 제거' }

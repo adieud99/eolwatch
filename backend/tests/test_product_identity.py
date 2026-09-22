@@ -58,7 +58,7 @@ def test_purl_and_cpe_resolving_to_two_products_fail(db):
 
 @pytest.mark.parametrize("changes", [
     {"version": "2.0"}, {"purl": "invalid-purl"},
-    {"purl": "pkg:npm/identity-demo@1.0"}, {"purl": "pkg:pypi/identity-demo@1.0?distro=other"},
+    {"purl": "pkg:npm/identity-demo@1.0"}, {"purl": "pkg:pypi/identity-demo@1.0?repository_url=https://other.example"},
 ])
 def test_conflicting_or_invalid_identity_is_explicit(db, changes):
     _normalize_product(db, package())

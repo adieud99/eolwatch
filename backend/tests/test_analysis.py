@@ -380,3 +380,23 @@ def test_earlier_runs_keep_their_counts_when_the_same_sbom_is_imported_again(cli
     assert second["id"] != first["id"] and second["fixable_cve_count"] == 1
     listed = {run["id"]: run for run in client.get("/api/analyses").json()}
     assert listed[first["id"]]["fixable_cve_count"] == 1 and listed[first["id"]]["cve_count"] == 1
+
+
+def test_same_os_package_on_two_ubuntu_releases_is_one_product(client, bundle):
+    """srv-han (26.04) and srv-na (24.04) both ship libsort-naturally-perl 1.03-4: same CPE, PURLs differing only in distro=."""
+    def package(distro):
+        return dict(bundle["sbom"]["packages"][0], SPDXID="SPDXRef-Package-perl", name="libsort-naturally-perl", versionInfo="1.03-4",
+                    externalRefs=[{"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl",
+                                   "referenceLocator": f"pkg:deb/ubuntu/libsort-naturally-perl@1.03-4?arch=all&distro=ubuntu-{distro}"},
+                                  {"referenceCategory": "SECURITY", "referenceType": "cpe23Type",
+                                   "referenceLocator": "cpe:2.3:a:libsort-naturally-perl:libsort-naturally-perl:1.03-4:*:*:*:*:*:*:*"}])
+    bundle["sbom"]["packages"].append(package("26.04"))
+    bundle["sbom"]["relationships"].append({"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": "SPDXRef-Package-perl"})
+    first = client.post("/api/analyses/import", json=bundle)
+    assert first.status_code == 200, first.text
+    other = client.post("/api/assets", json={"asset_tag": "ANALYSIS-SRV-02", "name": "다른 릴리스 서버", "asset_type": "server"}).json()["id"]
+    bundle["asset_id"] = other
+    bundle["sbom"]["documentNamespace"] = bundle["sbom"]["documentNamespace"] + "-2404"
+    bundle["sbom"]["packages"][-1] = package("24.04")
+    second = client.post("/api/analyses/import", json=bundle)
+    assert second.status_code == 200, second.text

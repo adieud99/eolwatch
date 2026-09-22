@@ -5,7 +5,7 @@ export const readTextFile = (file) => new Promise((resolve, reject) => { if (!fi
 
 const splitAddress = (value) => { let host = String(value || '').trim().replace(/^[a-z]+:\/\//i, '').replace(/\/.*$/, ''); let port = null; const match = host.match(/^([^[\]]+):(\d{1,5})$/); if (match) { host = match[1]; port = Number(match[2]) } return { host, port } }
 
-const types = { server: '서버', storage: '스토리지', network: '네트워크', security: '보안', vm: '가상머신', cloud: '클라우드', other: '기타' }
+const types = { server: '서버', vm: '가상머신', cloud: '클라우드' }
 const textFields = [['ip_address', '서버 주소 (IP 또는 도메인)'], ['ssh_username', 'SSH 사용자명']]
 const editable = ['asset_tag', 'name', 'asset_type', ...textFields.map(([key]) => key), 'ssh_port', 'ssh_auth', 'monitored']
 const draftOf = (asset) => Object.fromEntries(editable.map((key) => [key, key === 'monitored' ? Boolean(asset[key]) : asset[key] ?? (key === 'ssh_port' ? 22 : key === 'ssh_auth' ? 'key' : '')]))
