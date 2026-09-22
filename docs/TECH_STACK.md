@@ -12,9 +12,10 @@
 | ORM·마이그레이션 | SQLAlchemy 2.0.43, Alembic 1.16.5 | 관계·트랜잭션·DB 변경 이력 |
 | DB | PostgreSQL 16 / 테스트용 SQLite | 서버·작업·SBOM·CVE·원본 JSON 보관 |
 | 웹 | React 19.3.0, Vite 8.3.0 | 개발 검사·인프라 검사·검사 기록·관리 화면 |
-| 수집 | Paramiko 5.0.0, Syft 1.51.1 | 키 기반 SSH 접속, 서버 정보 수집, 설치 구성요소 식별 |
+| 수집 | Paramiko 5.0.0, Syft 1.52.0 | SSH 접속(키·비밀번호·개인키 첨부), 서버 정보 수집, 설치 구성요소 식별 |
 | SBOM | SPDX 2.3 JSON | 검사 경로의 기준 교환 형식. CycloneDX 1.4~1.7 반입 API도 유지 |
-| 취약점 대조 | Grype 0.118.0 | SPDX 구성요소와 취약점 DB 대조 |
+| 취약점 대조 | Grype 0.119.0 | SPDX 구성요소와 취약점 DB 대조, EPSS·CISA KEV·risk 제공 |
+| AI (선택) | OpenAI 호환 API 또는 Anthropic SDK | 결과·점검 요약, CVE 선별, 조치 가이드, 라이브러리 참조, 수집 에이전트 ([AI 정책](AI.md)) |
 | 작업 실행 | APScheduler 3.11.0 + DB 작업 큐 | 기본 3초 큐 확인, 일일 SSH 점검 |
 | PDF | ReportLab 4.4.4, 번들 Nanum Gothic 글꼴 | 한글 검사 전후 비교 PDF |
 | 웹 제공 | Nginx 1.27 계열, Docker Compose | 정적 웹·API 프록시, API·worker·DB 배치 |
@@ -43,7 +44,7 @@ Syft의 구성요소 식별과 Grype의 취약점 대조를 활용한다. 직접
 
 ### 제한된 SSH 수집 범위
 
-Ubuntu dpkg와 고정 Python 가상환경을 먼저 지원해 수집 범위를 검증할 수 있게 했다. 상주하는 자체 에이전트 대신 요청 때 Syft를 복사해 실행하지만, 대상 사용자 디렉터리에 도구·임시 파일을 배치한다. 실행 도구 체크섬, known_hosts 검증, 시간·출력 크기 제한을 적용한다. 서버 정보 수집 명령은 모두 읽기 전용이며 도구가 없어도 실패하지 않는다. 임의 프로그램 업로드나 임의 경로 실행은 제공하지 않는다.
+Ubuntu·Debian dpkg 설치 패키지를 지원하고 대상 CPU(x86_64·arm64)에 맞는 Syft를 고른다. 상주하는 자체 에이전트 대신 요청 때 Syft를 복사해 실행하지만, 대상 사용자 디렉터리에 도구·임시 파일을 배치한다. 실행 도구 체크섬, known_hosts 검증, 시간·출력 크기 제한을 적용한다. 서버 정보 수집 명령은 모두 읽기 전용이며 도구가 없어도 실패하지 않는다. 임의 프로그램 업로드나 임의 경로 실행은 제공하지 않는다.
 
 ### ReportLab
 

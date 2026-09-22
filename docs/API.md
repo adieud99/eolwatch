@@ -28,6 +28,8 @@
 
 **토큰 다이어트.** AI에는 저장된 데이터만, 그것도 압축해서 보낸다. CVE는 라이브러리별로 묶어 최고 심각도·건수·수정 버전·대표 CVE 2개(설명 60자)만 남기고 라이브러리 15개까지, 서버 정보는 포트 15개·서비스 12개·프로세스 5개·디스크 4개까지만 보낸다. 측정값과 발표용 정리는 `docs/TOKEN_DIET.md`. 설치 패키지 목록(수백 개)은 건수만 보낸다. JSON은 공백 없이 보내고, 같은 데이터·모델이면 저장된 답을 재사용한다. 응답에는 보낸 글자 수와 입력·출력 토큰 수가 남는다. 숨은 추론(thinking) 토큰도 출력처럼 과금되므로 기본으로 `OPENAI_REASONING_EFFORT=none`을 보내 끈다(같은 요약이 1,651→260 토큰). 값을 거부하는 모델에는 자동으로 빼고 다시 보낸다. 토큰·소스 코드·비밀번호는 보내지 않으며 결과는 참고용이다.
 
+AI 선별과 조치 가이드(2026-09-22): `GET/POST /api/ai/analyses/{run_id}/triage`(후보 CVE 판정, `summary`는 `{items,counts,note,eligible,sent,cve_total}` JSON 문자열), `GET /api/ai/analyses/{run_id}/triage/context`(보낼 전문 미리보기), `GET/POST /api/ai/vulnerabilities/{link_id}/advice`(CVE 하나의 조치 절차), `GET /api/ai/analyses/{run_id}/context`·`GET /api/ai/checks/{job_id}/context`(요약에 보낼 전문). POST는 ADMIN, `?force=true`로 재생성. CVE 응답과 검사 응답에 `epss`, `epss_percentile`, `kev`, `risk`, `kev_cve_count`, `epss_cve_count`가 추가됐다.
+
 ## 1. 개발 검사 — 소스 ZIP · 의존성 파일 · Git 저장소
 
 | 방식 | 경로 | 권한 | 용도·query |

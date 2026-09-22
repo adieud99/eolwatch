@@ -19,6 +19,13 @@
 | 11 | [운영 백업](BACKUP_OPERATIONS.md) | DB·원본 ZIP 백업, 복구 검증과 정기 실행 |
 | 11a | [재범위화 검증 기록](RESCOPE_VERIFICATION_2026-09-21.md) | 마이그레이션·개발 검사 API 흐름·권한 검증 결과 |
 | 12 | [작업 재개](NEXT_SESSION.md) | 접속 주소·직전 반영 내용·검증 배포 명령과 다음 작업 |
+| 13 | [요약서](PROJECT_SUMMARY.md) | 교수님 8단계 순서의 프로젝트 요약 |
+| 14 | [커널 CVE 검증](KERNEL_CVE_VERIFICATION_2026-09-22.md) | 과탐 여부, 전체 업데이트 VM 재검사, 아마존 이미지 질문에 대한 근거 |
+| 15 | [AI 사용 범위와 데이터 정책](AI.md) | AI가 받는 것·받지 않는 것, AI 선별·조치 가이드 |
+| 16 | [비밀값 관리](SECRETS.md) | `.env`·`*_FILE`·키 보호와 한계 |
+| 17 | [실사용 가이드](PRACTICAL_USE.md) | 팀이 매주 어떻게 쓰는지 |
+| 18 | [라이선스와 타깃](LICENSES_AND_TARGET.md) | 자사용/고객사용 구분, 도구·데이터 라이선스 |
+| 19 | [스캐너 선택](SCANNER_OPTIONS.md) | Grype 유지 근거, Trivy·OSV-Scanner 비교, 버전 갱신 절차 |
 
 실제 이력은 <http://127.0.0.1:18080>의 관리 VM DB에 있다. 맥 Docker의 <http://127.0.0.1:8080>은 별도 개발 DB다. 데모 앱의 미검출 결과를 전체 OS의 취약점 해소나 자동 조치 완료로 해석하지 않는다.
 
@@ -59,7 +66,7 @@
 | [2차 기획](archive/PROJECT_PLAN_V2.md) | 주제 발전 과정. 현재 범위 기준은 [SCOPE_V3](SCOPE_V3.md) |
 | [Black Duck 연동 안내](archive/BLACK_DUCK_DEMO.md) | Black Duck을 주 분석 경로로 쓰던 시기의 절차. 현재 시연에 불필요 |
 
-검증 문서의 테스트 개수·DB revision·"다음 단계"는 **해당 검증 시점**을 뜻한다. 현재 수치는 백엔드 348 passed / 2 skipped, 프런트엔드 100 passed(2026-09-21)이며 [구현 현황](IMPLEMENTATION_STATUS.md)을 기준으로 한다.
+검증 문서의 테스트 개수·DB revision·"다음 단계"는 **해당 검증 시점**을 뜻한다. 현재 수치는 백엔드 316 passed / 2 skipped, 프런트엔드 95 passed(2026-09-22)이며 [구현 현황](IMPLEMENTATION_STATUS.md)을 기준으로 한다.
 
 ## 발표 자료
 

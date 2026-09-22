@@ -11,7 +11,7 @@
 - 실제 시연 웹: <http://127.0.0.1:18080>.
 - 맥 Docker 개발 웹: <http://127.0.0.1:8080>. 관리 VM과 **별도 DB**다.
 - VM 사이는 `eolwatch-lab` 내부망, 외부 패키지·취약점 DB 다운로드는 NAT를 사용한다.
-- 기본 실습 로그인: `admin` / `Eolwatch!2026`.
+- 로그인 계정은 관리 VM `.env`의 `ADMIN_USERNAME`/`ADMIN_PASSWORD`로 만들어진다(기본값 없음).
 
 ## 1. 이미 만든 환경에서 재개
 

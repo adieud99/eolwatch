@@ -10,7 +10,7 @@ EOLWatch는 **개발 소스와 운영 서버의 취약점을 검사하고, 결�
 |---|---|---|---|
 | 개발 검사 | 소스 ZIP을 올리고 검사를 시작한다 | Syft로 의존성 목록을 뽑고(SPDX 2.3) Grype로 취약점 DB와 대조한다 | 라이브러리별 CVE, 수정 버전, 심각도 |
 | 인프라 검사 | 서버 IP·SSH 포트·SSH 계정을 등록하고 검사를 시작한다 | Syft를 SSH로 서버에 복사해 실행하고 설치 패키지와 서버 정보(CPU·메모리·디스크 사용률, OS)를 수집한다 | 서버 정보, OS 패키지 CVE |
-| 검사 기록 | 과거 검사를 찾아본다 | 검사 이력, CVE 결과와 조치 상태, 의존성 목록, 전후 비교와 PDF·JSON 보고서를 보여준다 | 이력, 비교, 보고서, 조치 기록 |
+| 검사 기록 | 과거 검사를 찾아본다 | 검사 이력, CVE 결과(KEV·EPSS 우선순위, AI 선별·조치 가이드)와 조치 상태, 의존성 목록, 전후 비교와 PDF·JSON 보고서를 보여준다 | 이력, 비교, 보고서, 조치 기록 |
 
 관리자·조회자 권한과 감사 로그가 있다.
 
@@ -24,7 +24,7 @@ EOLWatch는 **개발 소스와 운영 서버의 취약점을 검사하고, 결�
   → 관리 VM: SPDX 2.3 변환 · Grype 검사 → CVE 저장 → 검사 기록 · 전후 비교 · 보고서
 ```
 
-관리 VM 1대와 대상 VM 2대로 시연한다. 도구는 **Syft 1.51.1 / Grype 0.118.0**으로 고정했다. 기준 SBOM 형식은 **SPDX 2.3 JSON**이다.
+맥의 Docker 관리 스택 1개와 실제 서버(EC2, 학교 서버, 실습 VM)로 시연한다. 도구는 **Syft 1.52.0 / Grype 0.119.0**으로 고정했다. 기준 SBOM 형식은 **SPDX 2.3 JSON**이다.
 
 | 검사 범위 | 실제 검사 대상 |
 |---|---|
@@ -54,7 +54,8 @@ python3 scripts/package-project-source.py
 
 ## 현재 확인한 결과
 
-- 재범위화 후 테스트: 백엔드 **363 passed** (격리 컨테이너), 프런트엔드 **102 passed** (2026-09-21)
+- 테스트: 백엔드 **316 passed / 2 skipped**, 프런트엔드 **95 passed** (2026-09-22)
+- 커널 CVE 과탐 검증: Ubuntu 추적기와 80건 중 78건 일치, 전체 업데이트한 실습 VM 재검사 3,904 → 3,896 — [검증 기록](docs/KERNEL_CVE_VERIFICATION_2026-09-22.md)
 - 개발 검사: EOLWatch 자체 소스 ZIP의 직접 의존성 보완 후 같은 범위 CVE **9건 → 0건** (미검출 8건, pytest 운영 의존성 제거 1건) — [검사 #5 → #10 PDF](reports/eolwatch-source-analysis-5-10.pdf)
 - 인프라 검사: `LAB-VM-01` 데모 앱의 Jinja2 **3.1.4 → 3.1.6** 업데이트 후 재검사, 검사 **#3 → #4**에서 CVE **3건 → 0건** — [비교 PDF](reports/eolwatch-analysis-3-4.pdf)
 - 실제 Ubuntu 설치 패키지 669개 수집·검사, 서버별 CVE 조회
@@ -93,7 +94,7 @@ npm --prefix frontend run build
 
 테스트 컨테이너는 소스·테스트 자료만 읽기 전용으로 연결하고 네트워크 없이 실행한다. 의존성 변경 근거는 [의존성 보완 기록](docs/DEPENDENCY_REMEDIATION.md)에 있다.
 
-기본 실습 로그인은 `admin` / `Eolwatch!2026`이다. 합성 시연 데이터는 넣지 않는다. 서버는 인프라 검사에서 직접 등록한다. API 시작 시 Alembic 마이그레이션을 적용하며, 인프라 검사에는 대상 서버와 SSH 키·known_hosts 설정이 필요하다. 세부 설정은 [웹 검사 실행 안내](docs/WEB_ANALYSIS.md)를 따르고, 화면에 뜬 오류 문구는 [트러블슈팅](docs/TROUBLESHOOTING.md)에서 찾고, AI 토큰 절감 방법과 측정값은 [토큰 다이어트](docs/TOKEN_DIET.md)에 있다.
+관리자 계정은 `.env`의 `ADMIN_USERNAME`/`ADMIN_PASSWORD`로 만들어지며 기본값은 없다(비밀값 관리는 [docs/SECRETS.md](docs/SECRETS.md)). 합성 시연 데이터는 넣지 않는다. 서버는 인프라 검사에서 직접 등록한다. API 시작 시 Alembic 마이그레이션을 적용하며, 인프라 검사에는 대상 서버와 SSH 키·known_hosts 설정이 필요하다. 세부 설정은 [웹 검사 실행 안내](docs/WEB_ANALYSIS.md)를 따르고, 화면에 뜬 오류 문구는 [트러블슈팅](docs/TROUBLESHOOTING.md)에서 찾고, AI 토큰 절감 방법과 측정값은 [토큰 다이어트](docs/TOKEN_DIET.md)에 있다.
 
 ## 시연 순서
 
@@ -102,7 +103,7 @@ npm --prefix frontend run build
 1. 개발 검사: 소스 ZIP 업로드 → 진행 상태 → CVE 결과.
 2. 인프라 검사: 서버 등록 → SSH 점검(서버 정보) → 취약점 검사 → CVE 결과.
 3. 검사 기록: 검사 이력에서 이전·이후 검사를 골라 전후 비교 → PDF·JSON 다운로드 → 조치 기록.
-4. 관리: 사용자 권한과 감사 로그.
+4. AI 선별과 조치 가이드, 감사 로그(API).
 
 세부 시나리오는 [교수님용 전체 구조·화면·시나리오 안내](docs/PROFESSOR_PROJECT_GUIDE.md), 데모 앱 업데이트 명령은 [조치 시연 안내](docs/REMEDIATION_DEMO.md), 보고서 사용법은 [비교 보고서 안내](docs/COMPARISON_REPORTS.md)를 따른다.
 

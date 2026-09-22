@@ -1,139 +1,127 @@
 # EOLWatch 전체 구조
 
-코드 기준: 2026-09-21 (재범위화 커밋 `73c10b5`). 이 문서는 구현 구조이며, 실행 결과·배포 버전은 [구현 현황](IMPLEMENTATION_STATUS.md)과 과거 [확장 검증 기록](PROJECT_EXPANSION_VERIFICATION.md)에 있다.
+코드 기준: 2026-09-22. 이 문서는 구현된 구조를 코드 그대로 적는다. 실행 결과·검증 수치는 [구현 현황](IMPLEMENTATION_STATUS.md), [커널 CVE 검증](KERNEL_CVE_VERIFICATION_2026-09-22.md), [실사용 가이드](PRACTICAL_USE.md)에 있다.
 
 ## 1. 구성과 데이터 흐름
 
 ```mermaid
 flowchart LR
     Browser[사용자 브라우저]
-    subgraph Controller[관리 VM · Docker Compose]
-        Web[React · nginx]
-        API[FastAPI · 인증 및 업무 API]
-        DB[(PostgreSQL)]
-        Worker[검사 worker · APScheduler]
-        Syft[Syft · SPDX 변환]
-        Grype[Grype]
+    subgraph Controller[관리 서버 · Docker Compose 4개 컨테이너]
+        Web[web · nginx + React 정적 파일]
+        API[api · FastAPI]
+        DB[(db · PostgreSQL 16)]
+        Worker[worker · APScheduler + Syft/Grype]
         Upload[(analysis_uploads · ZIP 원본)]
         Artifacts[(analysis_artifacts · 작업 산출물)]
-        Cache[(analysis_cache · 취약점 DB)]
+        Cache[(analysis_cache · Grype 취약점 DB)]
+        Secrets[(secrets · SSH 키·known_hosts, 읽기 전용)]
     end
-    Target[등록 서버 · 원격 Syft · 서버 정보]
-    Feed[Grype DB 배포처]
-    Backup[백업 CLI · DB 및 ZIP · 임시 DB 복원]
-    Browser --> Web --> API
+    Target[대상 서버 · Ubuntu/Debian · SSH]
+    Feed[grype.anchore.io · 일일 DB 빌드]
+    AI[AI 제공자 · OpenAI 호환 / Anthropic]
+    Browser -->|:8080| Web -->|/api/| API
     API --> DB
-    API -->|개발 검사: ZIP 저장| Upload
-    API -->|인프라 검사: SSH 점검·서버 정보| Target
-    Worker -->|대기 작업 확보| DB
-    Worker -->|인프라 검사: SSH| Target
-    Target -->|Syft JSON| Worker
-    Upload -->|원본 해시 검증·제한된 해제| Worker
-    Worker --> Syft -->|SPDX 2.3| Grype
-    Feed --> Cache --> Grype
-    Grype -->|검사 원본·CVE·완료 상태| DB
+    API -->|ZIP 저장| Upload
+    API -->|SSH 점검 · 읽기 전용 명령| Target
+    Worker -->|3초마다 대기 작업 확보| DB
+    Worker -->|SFTP로 Syft 복사 · syft scan| Target
+    Upload -->|해시 검증 · 제한된 해제| Worker
+    Feed --> Cache --> Worker
+    Worker -->|SPDX·Grype JSON·CVE 저장| DB
     Worker --> Artifacts
-    API -->|검사 기록·조치·비교 PDF/JSON| Browser
-    DB --> Backup
-    Upload --> Backup
+    API -->|요약 · 선별 · 조치 가이드 (식별자 제거)| AI
+    Worker -->|라이브러리 참조 · 수집 에이전트| AI
+    Secrets --> API
+    Secrets --> Worker
 ```
 
-관리 웹과 검사 대상은 별개다. 사용자 PC에는 브라우저가 필요하고, SSH 수집·ZIP 검사·SPDX 변환·Grype 실행은 관리 worker가 처리한다. SSH 점검(서버 정보 수집)은 API 프로세스가 동기로 실행한다.
+- 브라우저는 web(nginx)에만 접속한다. nginx가 `/api/`를 api로 넘기고 요청마다 컨테이너 주소를 다시 찾는다(`frontend/nginx.conf`, resolver 127.0.0.11).
+- api는 요청을 처리하고 DB에 쓴다. 검사 요청은 `analysis_jobs` 행으로만 남긴다. SSH 점검(서버 정보 수집)만 api가 동기로 실행한다.
+- worker는 3초마다 `SELECT ... FOR UPDATE SKIP LOCKED`로 작업 한 건을 잡아 SSH 수집 또는 ZIP 해제 → SPDX 변환 → Grype 대조 → 저장을 한 트랜잭션으로 끝낸다. 매일 08:30에 등록 서버의 SSH 점검도 돈다(`app/worker.py`).
+- 대상 서버에는 상주 프로세스가 없다. 요청 때 검증된 Syft 바이너리 한 개를 SFTP로 복사해 실행하고, 서버 정보는 읽기 전용 명령으로 받는다.
+- AI는 선택 기능이며 api·worker가 HTTPS로 제공자를 부른다. 보내는 데이터는 [AI 정책](AI.md)대로 식별자를 뺀 압축본이다.
 
-## 2. 두 축의 입력과 범위 식별
+## 2. 두 축의 입력과 검사 범위
 
-| 축 | 프로필 | 실행 위치·방식 | 저장되는 `scan_scope` |
+| 축 | 프로필 | 수집 위치 | 저장되는 `scan_scope` |
 |---|---|---|---|
-| 개발 검사 | `source-zip` | 관리 worker의 작업별 해제 경로, 기본 패키지 cataloger | `source-zip:<프로젝트 이름>` |
-| 인프라 검사 | `ubuntu-dpkg-installed` | 대상 서버, `dpkg-db-cataloger` | 프로필명 |
+| 개발 검사 | `source-zip` (ZIP·의존성 파일 하나) / `source-git` (https 얕은 복제) | worker 안의 작업별 디렉터리 | `source-zip:<프로젝트>` / `source-git:<프로젝트>` |
+| 인프라 검사 | `ubuntu-dpkg-installed` | 대상 서버(`dpkg-db-cataloger`) | 프로필명 |
 
-다른 경로·프로젝트의 검사를 같은 범위로 합치지 않는다. 전후 비교는 여기에 서버와 시간 순서까지 확인한다. 일반 폴더/ZIP은 빌드·설치를 하지 않으며 `.git`과 중첩 압축 내부 탐색을 제외한다. 대상 SSH 서버는 worker와 같은 CPU 아키텍처의 Linux arm64 또는 amd64가 필요하다. ZIP은 대상 서버에 SSH로 접속하지 않는다.
+인프라 검사는 Ubuntu와 Debian(dpkg)을 지원한다. Grype에 서버가 보고한 `--distro <id>:<버전>`을 넘기고, `pkg:deb` PURL이 90% 미만이면 결과를 저장하지 않는다(`analysis_executor.py`). 대상 CPU는 x86_64·arm64 어느 쪽이든 되며 worker가 맞는 Syft를 고른다. ZIP·Git은 빌드·설치·실행 없이 잠금 파일·명세·설치 메타데이터만 읽고, 500 MiB·2 GiB 해제·256 MiB 파일·200,000항목·압축률 100배 한도와 경로·링크·암호화 검사를 거친다(`analysis_uploads.py`).
 
-ZIP 기본 한도는 업로드 500 MiB, 해제 합계 2 GiB, 파일당 256 MiB, 200,000항목, 압축률 100배다. 상대 경로 이탈·중복 경로·심볼릭 링크·특수 파일·암호화 ZIP을 거부한다. SHA-256 이름의 원본을 저장하고 실행·재시도 시 해시와 크기를 다시 확인한다. 이 처리를 임의 프로그램 실행을 위한 완전한 샌드박스라고 부르지 않는다.
+## 3. SSH 접속과 수집
 
-## 3. 인프라 검사의 서버 정보 수집
-
-`services/collector.py`가 SSH로 다음을 읽어 `check_results`에 저장한다. 모든 명령은 읽기 전용이며 도구나 파일이 없어도 수집이 실패하지 않는다.
-
-| 항목 | 명령 | 저장 위치 |
+| 방식 | 자격 증명 보관 | 호스트 키 |
 |---|---|---|
-| CPU·메모리·디스크 사용률, 가동 시간, 프로세스 | `top`, `/proc/meminfo`, `df -P`, `/proc/uptime`, `ps -eo` | `check_results` 컬럼·`disk_details`·`process_details` |
-| 설치 패키지, OS 배포판, 아키텍처 | `dpkg-query -W` 또는 `rpm -qa`, `/etc/os-release`, `uname -m` | `raw_metrics.packages`, `raw_metrics.package_context` |
-| 호스트·커널·CPU 모델·코어 수·메모리 총량·디스크 총량 | `hostname`, `uname -r`, `/proc/cpuinfo`, `nproc`, `/proc/meminfo`, `df -P -B1` | `raw_metrics.server_info` |
-| 가상화·클라우드 | `systemd-detect-virt`, `/sys/class/dmi/id/sys_vendor`·`product_name`, EC2 IMDSv2 인스턴스 문서(2초 타임아웃) | `raw_metrics.server_info.platform`, `.cloud` |
-| 통신 정보·실행 서비스 | `ip -4 addr`, `ss -tln`, `systemctl list-units --state=running` | `raw_metrics.server_info.ip_addresses`, `.listening_ports`, `.services` |
+| 관리 서버 키 | `secrets/eolwatch_ssh_key` 파일(읽기 전용 마운트) | `secrets/known_hosts` 엄격 검증 |
+| 비밀번호 | DB에 Fernet 암호문(`CREDENTIAL_KEY` 또는 `JWT_SECRET` 파생) | 첫 접속 때 기억, 이후 다르면 거부 |
+| 개인키 첨부 | DB에 Fernet 암호문 | 같음 |
 
-플랫폼은 `aws`/`gcp`/`azure`/`physical`/가상화 종류(`kvm`, `vmware` 등)/`unknown`으로 판정한다. 클라우드 계정 API는 연동하지 않으며 서버 안에서 읽을 수 있는 메타데이터·DMI로 한정한다. 이 정보는 화면 설명용이며 취약점 판정에 쓰지 않는다. 화면에서는 서버 목록의 `서버 정보` 열(OS·코어·메모리·실행 환경)과 수집 이력의 `서버 정보` 카드(호스트·OS·하드웨어·실행 환경·통신 정보·실행 서비스)로 보여준다.
+SSH 점검 명령은 `collector.py`에 문자열로 박혀 있고 스크립트 파일을 올리지 않는다. 자원(`/proc`, `df`, `ps`), 설치 패키지(`dpkg-query`/`rpm`/`apk`), 서버 정보(`hostname`, `uname`, `/proc/cpuinfo`, `systemd-detect-virt`, DMI, EC2 메타데이터, `ip`/`hostname -I`, `ss`/`netstat`, `systemctl`/`rc-status`/`service`)이며, 도구가 없는 배포판을 위한 대체 명령이 붙어 있다. 그 뒤 수집 에이전트가 카탈로그(`ai_collection.py`, 22개 읽기 전용 명령)에서 OS에 맞는 것을 고른다. 결과는 `collection_jobs`·`check_results`에 저장된다.
 
-## 4. DB 큐
+취약점 검사는 `uname -sm` → Syft 복사(`~/.local/eolwatch-tools/syft-<해시>`, 체크섬 재검증) → `syft scan dir:/`(300초 제한, 프로세스 그룹·pid 파일) → `/etc/os-release` → `apt list --upgradable` 순이다. 비밀값은 어떤 명령 인자·로그·산출물에도 들어가지 않는다. 자세한 목록은 [기술 질문 정리](../../EOLWatch_기술질문_정리.md) 7절과 같다.
 
-```mermaid
-sequenceDiagram
-    participant U as 브라우저
-    participant A as API
-    participant D as PostgreSQL
-    participant W as worker
-    U->>A: 검사 요청
-    A->>D: AnalysisJob 저장
-    A-->>U: 작업 202
-    W->>D: 대기 작업 확보 · COLLECTING
-    W->>W: SSH 수집 또는 ZIP 검사·수집
-    W->>D: SCANNING
-    W->>W: 동일 SPDX 2.3을 Grype로 검사
-    W->>D: IMPORTING
-    alt 원본·대상·저장 검증 성공
-        W->>D: SBOM·CVE·검사 이력·SUCCESS 함께 커밋
-    else 실패
-        W->>D: FAILED · 실패 코드와 종료 시각
-    end
-    U->>A: 작업 상태 조회
-    A-->>U: 상태·완료 검사 ID·SBOM ID
+## 4. DB 큐와 작업 상태
+
+```text
+QUEUED → COLLECTING → SCANNING → IMPORTING → SUCCESS
+                 └─ 오류 → FAILED(error_code)      QUEUED ─ 취소 → CANCELLED
+실행 중 ─ 취소 → CANCEL_REQUESTED ─ 프로세스 정리 확인 → CANCELLED
 ```
 
-- 같은 서버의 활성 검사는 하나다. 같은 범위·같은 업로드 해시 요청은 기존 작업을 반환하고 충돌하는 범위/업로드는 409다.
-- 기본 큐 확인 주기는 3초이며 한 worker의 검사 실행은 동시에 하나다. 작업 확보·`worker_token`·생존 확인으로 중복 실행과 오래된 worker의 뒤늦은 저장을 막는다.
-- 실행 중 약 5초마다 생존 시각을 갱신한다. 기본 180초 이상 끊긴 작업은 실패로 전환하며 재시도는 새 작업 이력을 만든다.
-- 취소는 대기 작업이면 즉시, 실행 중이면 프로세스 종료 확인 후 확정한다. [취소 운영](ANALYSIS_CANCELLATION.md)을 따른다.
-- SSH 점검(`CollectionJob`)은 API가 동기로 실행하는 별도 흐름이며 APScheduler가 일일 자동 점검도 예약한다.
+- 서버당 활성 작업 1건(`active_asset_id` 유니크). 같은 범위·같은 업로드 해시 요청은 기존 작업을 돌려주고, 다른 범위는 409다.
+- `worker_token`으로 소유권을 고정하고 5초마다 heartbeat를 갱신한다. 180초 넘게 끊기면 `WORKER_INTERRUPTED`로 정리한다.
+- 취소는 로컬 프로세스 그룹과 원격 pid 파일의 프로세스 그룹을 죽이고 정리 증거(manifest `cleanup_confirmed`)를 확인한 뒤 확정한다([취소 운영](ANALYSIS_CANCELLATION.md)).
+- Redis·Celery 없이 PostgreSQL 행 잠금만 쓴다. 관리 서버 1대·worker 1개 규모에 맞춘 선택이다.
 
-## 5. 데이터와 업무 관계
+## 5. CVE 판정과 우선순위
 
-| 데이터 | 목적 |
+1. **Grype 대조**: SPDX 2.3을 `sbom:` 입력으로, `--distro`와 `using-cpes: false`로 배포판 수정 버전 기준만 쓴다(백포트 오탐 방지). `--by-cve`로 CVE 번호 기준 결과.
+2. **반입**(`services/analysis.py`): 구성요소×CVE 연결을 만들고 CVE 번호 기준 `cve_count`를 센다. Grype가 준 **EPSS·CISA KEV·risk**를 연결마다 저장한다(2026-09-22).
+3. **apt 대조**(`package_updates.py`): 서버 저장소가 실제로 올릴 수 있는 버전과 수정판을 dpkg 규칙으로 비교해 `UPDATE_AVAILABLE / UPDATE_BELOW_FIX / NO_UPDATE_FOUND`를 남긴다.
+4. **분리 집계**(`cve_breakdown.py`): 수정판 있음, 커널(linux 소스), 저장소 확인, 오탐 의심, **KEV, EPSS 1% 이상**을 검사마다 고정 저장한다.
+5. **화면**: 결과 표 첫 줄에 "CVE 전체 / 지금 고칠 수 있는 CVE(커널 제외) / 실제 악용 확인 n / 악용 확률 1% 이상 n". CVE별 보기는 같은 CVE가 형제 패키지에 붙은 것을 한 줄로 접고 KEV → 심각도 → EPSS 순으로 정렬한다.
+6. **AI 선별**(`ai_triage.py`): KEV·EPSS·수정판·심각도로 고른 후보 40건과 서버 사실만 보내 `해당 / 확인 필요 / 해당 없음 가능성`과 조치를 받는다. 조치 상태는 바꾸지 않는다.
+
+숫자가 큰 이유와 검증 결과는 [커널 CVE 검증](KERNEL_CVE_VERIFICATION_2026-09-22.md)에 있다. CVSS를 따로 계산하지 않으며 심각도는 Grype 값을 쓴다.
+
+## 6. 조치·비교·보고서
+
+- 조치는 `component_vulnerabilities.vex_status`와 append-only `vulnerability_actions`. `review_revision` 낙관적 잠금으로 동시 수정을 막고 감사 로그를 같은 트랜잭션에 남긴다.
+- 전후 비교는 저장된 두 검사의 원본(SPDX+Grype JSON)만 읽어 계속 검출·새로 검출·재검사 미검출·구성요소 제거를 계산한다. 도구·DB가 다르면 경고한다.
+- PDF는 ReportLab + 번들 Nanum Gothic, JSON에는 원본 해시가 들어간다.
+
+## 7. 데이터와 저장소
+
+| 테이블 | 목적 |
 |---|---|
-| Asset | 등록 서버의 식별·SSH 접속 정보 |
-| CollectionJob·CheckResult | SSH 점검 이력과 자원 사용률·설치 패키지·서버 정보 |
-| AnalysisUpload | 서버·프로젝트명·파일명·크기·원본 SHA-256 |
-| AnalysisJob | 요청 범위·입력 스냅샷·진행·실패·재시도·취소 |
-| SbomDocument·Component·DependencyEdge | 원본과 검색용 구성요소·라이선스·해시·의존관계 |
-| ProductRelease | 구성요소 식별용 내부 테이블 (제품 버전 묶음) |
-| AnalysisRun | 특정 시점의 SPDX·Grype 원본, 도구/DB 정보·해시·탐지 건수 |
-| Vulnerability·ComponentVulnerability | CVE와 설치 구성요소 연결, 출처별 심각도·수정 버전·현재 검토 상태 |
-| VulnerabilityAction | 메모·작성자·전후 상태의 추가형 이력 |
-| User·AuditLog | 관리자/조회자 계정과 변경 감사 로그 |
-
-CVE 작업목록은 전체 SBOM 이력을 대상으로 서버에서 개수·정렬·페이지를 계산한다. 단건 조치와 구성요소 목록 탐색도 큰 원본을 필요할 때만 읽는다. 개요 화면은 서버·범위별 마지막 성공 메타데이터를 사용하며, 과거 미완료 조치를 최신 탐지 수로 표현하지 않는다.
-
-## 6. CVE 정확성과 조치 근거
-
-Grype는 실제 생성한 SPDX를 입력으로 사용하며 원본 보고서와 매칭 출처를 저장한다. OS 패키지는 pkg:deb PURL로 배포판 수정 버전 기준으로 매칭하고, 서버의 패키지 관리자가 실제로 제공하는 업데이트와 대조한다.
-
-수정 버전은 같은 패키지·현재 버전이 포함된 구간에서 찾는다. 같은 CVE의 다른 advisory가 여전히 취약하다고 하는 후보는 제외한다. CVSS 2/3/4는 검증된 라이브러리로 계산하며 유효한 정보가 없으면 UNKNOWN이다. 미지원 생태계 순서·Git 그래프는 수정 버전 추정을 보류한다.
-
-검사 비교는 수동 VEX 값을 과거 탐지 결과로 사용하지 않는다. 다중 버전·CVE 별칭·원본 해시와 서버·범위를 확인한다. 도구/DB 변경·수동 반입·식별 정보 부족에는 경고를 표시한다. 조치 저장은 현재 `review_revision`을 확인하고 상태·이력·감사를 원자적으로 저장한다. 미검출만으로 자동 FIXED하지 않는다.
-
-## 7. 저장소·백업·운영 경계
+| assets | 등록 서버·대상. SSH 접속 정보(암호문), 호스트 키 |
+| collection_jobs · check_results | SSH 점검 이력, 자원·패키지·서버 정보·수집 에이전트 결과 |
+| analysis_uploads | ZIP 원본 sha256·프로젝트·크기 |
+| analysis_jobs | 검사 요청·스냅샷·진행·실패·취소·재시도 |
+| sbom_documents · components · dependency_edges | SPDX 원본과 검색용 구성요소·의존관계 |
+| analysis_runs | Grype 원본, 도구·DB 정보, 해시, 분리 집계 |
+| vulnerabilities · component_vulnerabilities | CVE와 구성요소 연결, 심각도·수정판·apt 대조·EPSS·KEV·risk·조치 상태 |
+| vulnerability_actions | 조치 이력(전후 스냅샷) |
+| ai_summaries | AI 요약·선별·조치 가이드(종류·대상·모델·토큰·프롬프트 해시) |
+| users · audit_logs | 계정, 감사 로그 |
 
 | 볼륨 | 내용 |
 |---|---|
-| `postgres_data` | 업무·검사 원본·조치 이력 DB |
-| `analysis_uploads` | DB에서 참조하는 원본 ZIP, API/worker 공유 |
-| `analysis_artifacts` | 작업별 수집·검사 파일·실행 manifest |
-| `analysis_cache` | 재사용하는 Grype DB |
+| postgres_data | DB |
+| analysis_uploads | ZIP 원본(api 쓰기, worker 읽기) |
+| analysis_artifacts | 작업별 manifest·로그·SBOM·Grype JSON |
+| analysis_cache | Grype DB(자동 갱신) |
 
-`backup-runtime.py`는 DB에서 내보낸 동일 스냅샷으로 dump와 전체 테이블 해시를 만들고 그 스냅샷이 참조하는 ZIP을 함께 보관한다. `--verify-restore`는 새 임시 DB에 복원해 전체 행 수·내용 해시와 ZIP 해시를 대조한 뒤 임시 DB를 삭제한다. 완성된 백업만 보존 개수 정책에 포함하며, `--install-schedule`로 해당 프로젝트의 일일 03:20 cron을 등록할 수 있다.
+백업은 `scripts/backup-runtime.py`가 DB 덤프와 참조 ZIP을 묶고 임시 DB 복원으로 검증한다([운영 백업](BACKUP_OPERATIONS.md)).
 
-이 백업의 범위는 DB와 참조된 ZIP이다. `.env`, SSH 키, 작업 디렉터리 전체, Grype 캐시, 서버 이미지와 운영 DB 자동 전환은 포함하지 않는다.
+## 8. 인증·비밀값·경계
 
-ADMIN은 서버 등록·검사·조치 변경을 수행하고 VIEWER는 조회·비교·다운로드·이력을 확인한다. 키·known_hosts는 서버에 읽기 전용으로 마운트하며 입력으로 임의 명령이나 개인키를 받지 않는다. 공개 다중 조직 SaaS, 컨테이너 이미지 입력, 자동 패치, 클라우드 계정 API 연동은 현재 범위 밖이다.
+- 로그인은 PBKDF2-HMAC-SHA256, 토큰은 HS256 JWT 8시간. 미들웨어가 모든 `/api/`에서 토큰·활성 계정을 검사하고 GET이 아닌 요청은 ADMIN만 통과시킨 뒤 감사 로그에 남긴다.
+- `JWT_SECRET`·`ADMIN_PASSWORD`에 기본값이 없고 `.env` 또는 `*_FILE`(Docker secrets)로 준다([비밀값 관리](SECRETS.md)).
+- 시연 compose는 web 8080과 api 8000을 연다. DB 포트는 열지 않는다. `docker-compose.prod.yml`은 Caddy 80·443만 연다(현재 시연 구성 아님).
+- 범위 밖: 컨테이너 이미지 입력, 자동 패치, 조직별 분리(멀티 테넌트), 클라우드 계정 API 연동. 도구·데이터 라이선스와 타깃층은 [라이선스와 타깃](LICENSES_AND_TARGET.md), 스캐너 대안·버전은 [스캐너 선택](SCANNER_OPTIONS.md).
 
-[API 안내](API.md) · [웹 사용 안내](WEB_ANALYSIS.md) · [교수님용 설명](PROFESSOR_PROJECT_GUIDE.md) · [과거 AWS 기록](AWS_DEPLOYMENT_RECORD.md)
+[API 안내](API.md) · [웹 사용 안내](WEB_ANALYSIS.md) · [교수님용 설명](PROFESSOR_PROJECT_GUIDE.md) · [요약서](PROJECT_SUMMARY.md)

@@ -19,7 +19,7 @@
 python3 scripts/install-analysis-tools.py
 ```
 
-고정 버전은 Syft 1.51.1, Grype 0.118.0이다. GitHub 공식 릴리스의 체크섬과 다운로드한 아카이브의 SHA-256을 비교한 다음 바이너리만 추출한다. 설치 위치는 Git에서 제외되는 `infrastructure/local-vm/runtime/tools`다. 전역 프로그램을 교체하지 않는다.
+고정 버전은 Syft 1.52.0, Grype 0.119.0이다. GitHub 공식 릴리스의 체크섬과 다운로드한 아카이브의 SHA-256을 비교한 다음 바이너리만 추출한다. 설치 위치는 Git에서 제외되는 `infrastructure/local-vm/runtime/tools`다. 전역 프로그램을 교체하지 않는다.
 
 도구의 역할과 옵션은 [Syft CLI](https://oss.anchore.com/docs/reference/syft/cli/), [SBOM 출력 형식](https://oss.anchore.com/docs/guides/sbom/formats/), [Grype SBOM 분석](https://oss.anchore.com/docs/guides/vulnerability/scan-targets/)을 참고한다.
 
@@ -54,7 +54,7 @@ python3 scripts/analyze-lab.py --asset-tag LAB-VM-01 --upload-existing-dir infra
   "asset_id": 1,
   "scan_scope": "ubuntu-dpkg-installed",
   "sbom": {"spdxVersion": "SPDX-2.3"},
-  "report": {"descriptor": {"name": "grype", "version": "0.118.0"}}
+  "report": {"descriptor": {"name": "grype", "version": "0.119.0"}}
 }
 ```
 
@@ -80,7 +80,7 @@ python3 scripts/analyze-lab.py --asset-tag LAB-VM-01 --upload-existing-dir infra
 - 구성요소별 심각도·분석 출처·수정 버전 목록을 저장한다. 여러 수정 계열을 임의로 하나의 권장 버전으로 선택하지 않는다.
 - 분석 이력에는 원본 보고서, 도구 버전, 보고서의 DB 정보, SBOM 해시와 묶음 중복 판별 해시를 저장한다. 원본의 `ignoredMatches`도 그대로 보관한다.
 - 파일 소유관계는 SPDX 원본에 보관하고 검색용 의존관계에는 패키지 간 연결만 저장한다.
-- 실제 약 94 MB 묶음에 맞춰 Nginx 요청 크기 한도를 200 MB로 설정했다. 목록 조회는 큰 원본 필드를 제외하며 CVE 화면은 100행씩 표시한다.
+- 실제 약 94 MB 묶음에 맞춰 Nginx 요청 크기 한도를 600 MB로 설정했다. 목록 조회는 큰 원본 필드를 제외하며 CVE 화면은 100행씩 표시한다.
 
 ## 후속 정확성·조치 검증
 
