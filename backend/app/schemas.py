@@ -276,6 +276,7 @@ class VulnerabilityRead(BaseModel):
     tracker_fix: Optional[str] = None
     host_relevance: Optional[str] = None
     kernel_files: list[str] = Field(default_factory=list)
+    secondary_status: Optional[str] = None
     finding_source: Optional[str] = None
     analysis_run_id: Optional[int] = None
     vex_status: str
@@ -351,6 +352,7 @@ class AuditLogRead(BaseModel):
 class AnalysisImport(BaseModel):
     distro: Optional[dict[str, Any]] = None   # {id, versionID, codename} the server reported (OS scans)
     host: Optional[dict[str, Any]] = None     # {arch, modules, filesystems, rootfs} for kernel CVE relevance
+    secondary: Optional[dict[str, Any]] = None  # {scanner, version, cve_count, cves: {cve: {pkgs, fixed}}} from the second scanner
 
     asset_id: int = Field(gt=0)
     sbom: dict[str, Any]
@@ -383,6 +385,7 @@ class AnalysisRead(BaseModel):
     epss_cve_count: int = 0              # distinct CVEs with EPSS >= 1%
     package_updates: Optional[dict[str, Any]] = None
     verification: Optional[dict[str, Any]] = None   # services/verification.py counts: tracker statuses, host relevance, checked_at
+    secondary: Optional[dict[str, Any]] = None      # second scanner summary: scanner, version, cve_count, agreed/grype_only/trivy_only counts
     host: Optional[dict[str, Any]] = None           # {arch, modules(count), filesystems, rootfs}
     database_info: dict[str, Any]
     imported_at: datetime

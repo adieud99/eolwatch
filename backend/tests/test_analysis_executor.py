@@ -189,7 +189,7 @@ def test_invalid_results_never_reach_import(tmp_path, mocked_pipeline, invalid, 
     elif invalid == "scope":
         state["raw"]["artifacts"][0]["type"] = "npm"
     elif invalid == "distro":
-        state["raw"]["distro"]["id"] = "alpine"
+        state["raw"]["distro"]["id"] = "arch"   # grype has no data for it -> refused, alpine/rpm families are supported now
     else:
         state["report"].pop("matches")
     with pytest.raises(executor.AnalysisExecutionError) as failure:
@@ -306,3 +306,56 @@ def test_os_scan_without_deb_purls_is_rejected_instead_of_matching_upstream_vers
         executor.execute_analysis({"id": 9, "ip_address": "10.77.0.21"}, tmp_path / "job", settings, state["stages"].append)
     assert failure.value.code == "PACKAGE_IDENTITY"
     assert "grype-scan" not in [name for name, _ in state["local_commands"]]
+
+
+@pytest.mark.parametrize("os_release,artifact_type,cataloger,purl,distro", [
+    ('ID=rocky\nVERSION_ID="9.3"\nID_LIKE="rhel centos fedora"\n', "rpm", "rpm-db-cataloger", "pkg:rpm/rocky/openssl@3.0.7?distro=rocky-9.3", "rockylinux:9"),
+    ('ID=amzn\nVERSION_ID="2023"\n', "rpm", "rpm-db-cataloger", "pkg:rpm/amzn/openssl@3.0.8?distro=amzn-2023", "amazonlinux:2023"),
+    ('ID=alpine\nVERSION_ID="3.19.1"\n', "apk", "apk-db-cataloger", "pkg:apk/alpine/openssl@3.1.4-r5?distro=alpine-3.19.1", "alpine:3.19"),
+    ('ID=debian\nVERSION_ID="12"\n', "deb", "dpkg-db-cataloger", "pkg:deb/debian/openssl@3.0.11?distro=debian-12", "debian:12"),
+])
+def test_os_scan_follows_the_servers_package_family(tmp_path, mocked_pipeline, os_release, artifact_type, cataloger, purl, distro):
+    settings, state = mocked_pipeline
+    state["os_release"] = os_release
+    state["raw"]["artifacts"][0]["type"] = artifact_type
+    state["raw"]["descriptor"]["configuration"]["catalogers"]["used"] = [cataloger]
+    state["raw"]["distro"] = {}
+    state["sbom"]["packages"][0]["externalRefs"][0]["referenceLocator"] = purl
+    directory = tmp_path / "job"
+    executor.execute_analysis({"id": 9, "ip_address": "10.77.0.21"}, directory, settings, state["stages"].append)
+    syft = next(argv for name, argv in state["remote_commands"] if name == "syft-scan")
+    assert syft[syft.index("--override-default-catalogers") + 1] == cataloger
+    grype = next(argv for name, argv in state["local_commands"] if name == "grype-scan")
+    assert grype[grype.index("--distro") + 1] == distro
+    manifest = json.loads((directory / "manifest.json").read_text())
+    assert manifest["os_family"] == {"rpm": "rpm", "apk": "apk", "deb": "deb"}[artifact_type]
+
+
+def test_unknown_package_family_fails_before_copying_anything(tmp_path, mocked_pipeline):
+    settings, state = mocked_pipeline
+    state["os_release"] = 'ID=arch\nPRETTY_NAME="Arch Linux"\n'
+    with pytest.raises(executor.AnalysisExecutionError) as failure:
+        executor.execute_analysis({"id": 9, "ip_address": "10.77.0.21"}, tmp_path / "job", settings, state["stages"].append)
+    assert failure.value.code == "DISTRO_UNSUPPORTED"
+    assert not any(name == "syft-scan" for name, _ in state["remote_commands"])
+
+
+def test_grype_distro_names_and_version_granularity():
+    assert executor.grype_distro({"id": "rhel", "versionID": "9.4"}) == "redhat:9"
+    assert executor.grype_distro({"id": "ubuntu", "versionID": "26.04"}) == "ubuntu:26.04"
+    assert executor.grype_distro({"id": "alpine", "versionID": "3.20.2"}) == "alpine:3.20"
+    assert executor.grype_distro({"id": "sles", "versionID": "15.5"}) == "sles:15.5"
+    assert executor.grype_distro({"id": "arch", "versionID": ""}) is None
+    assert executor.family_for({"id": "linuxmint", "idLike": ["ubuntu"]}) == "deb"
+    assert executor.family_for({"id": "custom", "idLike": ["rhel", "fedora"]}) == "rpm"
+
+
+def test_trivy_summary_keeps_only_cves_with_packages_and_fixes():
+    report = {"Results": [{"Vulnerabilities": [
+        {"VulnerabilityID": "CVE-2026-10001", "PkgName": "openssl", "FixedVersion": "3.0.2-0ubuntu1.18", "Severity": "HIGH"},
+        {"VulnerabilityID": "CVE-2026-10001", "PkgName": "libssl3", "Severity": "HIGH"},
+        {"VulnerabilityID": "GHSA-xxxx", "PkgName": "x"},
+        {"VulnerabilityID": "CVE-2026-10002", "PkgName": "curl", "Severity": "LOW"}]}]}
+    summary = executor._summarize_trivy(report, "0.74.0")
+    assert summary["cve_count"] == 2 and summary["cves"]["CVE-2026-10001"] == {"pkgs": ["openssl", "libssl3"], "fixed": "3.0.2-0ubuntu1.18", "severity": "HIGH"}
+    assert summary["cves"]["CVE-2026-10002"]["fixed"] is None

@@ -41,6 +41,7 @@ def _read(link: models.ComponentVulnerability) -> schemas.VulnerabilityRead:
         tracker_fix=link.tracker_fix,
         host_relevance=link.host_relevance,
         kernel_files=list(link.kernel_files or []),
+        secondary_status=link.secondary_status,
         finding_source=link.finding_source or "OSV",
         analysis_run_id=link.analysis_run_id,
         vex_status=link.vex_status,

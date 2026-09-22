@@ -348,7 +348,7 @@ def process_next_analysis_job() -> Optional[int]:
             _check_target(db, snapshot)
             payload = schemas.AnalysisImport(asset_id=job.asset_id, sbom=bundle['sbom'], report=bundle['report'],
                                             scan_scope=bundle['scan_scope'], package_updates=bundle.get('package_updates'),
-                                            distro=bundle.get('distro'), host=bundle.get('host'))
+                                            distro=bundle.get('distro'), host=bundle.get('host'), secondary=bundle.get('secondary'))
             run = import_analysis(db, payload, commit=False)
             if bundle.get('learned_host_key'):
                 target = db.get(models.Asset, job.asset_id)

@@ -31,8 +31,16 @@ REMOTE_COMMAND = (
     "elif command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then "
     "  echo MANAGER=rpm; echo REFRESHED=yes; "
     "  (dnf -q check-update 2>/dev/null || yum -q check-update 2>/dev/null); "
+    "elif command -v zypper >/dev/null 2>&1; then "
+    "  echo MANAGER=zypper; echo REFRESHED=yes; zypper --non-interactive --quiet list-updates 2>/dev/null; "
+    "elif command -v apk >/dev/null 2>&1; then "
+    "  echo MANAGER=apk; if apk update -q >/dev/null 2>&1; then echo REFRESHED=yes; else echo REFRESHED=no; fi; "
+    "  apk version -l '<' 2>/dev/null; "
     "else echo MANAGER=none; fi; true"
 )
+# apk: "openssl-3.1.4-r5 < 3.1.4-r6"        zypper: "v | repo | name | 1.0-1 | 1.0-2 | x86_64"
+APK_LINE = re.compile(r"^(\S+?)-([0-9][^\s]*)\s+<\s+(\S+)")
+ZYPPER_LINE = re.compile(r"^v\s*\|[^|]*\|\s*(\S+)\s*\|\s*(\S+)\s*\|\s*(\S+)\s*\|")
 APT_LINE = re.compile(r"^([^/\s]+)/\S+\s+(\S+)\s+\S+\s+\[upgradable from:\s*([^\]]+)\]")
 RPM_LINE = re.compile(r"^(\S+?)\.(?:x86_64|aarch64|noarch|i686|s390x|ppc64le)\s+(\S+)\s+\S+$")
 
@@ -42,7 +50,7 @@ def parse_updates(text: str) -> dict[str, Any]:
     for line in (text or "").splitlines():
         line = line.strip()
         if line.startswith("MANAGER="):
-            manager = line[8:] if line[8:] in {"apt", "rpm"} else None
+            manager = line[8:] if line[8:] in {"apt", "rpm", "apk", "zypper"} else None
         elif line.startswith("REFRESHED="):
             refreshed = line[10:] == "yes"
         elif manager == "apt":
@@ -53,6 +61,14 @@ def parse_updates(text: str) -> dict[str, Any]:
             match = RPM_LINE.match(line)
             if match:
                 packages[match.group(1)] = {"candidate": match.group(2), "installed": None}
+        elif manager == "apk":
+            match = APK_LINE.match(line)
+            if match:
+                packages[match.group(1)] = {"candidate": match.group(3), "installed": match.group(2)}
+        elif manager == "zypper":
+            match = ZYPPER_LINE.match(line)
+            if match:
+                packages[match.group(1)] = {"candidate": match.group(3), "installed": match.group(2)}
     return {"manager": manager, "refreshed": refreshed, "packages": packages,
             "collected_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
 

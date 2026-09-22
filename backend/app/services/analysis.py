@@ -136,6 +136,7 @@ def import_analysis(db: Session, payload: schemas.AnalysisImport, *, commit: boo
         run.database_info = {**(run.database_info or {}), 'package_updates': {k: v for k, v in payload.package_updates.items() if k != 'packages'} | {'package_count': len(payload.package_updates.get('packages') or {})}}
     if payload.distro:
         run.database_info = {**(run.database_info or {}), 'distro': {k: payload.distro.get(k) for k in ('id', 'versionID', 'codename', 'prettyName') if payload.distro.get(k)}}
+    secondary_cves = set((payload.secondary or {}).get('cves') or {}) if payload.secondary else None
     if payload.host:
         host = payload.host
         run.database_info = {**(run.database_info or {}), 'host': {'arch': host.get('arch'), 'modules': list(host.get('modules') or [])[:400],
@@ -212,8 +213,17 @@ def import_analysis(db: Session, payload: schemas.AnalysisImport, *, commit: boo
                 link.fixed_version = link.fixed_versions[0] if len(link.fixed_versions) == 1 else None
                 # apt/dnf upgrade the kernel through its meta package (linux-aws), never the versioned binary, so no verdict there.
                 link.fix_check = None if is_kernel_package(component.name, component.purl) else fix_check(component.name, link.fixed_versions, payload.package_updates)
+                if secondary_cves is not None:
+                    link.secondary_status = 'AGREED' if cve in secondary_cves else 'GRYPE_ONLY'
                 seen.add(key)
     run.cve_count, run.link_count = len(cves), len(seen)
+    if secondary_cves is not None:
+        only_second = sorted(secondary_cves - cves)
+        run.database_info = {**(run.database_info or {}), 'secondary': {
+            'scanner': payload.secondary.get('scanner', 'trivy'), 'version': payload.secondary.get('version'),
+            'cve_count': len(secondary_cves), 'agreed_cve_count': len(cves & secondary_cves), 'grype_only_cve_count': len(cves - secondary_cves),
+            'second_only_cve_count': len(only_second), 'second_only': only_second[:100],
+            'second_only_detail': {c: payload.secondary['cves'][c] for c in only_second[:100]}}}
     # Freeze the fixable/kernel/verified split now: a later import on the same SBOM re-points the shared links
     # (analysis_run_id) at itself, so a live per-run query would empty out this run's numbers.
     db.flush()

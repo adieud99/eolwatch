@@ -103,7 +103,8 @@ def read(run: models.AnalysisRun, counts: Optional[dict[str, int]] = None) -> sc
         component_count=run.sbom.component_count, match_count=run.match_count,
         cve_count=run.cve_count, link_count=run.link_count, ignored_non_cve=run.ignored_non_cve,
         # database_info stays the scanner DB descriptor; our own bookkeeping (counts, package_updates) lives beside it
-        database_info={k: v for k, v in (run.database_info or {}).items() if k not in ('counts', 'package_updates', 'verification', 'host', 'distro')} if isinstance(run.database_info, dict) else run.database_info,
+        database_info={k: v for k, v in (run.database_info or {}).items() if k not in ('counts', 'package_updates', 'verification', 'host', 'distro', 'secondary')} if isinstance(run.database_info, dict) else run.database_info,
+        secondary=(run.database_info or {}).get('secondary') if isinstance(run.database_info, dict) else None,
         verification=(run.database_info or {}).get('verification') if isinstance(run.database_info, dict) else None,
         host=({**(run.database_info or {}).get('host', {}), 'modules': len((run.database_info or {}).get('host', {}).get('modules') or [])} if isinstance(run.database_info, dict) and (run.database_info or {}).get('host') else None),
         imported_at=run.imported_at,

@@ -32,8 +32,47 @@ from .package_updates import REMOTE_COMMAND as PACKAGE_UPDATES_COMMAND, parse_up
 
 
 SCAN_SCOPE = DEFAULT_SCAN_SCOPE
-# dpkg distributions grype has distro fix data for; the version string must be numeric (e.g. 24.04, 12).
-SUPPORTED_DPKG_DISTROS = ("ubuntu", "debian")
+
+# Package-manager family of the OS scan, decided from /etc/os-release (ID, then ID_LIKE). Each family has its syft
+# cataloger, the package type syft reports and the PURL type grype needs for distro-version matching.
+OS_FAMILIES = {
+    "deb": {"cataloger": "dpkg-db-cataloger", "package_type": "deb", "purl": "pkg:deb/",
+            "ids": ("ubuntu", "debian", "linuxmint", "pop", "kali", "raspbian", "elementary", "zorin", "neon")},
+    "rpm": {"cataloger": "rpm-db-cataloger", "package_type": "rpm", "purl": "pkg:rpm/",
+            "ids": ("rhel", "centos", "rocky", "almalinux", "ol", "fedora", "amzn", "sles", "opensuse-leap", "opensuse-tumbleweed",
+                    "photon", "mariner", "azurelinux", "euleros", "openeuler")},
+    "apk": {"cataloger": "apk-db-cataloger", "package_type": "apk", "purl": "pkg:apk/", "ids": ("alpine", "wolfi", "chainguard")},
+}
+# os-release ID -> grype distro name, and how much of VERSION_ID grype's data is keyed on.
+GRYPE_DISTROS = {"ubuntu": ("ubuntu", "full"), "debian": ("debian", "major"), "alpine": ("alpine", "minor"), "amzn": ("amazonlinux", "full"),
+                 "rhel": ("redhat", "major"), "centos": ("centos", "major"), "rocky": ("rockylinux", "major"), "almalinux": ("almalinux", "major"),
+                 "ol": ("oraclelinux", "major"), "fedora": ("fedora", "major"), "sles": ("sles", "full"), "opensuse-leap": ("opensuse-leap", "full"),
+                 "photon": ("photon", "major"), "mariner": ("mariner", "full"), "azurelinux": ("azurelinux", "full"), "wolfi": ("wolfi", "full"),
+                 "chainguard": ("chainguard", "full"), "euleros": ("euleros", "full")}
+
+
+def family_for(os_release: dict):
+    """Which family the server belongs to, or None when it is not a dpkg/rpm/apk system."""
+    ids = [str(os_release.get("id") or "").lower()] + [i.lower() for i in (os_release.get("idLike") or [])]
+    for name, family in OS_FAMILIES.items():
+        if any(i in family["ids"] for i in ids):
+            return name
+    return None
+
+
+def grype_distro(distro: dict):
+    """'<grype name>:<version>' for --distro, or None when grype has no data for this distribution."""
+    mapping = GRYPE_DISTROS.get(str(distro.get("id") or "").lower())
+    version = str(distro.get("versionID") or "")
+    if not mapping or not re.fullmatch(r"[0-9]+(?:\.[0-9]+)*", version):
+        return None
+    name, granularity = mapping
+    parts = version.split(".")
+    if granularity == "major":
+        version = parts[0]
+    elif granularity == "minor":
+        version = ".".join(parts[:2])
+    return f"{name}:{version}"
 EXCLUSIONS = list(ANALYSIS_PROFILES[DEFAULT_SCAN_SCOPE].exclusions)
 SYFT_CONFIG = {"file": {"metadata": {"selection": "none"}},
                "relationships": {"package-file-ownership": False},
@@ -311,6 +350,40 @@ def _tools(settings, run: _Run):
     return syft.resolve(), grype.resolve(), "Linux " + expected_arch
 
 
+def _secondary_tool(settings, run: _Run):
+    """Trivy, when the worker image carries a verified copy; the scan never fails because it is absent."""
+    grype_path = getattr(settings, "analysis_grype_path", None)
+    if not grype_path and not getattr(settings, "analysis_trivy_path", None):
+        return None
+    trivy = Path(getattr(settings, "analysis_trivy_path", "") or Path(grype_path).parent / "trivy")
+    manifest_path = trivy.parent / "manifest.json"
+    if not trivy.is_file() or not os.access(trivy, os.X_OK) or not manifest_path.is_file():
+        return None
+    installed = _json(manifest_path).get("tools", {}).get("trivy", {})
+    digest = _sha256(trivy)
+    if digest != installed.get("binary_sha256"):
+        run.manifest["secondary"] = {"status": "skipped", "error_code": "TOOL_CHECKSUM"}
+        return None
+    run.manifest.setdefault("tools", {})["trivy"] = {"version": installed.get("version"), "sha256": digest}
+    return trivy.resolve()
+
+
+def _summarize_trivy(report: dict, version) -> dict:
+    """Compact second opinion: which CVEs Trivy found on which packages (the full JSON stays in the artifacts)."""
+    cves: dict = {}
+    for result in report.get("Results") or []:
+        for item in result.get("Vulnerabilities") or []:
+            cve = str(item.get("VulnerabilityID") or "")
+            if not re.fullmatch(r"CVE-\d{4}-\d{4,}", cve):
+                continue
+            entry = cves.setdefault(cve, {"pkgs": [], "fixed": None, "severity": item.get("Severity")})
+            if item.get("PkgName") and item["PkgName"] not in entry["pkgs"]:
+                entry["pkgs"].append(item["PkgName"])
+            if item.get("FixedVersion") and not entry["fixed"]:
+                entry["fixed"] = str(item["FixedVersion"])[:160]
+    return {"scanner": "trivy", "version": version, "cve_count": len(cves), "cves": cves}
+
+
 REMOTE_ARCHITECTURES = {"Linux x86_64": "amd64", "Linux aarch64": "arm64", "Linux arm64": "arm64"}
 
 
@@ -511,7 +584,8 @@ def _parse_os_release(text: str) -> dict:
     if not values.get("ID"):
         return {}
     return {"id": values["ID"].lower(), "versionID": values.get("VERSION_ID", ""), "prettyName": values.get("PRETTY_NAME", ""),
-            "codename": values.get("VERSION_CODENAME", "").lower() or None}
+            "codename": values.get("VERSION_CODENAME", "").lower() or None,
+            "idLike": [i for i in values.get("ID_LIKE", "").lower().split() if i]}
 
 
 HOST_FACTS_COMMAND = ("uname -m; echo ---; lsmod 2>/dev/null | awk 'NR>1 {print $1}'; echo ---; "
@@ -537,7 +611,8 @@ def _environment(settings) -> dict:
     cache = Path(settings.analysis_cache_dir).resolve()
     cache.mkdir(parents=True, exist_ok=True)
     env.update(SYFT_CHECK_FOR_APP_UPDATE="false", GRYPE_CHECK_FOR_APP_UPDATE="false",
-               GRYPE_DB_CACHE_DIR=str(cache / "grype-db"), GRYPE_CACHE_DIR=str(cache / "grype"))
+               GRYPE_DB_CACHE_DIR=str(cache / "grype-db"), GRYPE_CACHE_DIR=str(cache / "grype"),
+               TRIVY_CACHE_DIR=str(cache / "trivy"), TRIVY_NO_PROGRESS="true", TRIVY_DISABLE_VEX_NOTICE="true")
     return env
 
 
@@ -573,6 +648,7 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
         scan_options = ["--select-catalogers=-file", "--parallelism", "1", "--source-name",
                         str(asset_snapshot.get("project_name") or asset_snapshot.get("asset_tag") or asset_snapshot.get("id")),
                         "-o", "syft-json"]
+        expected_cataloger, expected_type, purl_prefix = profile.cataloger, profile.package_type, None
         if profile.cataloger:
             scan_options.extend(["--override-default-catalogers", profile.cataloger])
         for exclude in profile.exclusions:
@@ -596,18 +672,25 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
             architecture_line = architecture.read_text().strip()
             remote_syft = syft if architecture_line == expected_architecture else _remote_syft(syft, architecture_line, run)
             run.manifest["target_architecture"] = architecture_line
-            directory = "/"  # the OS scan reads the whole dpkg database; the profile exclusions trim the file walk
+            directory = "/"  # the OS scan reads the package database; the profile exclusions trim the file walk
+            if run.profile == DEFAULT_SCAN_SCOPE:
+                # The distro decides everything that follows: which syft cataloger, which PURL type, which grype data.
+                try:
+                    os_release = _parse_os_release(run.remote(client, "os-release", ["cat", "/etc/os-release"], 10).read_text(errors="replace"))
+                except AnalysisExecutionError:
+                    os_release = {}
+                family = family_for(os_release)
+                if not family:
+                    raise AnalysisExecutionError("DISTRO_UNSUPPORTED", f"지원하지 않는 배포판입니다: {os_release.get('prettyName') or os_release.get('id') or '알 수 없음'}. dpkg·rpm·apk 기반 Linux를 지원합니다.")
+                expected_cataloger, expected_type, purl_prefix = OS_FAMILIES[family]["cataloger"], OS_FAMILIES[family]["package_type"], OS_FAMILIES[family]["purl"]
+                scan_options.extend(["--override-default-catalogers", expected_cataloger])
+                run.manifest.update(os_family=family, os_release={k: os_release.get(k) for k in ("id", "versionID", "codename")})
             target, remote_config, pid_file = _provision(client, remote_syft, run)
             remote = ["env", "SYFT_CHECK_FOR_APP_UPDATE=false", target, "scan", "dir:" + directory,
                       "--config", remote_config, *scan_options]
             raw_path = run.remote(client, "syft-scan", remote, settings.analysis_collect_timeout_seconds,
                                   output="sbom.syft.json", pid_file=pid_file)
             if run.profile == DEFAULT_SCAN_SCOPE:
-                # The distro comes straight from the server, not from syft's file walk (which now skips /usr/lib).
-                try:
-                    os_release = _parse_os_release(run.remote(client, "os-release", ["cat", "/etc/os-release"], 10).read_text(errors="replace"))
-                except AnalysisExecutionError:
-                    os_release = {}
                 # What this kernel actually runs: needed to tell a CVE in an unloaded driver from one in core code.
                 try:
                     host_facts = _parse_host_facts(run.remote(client, "host-facts", ["sh", "-c", HOST_FACTS_COMMAND], 20).read_text(errors="replace"))
@@ -635,17 +718,17 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
             else:
                 raise AnalysisExecutionError("EMPTY_COLLECTION", "설치 패키지가 수집되지 않았습니다. 빈 결과는 정상 분석으로 저장하지 않습니다.")
         if not ai_reference and (any(not isinstance(package, dict) for package in packages)
-                or profile.cataloger and (catalogers != [profile.cataloger]
-                    or any(package.get("type") != profile.package_type for package in packages))):
+                or expected_cataloger and (catalogers != [expected_cataloger]
+                    or any(package.get("type") != expected_type for package in packages))):
             raise AnalysisExecutionError("SCOPE_MISMATCH", "수집 결과의 구성요소 또는 수집 도구가 선택한 분석 범위와 일치하지 않습니다.")
         distro = raw.get("distro") or {}
         if not distro.get("id") and os_release.get("id"):
             distro = {"id": os_release["id"], "versionID": os_release.get("versionID", ""), "prettyName": os_release.get("prettyName", "")}
         if os_release.get("codename") and not distro.get("codename"):
             distro = {**distro, "codename": os_release["codename"]}
-        if run.profile == DEFAULT_SCAN_SCOPE and (distro.get("id") not in SUPPORTED_DPKG_DISTROS
-                or not re.fullmatch(r"[0-9]+(?:\.[0-9]+)*", str(distro.get("versionID", "")))):
-            raise AnalysisExecutionError("DISTRO_UNSUPPORTED", "현재 분석은 배포판 버전을 식별할 수 있는 Ubuntu 또는 Debian 서버를 지원합니다.")
+        distro_target = grype_distro(distro) if run.profile == DEFAULT_SCAN_SCOPE else None
+        if run.profile == DEFAULT_SCAN_SCOPE and not distro_target:
+            raise AnalysisExecutionError("DISTRO_UNSUPPORTED", f"취약점 DB에 배포판 데이터가 없거나 버전을 식별할 수 없습니다: {distro.get('id') or '알 수 없음'} {distro.get('versionID') or ''}".strip())
         if not ai_reference and run.profile in SOURCE_SCAN_SCOPES and raw.get("source", {}).get("metadata", {}).get("path") != directory:
             raise AnalysisExecutionError("SCOPE_MISMATCH", "수집 결과의 경로가 검사한 소스 디렉터리와 다릅니다.")
         run.manifest.update(distro=distro, package_count=len(packages), catalogers=catalogers)
@@ -659,8 +742,9 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
         if sbom.get("spdxVersion") != "SPDX-2.3" or not sbom.get("packages"):
             raise AnalysisExecutionError("SPDX_INVALID", "SPDX 2.3 구성요소 목록 생성에 실패했습니다.")
         if run.profile == DEFAULT_SCAN_SCOPE:
-            # Without pkg:deb PURLs grype would match OS packages by upstream version and flag backported fixes.
-            with_purl = sum(1 for package in sbom["packages"] if any(str(ref.get("referenceLocator", "")).startswith("pkg:deb/")
+            # Without distro PURLs grype would match OS packages by upstream version and flag backported fixes.
+            prefix = purl_prefix or "pkg:deb/"
+            with_purl = sum(1 for package in sbom["packages"] if any(str(ref.get("referenceLocator", "")).startswith(prefix)
                                                                      for ref in package.get("externalRefs") or []))
             if with_purl < 0.9 * len(sbom["packages"]):
                 raise AnalysisExecutionError("PACKAGE_IDENTITY", "설치 패키지의 식별자(PURL)를 만들지 못해 결과를 저장하지 않습니다. 서버의 /etc/os-release를 읽을 수 있는지 확인하세요.")
@@ -670,8 +754,8 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
         grype_config = run.directory / "grype.yaml"
         grype_config.write_text(GRYPE_CONFIG, encoding="utf-8")
         grype_arguments = [str(grype), "sbom:" + str(spdx_path), "--config", str(grype_config)]
-        if run.profile == DEFAULT_SCAN_SCOPE:
-            grype_arguments.extend(["--distro", distro["id"] + ":" + distro["versionID"]])
+        if distro_target:
+            grype_arguments.extend(["--distro", distro_target])
         grype_arguments.extend(["--by-cve", "-o", "json"])
         report_path = run.local("grype-scan", grype_arguments,
                                settings.analysis_scan_timeout_seconds, env, output="grype.json")
@@ -679,6 +763,20 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
         if not isinstance(report.get("matches"), list) or report.get("descriptor", {}).get("name") != "grype":
             raise AnalysisExecutionError("GRYPE_INVALID", "Grype 취약점 분석 결과 형식이 올바르지 않습니다.")
         run.manifest.update(match_count=len(report["matches"]), grype_db=report.get("descriptor", {}).get("db"))
+        # Second opinion: Trivy on the very same SPDX file. Its disagreement is shown, never merged into the findings.
+        secondary = None
+        trivy = _secondary_tool(settings, run)
+        if trivy is not None:
+            trivy_path = run.directory / "trivy.json"
+            try:
+                run.local("trivy-scan", [str(trivy), "sbom", str(spdx_path), "--scanners", "vuln", "--format", "json",
+                                         "--output", str(trivy_path), "--quiet", "--timeout", f"{settings.analysis_scan_timeout_seconds}s"],
+                          settings.analysis_scan_timeout_seconds, env, output="trivy.log")
+                secondary = _summarize_trivy(_json(trivy_path), run.manifest.get("tools", {}).get("trivy", {}).get("version"))
+                run.manifest["secondary"] = {"status": "ok", "scanner": "trivy", "cve_count": secondary["cve_count"]}
+            except AnalysisExecutionError as error:
+                run.manifest["secondary"] = {"status": "failed", "scanner": "trivy", "error_code": error.code}
+                secondary = None
         run.heartbeat("IMPORTING")
         run.manifest["status"] = "ready_for_import"
         result = {"sbom": sbom, "report": report, "scan_scope": run.scan_scope, "distro": distro}
@@ -686,6 +784,8 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
             result["package_updates"] = package_updates
         if host_facts:
             result["host"] = host_facts
+        if secondary:
+            result["secondary"] = secondary
         if run.manifest.get("git_commit"):
             result["git_commit"] = run.manifest["git_commit"]
         learned = getattr(client, "eolwatch_learned_host_key", None) if client is not None else None

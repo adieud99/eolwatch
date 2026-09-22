@@ -228,6 +228,7 @@ class ComponentVulnerability(Base):
     tracker_fix: Mapped[Optional[str]] = mapped_column(String(160))     # released or pending package version from the tracker
     host_relevance: Mapped[Optional[str]] = mapped_column(String(24))   # CORE / LOADED_MODULE / UNLOADED_MODULE / OTHER_ARCH / FS_NOT_USED / UNKNOWN (kernel CVEs only)
     kernel_files: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    secondary_status: Mapped[Optional[str]] = mapped_column(String(20))   # AGREED / GRYPE_ONLY when a second scanner ran on the same SBOM
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     component: Mapped[Component] = relationship()

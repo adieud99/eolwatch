@@ -50,3 +50,11 @@ def test_fix_check_says_what_the_repository_really_offers():
     assert pu.fix_check("vim", ["2:9.1.2141-1ubuntu4.9"], updates) == pu.NO_UPDATE_FOUND      # nothing to upgrade: suspect
     assert pu.fix_check("vim", [], updates) is None                                          # no fix expected: nothing to check
     assert pu.fix_check("vim", ["1"], None) is None and pu.fix_check("vim", ["1"], {"manager": None, "packages": {}}) is None
+
+
+def test_apk_and_zypper_outputs_are_parsed():
+    from app.services.package_updates import parse_updates
+    apk = parse_updates("MANAGER=apk\nREFRESHED=yes\nopenssl-3.1.4-r5 < 3.1.4-r6\nbusybox-1.36.1-r15 < 1.36.1-r19\n")
+    assert apk["manager"] == "apk" and apk["packages"]["openssl"] == {"candidate": "3.1.4-r6", "installed": "3.1.4-r5"}
+    zyp = parse_updates("MANAGER=zypper\nREFRESHED=yes\nS | Repository | Name | Current Version | Available Version | Arch\n--+---\nv | Main | curl | 8.0.1-150400.5.44.1 | 8.0.1-150400.5.47.1 | x86_64\n")
+    assert zyp["packages"]["curl"] == {"candidate": "8.0.1-150400.5.47.1", "installed": "8.0.1-150400.5.44.1"}

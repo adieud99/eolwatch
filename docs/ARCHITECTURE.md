@@ -47,9 +47,9 @@ flowchart LR
 | 축 | 프로필 | 수집 위치 | 저장되는 `scan_scope` |
 |---|---|---|---|
 | 개발 검사 | `source-zip` (ZIP·의존성 파일 하나) / `source-git` (https 얕은 복제) | worker 안의 작업별 디렉터리 | `source-zip:<프로젝트>` / `source-git:<프로젝트>` |
-| 인프라 검사 | `ubuntu-dpkg-installed` | 대상 서버(`dpkg-db-cataloger`) | 프로필명 |
+| 인프라 검사 | `ubuntu-dpkg-installed` (이름은 유지, 내용은 OS 패키지 전체) | 대상 서버. `/etc/os-release`로 패키지 계열을 정해 `dpkg-db-cataloger` / `rpm-db-cataloger` / `apk-db-cataloger` 중 하나 | 프로필명 |
 
-인프라 검사는 Ubuntu와 Debian(dpkg)을 지원한다. Grype에 서버가 보고한 `--distro <id>:<버전>`을 넘기고, `pkg:deb` PURL이 90% 미만이면 결과를 저장하지 않는다(`analysis_executor.py`). 대상 CPU는 x86_64·arm64 어느 쪽이든 되며 worker가 맞는 Syft를 고른다. ZIP·Git은 빌드·설치·실행 없이 잠금 파일·명세·설치 메타데이터만 읽고, 500 MiB·2 GiB 해제·256 MiB 파일·200,000항목·압축률 100배 한도와 경로·링크·암호화 검사를 거친다(`analysis_uploads.py`).
+인프라 검사는 dpkg(Ubuntu·Debian·Mint 등), rpm(RHEL·CentOS·Rocky·Alma·Oracle·Fedora·Amazon Linux·SLES·openSUSE·Photon·Azure Linux), apk(Alpine·Wolfi) 계열을 지원한다(`analysis_executor.OS_FAMILIES`). Grype에는 배포판별 이름·버전 규칙(`GRYPE_DISTROS`: 예 `redhat:9`, `amazonlinux:2023`, `alpine:3.19`)으로 `--distro`를 넘기고, 계열에 맞는 PURL(`pkg:deb/`·`pkg:rpm/`·`pkg:apk/`)이 90% 미만이면 결과를 저장하지 않는다. apt·dnf/yum·zypper·apk 저장소 대조를 모두 지원한다(`package_updates.py`). 배포판 추적기 2차 검증은 현재 Ubuntu만이다. 대상 CPU는 x86_64·arm64 어느 쪽이든 되며 worker가 맞는 Syft를 고른다. ZIP·Git은 빌드·설치·실행 없이 잠금 파일·명세·설치 메타데이터만 읽고, 500 MiB·2 GiB 해제·256 MiB 파일·200,000항목·압축률 100배 한도와 경로·링크·암호화 검사를 거친다(`analysis_uploads.py`).
 
 ## 3. SSH 접속과 수집
 
@@ -78,7 +78,7 @@ QUEUED → COLLECTING → SCANNING → IMPORTING → SUCCESS
 
 ## 5. CVE 판정과 우선순위
 
-1. **Grype 대조**: SPDX 2.3을 `sbom:` 입력으로, `--distro`와 `using-cpes: false`로 배포판 수정 버전 기준만 쓴다(백포트 오탐 방지). `--by-cve`로 CVE 번호 기준 결과.
+1. **Grype 대조**: SPDX 2.3을 `sbom:` 입력으로, `--distro`와 `using-cpes: false`로 배포판 수정 버전 기준만 쓴다(백포트 오탐 방지). `--by-cve`로 CVE 번호 기준 결과. 이어서 **Trivy 0.74.0**이 같은 SPDX 파일을 검사한다(`trivy sbom … --scanners vuln`). Trivy 결과는 CVE 연결에 `secondary_status`(AGREED / GRYPE_ONLY)로, 검사에는 "두 도구 일치 n · Grype만 n · Trivy만 n"으로 남고 판정 자체는 Grype 것을 쓴다. Trivy가 없거나 실패해도 검사는 성공한다.
 2. **반입**(`services/analysis.py`): 구성요소×CVE 연결을 만들고 CVE 번호 기준 `cve_count`를 센다. Grype가 준 **EPSS·CISA KEV·risk**를 연결마다 저장한다(2026-09-22).
 3. **apt 대조**(`package_updates.py`): 서버 저장소가 실제로 올릴 수 있는 버전과 수정판을 dpkg 규칙으로 비교해 `UPDATE_AVAILABLE / UPDATE_BELOW_FIX / NO_UPDATE_FOUND`를 남긴다.
 4. **분리 집계**(`cve_breakdown.py`): 수정판 있음, 커널(linux 소스), 저장소 확인, 오탐 의심, **KEV, EPSS 1% 이상**을 검사마다 고정 저장한다.

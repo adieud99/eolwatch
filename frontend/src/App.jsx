@@ -39,7 +39,8 @@ function VerifyBadge({ item }) {
   if (!item) return null
   const tracker = item.tracker_status && item.tracker_status !== 'released' ? <small className={`verify verify-tracker-${item.tracker_status === 'pending' ? 'pending' : item.tracker_status === 'not-affected' || item.tracker_status === 'DNE' ? 'clear' : 'open'}`}>{trackerText[item.tracker_status] || item.tracker_status}{item.tracker_status === 'pending' && item.tracker_fix ? ` ${item.tracker_fix}` : ''}</small> : null
   const host = item.host_relevance ? <small className={`verify verify-host-${hostNotHere.includes(item.host_relevance) ? 'clear' : item.host_relevance === 'UNKNOWN' ? 'check' : 'here'}`}>{hostText[item.host_relevance] || item.host_relevance}</small> : null
-  return <>{tracker}{host}</>
+  const second = item.secondary_status ? <small className={`verify ${item.secondary_status === 'AGREED' ? 'verify-second-agree' : 'verify-second-only'}`}>{item.secondary_status === 'AGREED' ? '2차 스캐너(Trivy) 일치' : 'Grype만 검출'}</small> : null
+  return <>{tracker}{host}{second}</>
 }
 
 // KEV = CISA가 실제 악용을 확인한 목록, EPSS = 30일 안에 악용될 확률. 색이 아니라 글자로 뜻을 전한다.
@@ -500,11 +501,13 @@ const triageVerdictClass = { '해당': 'verdict-hit', '확인 필요': 'verdict-
 // 실무자 요약: 수정판 없는 커널 CVE를 "배포판이 어디까지 했나"와 "이 서버에 해당하나"로 나눠 보여 준다.
 function VerificationSummary({ run }) {
   const v = run.verification
-  if (!v) return <small className="verify-summary subtle">2차 검증 전 · 검사 결과 아래 "2차 검증 실행"</small>
+  const s = run.secondary
+  const secondLine = s ? <small className="verify-summary">2차 스캐너 {s.scanner === 'trivy' ? 'Trivy' : s.scanner}{s.version ? ` ${s.version}` : ''}: 두 도구 일치 {s.agreed_cve_count?.toLocaleString()} · Grype만 {s.grype_only_cve_count?.toLocaleString()} · Trivy만 {s.second_only_cve_count?.toLocaleString()}{s.second_only?.length ? ` (${s.second_only.slice(0, 3).join(', ')}${s.second_only.length > 3 ? ' …' : ''})` : ''}</small> : null
+  if (!v) return <>{secondLine}<small className="verify-summary subtle">2차 검증 전 · 검사 결과 아래 "2차 검증 실행"</small></>
   const t = v.tracker || {}, h = v.host || {}
   const notHere = (h.UNLOADED_MODULE || 0) + (h.OTHER_ARCH || 0) + (h.FS_NOT_USED || 0)
   const waiting = (t.pending || 0) + (t.needed || 0) + (t.deferred || 0) + (t.ignored || 0) + (t['needs-triage'] || 0)
-  return <small className="verify-summary">배포판 추적기 {v.checked_cves?.toLocaleString() ?? 0}건 대조 · 수정 예정 {t.pending || 0} · 업스트림만 수정 {t.needed || 0}{t.deferred || t.ignored ? ` · 보류·미수정 결정 ${(t.deferred || 0) + (t.ignored || 0)}` : ''}{v.fixed_already ? ` · 이미 수정됨(DB 지연) ${v.fixed_already}` : ''}{Object.keys(h).length ? ` | 커널 코드 위치: 핵심·로드됨 ${(h.CORE || 0) + (h.LOADED_MODULE || 0)} · 이 서버 미해당 추정 ${notHere} · 확인 필요 ${h.UNKNOWN || 0}` : ''}{v.partial ? ' · (일부만 조회됨, 다시 실행하면 이어서)' : ''}</small>
+  return <>{secondLine}<small className="verify-summary">배포판 추적기 {v.checked_cves?.toLocaleString() ?? 0}건 대조 · 수정 예정 {t.pending || 0} · 업스트림만 수정 {t.needed || 0}{t.deferred || t.ignored ? ` · 보류·미수정 결정 ${(t.deferred || 0) + (t.ignored || 0)}` : ''}{v.fixed_already ? ` · 이미 수정됨(DB 지연) ${v.fixed_already}` : ''}{Object.keys(h).length ? ` | 커널 코드 위치: 핵심·로드됨 ${(h.CORE || 0) + (h.LOADED_MODULE || 0)} · 이 서버 미해당 추정 ${notHere} · 확인 필요 ${h.UNKNOWN || 0}` : ''}{v.partial ? ' · (일부만 조회됨, 다시 실행하면 이어서)' : ''}</small></>
 }
 
 // AI 선별: KEV·EPSS·수정판·심각도로 고른 후보만 서버 사실과 함께 보내 '해당 / 확인 필요 / 해당 없음 가능성'을 받는다. 조치 상태는 바꾸지 않는다.

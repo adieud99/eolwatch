@@ -431,3 +431,16 @@ def test_import_keeps_exploit_evidence_and_counts_kev_and_epss(client, bundle):
     # The per-CVE list puts the known-exploited one first regardless of severity ordering ties.
     grouped = client.get("/api/vulnerability-work/cves", params={"sbom_id": body["sbom_id"], "status": "ALL"}).json()
     assert grouped["items"][0]["cve_id"] == "CVE-2026-30001" and grouped["items"][0]["kev"] is True
+
+
+def test_second_scanner_agreement_is_recorded_per_finding_and_per_run(client, bundle):
+    ids = [m["vulnerability"]["id"] for m in bundle["report"]["matches"]]
+    secondary = {"scanner": "trivy", "version": "0.74.0", "cve_count": 2, "cves": {ids[0]: {"pkgs": ["x"], "fixed": None, "severity": "HIGH"},
+                                                                                    "CVE-2026-77777": {"pkgs": ["y"], "fixed": "1.2", "severity": "LOW"}}}
+    imported = client.post("/api/analyses/import", json={**bundle, "secondary": secondary})
+    assert imported.status_code == 200, imported.text
+    body = imported.json()
+    assert body["secondary"]["agreed_cve_count"] == 1 and body["secondary"]["second_only"] == ["CVE-2026-77777"]
+    assert body["secondary"]["grype_only_cve_count"] == body["cve_count"] - 1
+    rows = {row["cve_id"]: row for row in client.get("/api/vulnerabilities", params={"sbom_id": body["sbom_id"]}).json()}
+    assert rows[ids[0]]["secondary_status"] == "AGREED" and all(r["secondary_status"] in ("AGREED", "GRYPE_ONLY") for r in rows.values())
