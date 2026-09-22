@@ -107,6 +107,28 @@ describe('실제 프로젝트 분석 입력', () => {
   })
 })
 
+describe('새 대상 만들기', () => {
+  it('개발 검사에서 대상을 만들면 목록에 추가되고 바로 선택된다', async () => {
+    const request = vi.fn(async (path, options) => options?.method === 'POST' && path === '/assets' ? { id: 77, asset_tag: 'PROJ-ORDERS', name: '주문 서비스' } : [])
+    const onAssetCreated = vi.fn()
+    open({ request, onAssetCreated, mode: 'zip' })
+    fireEvent.click(screen.getByRole('button', { name: '+ 새 대상' }))
+    fireEvent.change(screen.getByLabelText('대상 번호'), { target: { value: 'PROJ-ORDERS' } })
+    fireEvent.change(screen.getByLabelText('대상 이름'), { target: { value: '주문 서비스' } })
+    fireEvent.click(screen.getByRole('button', { name: '대상 만들기' }))
+    await screen.findByText('대상 PROJ-ORDERS을(를) 만들었습니다.')
+    const post = request.mock.calls.find(([, options]) => options?.method === 'POST')
+    expect(JSON.parse(post[1].body)).toEqual({ asset_tag: 'PROJ-ORDERS', name: '주문 서비스', asset_type: 'server', monitored: false })
+    expect(screen.getByRole('combobox', { name: /결과를 저장할 대상/ })).toHaveValue('77')
+    expect(onAssetCreated).toHaveBeenCalledWith({ id: 77, asset_tag: 'PROJ-ORDERS', name: '주문 서비스' })
+    expect(screen.queryByLabelText('대상 번호')).not.toBeInTheDocument()
+  })
+  it('조회자에게는 새 대상 버튼이 없다', () => {
+    open({ mode: 'zip', canEdit: false })
+    expect(screen.queryByRole('button', { name: '+ 새 대상' })).not.toBeInTheDocument()
+  })
+})
+
 describe('Git 저장소와 의존성 파일 입력', () => {
   it('Git 저장소 주소·브랜치·토큰을 JSON으로 보내고 토큰은 응답 뒤 비운다', async () => {
     const queued = { id: 9, asset_id: 2, scan_scope: 'source-git:orders', status: 'QUEUED', input_type: 'git' }
