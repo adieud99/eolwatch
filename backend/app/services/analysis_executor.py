@@ -215,9 +215,12 @@ class _Run:
                     if not channel.recv_ready() and not channel.recv_stderr_ready():
                         time.sleep(0.1)
             if entry["returncode"]:
-                code = "COLLECTION_TIMEOUT" if entry["returncode"] in (124, 137) else "REMOTE_COMMAND_FAILED"
                 hint = _remote_hint(stdout, stderr)
-                raise AnalysisExecutionError(code, f"{name} 원격 작업에 실패했습니다." + (f" 서버 응답: {hint}" if hint else " 대상 권한과 작업 로그를 확인하세요."))
+                if entry["returncode"] == 124:
+                    raise AnalysisExecutionError("COLLECTION_TIMEOUT", f"{name} 원격 작업이 {timeout}초 안에 끝나지 않았습니다. 서버가 느리거나 바쁠 수 있으니 잠시 후 다시 시도하세요." + (f" 서버 응답: {hint}" if hint else ""))
+                if entry["returncode"] == 137:
+                    raise AnalysisExecutionError("COLLECTION_KILLED", f"{name} 원격 작업이 서버에서 강제 종료되었습니다(메모리 부족일 때 흔합니다). 서버의 메모리 여유를 확인하거나 잠시 후 다시 시도하세요." + (f" 서버 응답: {hint}" if hint else ""))
+                raise AnalysisExecutionError("REMOTE_COMMAND_FAILED", f"{name} 원격 작업에 실패했습니다." + (f" 서버 응답: {hint}" if hint else " 대상 권한과 작업 로그를 확인하세요."))
         finally:
             if not completed and requested:
                 stopped = bool(channel is not None and channel.exit_status_ready()
@@ -253,7 +256,10 @@ def _remote_hint(stdout: Path, stderr: Path, limit: int = 200) -> str:
         except OSError:
             continue
         if text:
-            line = text.splitlines()[0].strip()
+            lines = [line.strip() for line in text.splitlines() if line.strip()]
+            # syft prints hundreds of "WARN unable to access" lines; the line that explains the failure is not one of them
+            telling = [line for line in lines if " WARN " not in line and "WARN unable to access" not in line]
+            line = (telling or lines)[-1 if telling else 0]
             return line[:limit] + ("…" if len(line) > limit else "")
     return ""
 
@@ -512,6 +518,18 @@ def _ai_library_reference(run: _Run, directory: str, asset_snapshot: dict) -> Pa
     return spdx_path
 
 
+def _parse_os_release(text: str) -> dict:
+    """ID / VERSION_ID / PRETTY_NAME out of /etc/os-release; anything else (or garbage) gives {}."""
+    values = {}
+    for line in text.splitlines():
+        if "=" in line and not line.startswith("#"):
+            key, _, value = line.partition("=")
+            values[key.strip()] = value.strip().strip('"').strip("'")
+    if not values.get("ID"):
+        return {}
+    return {"id": values["ID"].lower(), "versionID": values.get("VERSION_ID", ""), "prettyName": values.get("PRETTY_NAME", "")}
+
+
 def _environment(settings) -> dict:
     # Do not pass database/password/registry credentials into scanners or their reports.
     allowed = {"PATH", "HOME", "LANG", "LC_ALL", "TZ", "SSL_CERT_FILE", "SSL_CERT_DIR",
@@ -535,6 +553,7 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
     client = None
     remote_config = None
     package_updates = None
+    os_release: dict = {}
     try:
         run.heartbeat("COLLECTING")
         profile = ANALYSIS_PROFILES.get(run.profile)
@@ -587,6 +606,11 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
             raw_path = run.remote(client, "syft-scan", remote, settings.analysis_collect_timeout_seconds,
                                   output="sbom.syft.json", pid_file=pid_file)
             if run.profile == DEFAULT_SCAN_SCOPE:
+                # The distro comes straight from the server, not from syft's file walk (which now skips /usr/lib).
+                try:
+                    os_release = _parse_os_release(run.remote(client, "os-release", ["cat", "/etc/os-release"], 10).read_text(errors="replace"))
+                except AnalysisExecutionError:
+                    os_release = {}
                 # Ask apt/dnf what it would upgrade, so each 'fixed' CVE can be checked against the real repository.
                 try:
                     package_updates = parse_updates(run.remote(client, "package-updates", ["sh", "-c", PACKAGE_UPDATES_COMMAND], 180).read_text(errors="replace"))
@@ -612,6 +636,8 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
                     or any(package.get("type") != profile.package_type for package in packages))):
             raise AnalysisExecutionError("SCOPE_MISMATCH", "수집 결과의 구성요소 또는 수집 도구가 선택한 분석 범위와 일치하지 않습니다.")
         distro = raw.get("distro") or {}
+        if not distro.get("id") and os_release.get("id"):
+            distro = {"id": os_release["id"], "versionID": os_release.get("versionID", ""), "prettyName": os_release.get("prettyName", "")}
         if run.profile == DEFAULT_SCAN_SCOPE and (distro.get("id") != "ubuntu"
                 or not re.fullmatch(r"[0-9]+(?:\.[0-9]+)*", str(distro.get("versionID", "")))):
             raise AnalysisExecutionError("DISTRO_UNSUPPORTED", "현재 분석은 배포판 버전을 식별할 수 있는 Ubuntu 서버를 지원합니다.")
@@ -627,6 +653,12 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
         sbom = _json(spdx_path)
         if sbom.get("spdxVersion") != "SPDX-2.3" or not sbom.get("packages"):
             raise AnalysisExecutionError("SPDX_INVALID", "SPDX 2.3 구성요소 목록 생성에 실패했습니다.")
+        if run.profile == DEFAULT_SCAN_SCOPE:
+            # Without pkg:deb PURLs grype would match OS packages by upstream version and flag backported fixes.
+            with_purl = sum(1 for package in sbom["packages"] if any(str(ref.get("referenceLocator", "")).startswith("pkg:deb/")
+                                                                     for ref in package.get("externalRefs") or []))
+            if with_purl < 0.9 * len(sbom["packages"]):
+                raise AnalysisExecutionError("PACKAGE_IDENTITY", "설치 패키지의 식별자(PURL)를 만들지 못해 결과를 저장하지 않습니다. 서버의 /etc/os-release를 읽을 수 있는지 확인하세요.")
         run.manifest["grype_input_sha256"] = _sha256(spdx_path)
         # OS packages: match only on the distribution's own fixed package versions (backports stay correct);
         # CPE matching would judge by upstream version and re-create the classic false positives.

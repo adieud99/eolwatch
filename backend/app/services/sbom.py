@@ -192,10 +192,8 @@ def _normalize_product(db: Session, item: dict[str, Any]) -> models.ProductRelea
                 fail("PURL과 CPE가 서로 다른 제품을 가리킵니다.")
             if same_cpe and purl and existing.purl and not same_purl:
                 fail("PURL과 CPE가 서로 다른 제품을 가리킵니다.")
-            if same_cpe and purl and not existing.purl:
-                parsed = PackageURL.from_string(purl)
-                if parsed.type in {"deb", "rpm", "apk"} or parsed.qualifiers:
-                    fail("배포판·한정자가 있는 패키지는 CPE만으로 공통 지원일을 상속할 수 없습니다.")
+            # same CPE, same version, no PURL yet: the earlier record is the same package seen without an
+            # identifier (e.g. a scan where the distro was unknown); it gets enriched below, not rejected.
             matches.append(existing)
         elif not purl and not cpe:
             matches.append(existing)

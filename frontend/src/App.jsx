@@ -460,7 +460,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
   const [cveRead, setCveRead] = useState(null)
   const [selectedFinding, setSelectedFinding] = useState(null)
   const [bundle, setBundle] = useState(null)
-  const [cveFilter, setCveFilter] = useState({ fix: 'ALL', kernel: false })
+  const [cveFilter, setCveFilter] = useState({ fix: 'ALL', kernel: false, resolved: false })   // resolved: show 조치 완료·영향 없음 too
   const [cveView, setCveView] = useState('components')   // one row per component, CVEs folded under it
   const [expanded, setExpanded] = useState({})            // component_id -> { status, items, total }
   const loadedKey = useRef('')
@@ -469,7 +469,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
   const cveSection = useRef(null)
   const pageSize = 100
   const currentPage = page.sbomId === sbomId ? page.number : 0
-  const cveKey = `${sbomId}:${currentPage}:${cveRevision}:${cveFilter.fix}:${cveFilter.kernel}:${cveView}`
+  const cveKey = `${sbomId}:${currentPage}:${cveRevision}:${cveFilter.fix}:${cveFilter.kernel}:${cveFilter.resolved}:${cveView}`
   const currentRead = cveRead?.key === cveKey ? cveRead : null
   const cveLoading = Boolean(sbomId && (!currentRead || currentRead.status === 'loading'))
   const cveError = currentRead?.error || ''
@@ -483,7 +483,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
     if (!sbomId) return
     const controller = new AbortController()
     setCveRead({ key: cveKey, status: 'loading' })
-    const params = new URLSearchParams({ sbom_id: String(sbomId), status: 'ALL', fix: cveFilter.fix, kernel: String(cveFilter.kernel), limit: String(pageSize), offset: String(currentPage * pageSize) })
+    const params = new URLSearchParams({ sbom_id: String(sbomId), status: cveFilter.resolved ? 'ALL' : 'OPEN', fix: cveFilter.fix, kernel: String(cveFilter.kernel), limit: String(pageSize), offset: String(currentPage * pageSize) })
     api(cveView === 'components' ? `/vulnerability-work/components?${params}` : `/vulnerability-work?${params}`, { signal: controller.signal }).then((result) => {
       if (controller.signal.aborted) return
       if (currentPage && currentPage * pageSize >= result.total) {
@@ -513,7 +513,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
     const controller = new AbortController()
     setExpanded((current) => ({ ...current, ...Object.fromEntries(ids.filter((id) => id in current).map((id) => [id, { ...current[id], status: 'loading' }])) }))
     ids.forEach((id) => {
-      const params = new URLSearchParams({ sbom_id: String(sbomId), component_id: id, status: 'ALL', fix: cveFilter.fix, kernel: String(cveFilter.kernel), limit: '100', offset: '0' })
+      const params = new URLSearchParams({ sbom_id: String(sbomId), component_id: id, status: cveFilter.resolved ? 'ALL' : 'OPEN', fix: cveFilter.fix, kernel: String(cveFilter.kernel), limit: '100', offset: '0' })
       api(`/vulnerability-work?${params}`, { signal: controller.signal })
         .then((result) => { if (!controller.signal.aborted) setExpanded((current) => (id in current ? { ...current, [id]: { status: 'success', items: result.items || [], total: result.total || 0 } } : current)) })
         .catch((reason) => { if (!controller.signal.aborted) setExpanded((current) => (id in current ? { ...current, [id]: { status: 'error', error: reason.message } } : current)) })
@@ -595,7 +595,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
     {selectedFinding && <VulnerabilityActions key={selectedFinding.link_id} finding={selectedFinding} analyses={analyses} users={users} canEdit={canEdit} request={api} onSaved={() => { setSelectedFinding(null); refreshCves(); return onChanged('조치 내용과 이력을 저장했습니다.') }} onClose={() => setSelectedFinding(null)} />}
     {cveLoading && <p role="status">CVE 결과를 불러오는 중…</p>}
     {cveError && <div role="alert"><p className="form-error">CVE 결과 조회 실패: {cveError}</p><button className="secondary" type="button" onClick={refreshCves}>CVE 조회 다시 시도</button></div>}
-    {sbomId && <div className="cve-filters" role="group" aria-label="CVE 표시 조건"><label>표시<select aria-label="수정판 기준" value={cveFilter.fix} onChange={(event) => { setCveFilter({ ...cveFilter, fix: event.target.value }); setPage({ sbomId, number: 0 }) }}><option value="ALL">전체</option><option value="FIXED">수정판 있는 CVE만</option><option value="UNFIXED">수정판 없는 CVE만</option></select></label><label className="check"><input type="checkbox" checked={cveFilter.kernel} onChange={(event) => { setCveFilter({ ...cveFilter, kernel: event.target.checked }); setPage({ sbomId, number: 0 }) }} />커널(linux) CVE 포함</label><small>Ubuntu는 커널(linux) 한 패키지에 수천 개의 CVE를 묶어 두므로 기본은 커널을 제외합니다. 바로 조치할 것만 보려면 '수정판 있는 CVE만'을 고르세요.</small></div>}
+    {sbomId && <div className="cve-filters" role="group" aria-label="CVE 표시 조건"><label>표시<select aria-label="수정판 기준" value={cveFilter.fix} onChange={(event) => { setCveFilter({ ...cveFilter, fix: event.target.value }); setPage({ sbomId, number: 0 }) }}><option value="ALL">전체</option><option value="FIXED">수정판 있는 CVE만</option><option value="UNFIXED">수정판 없는 CVE만</option></select></label><label className="check"><input type="checkbox" checked={cveFilter.kernel} onChange={(event) => { setCveFilter({ ...cveFilter, kernel: event.target.checked }); setPage({ sbomId, number: 0 }) }} />커널(linux) CVE 포함</label><label className="check"><input type="checkbox" checked={cveFilter.resolved} onChange={(event) => { setCveFilter({ ...cveFilter, resolved: event.target.checked }); setPage({ sbomId, number: 0 }) }} />해결된 CVE 포함</label><small>기본은 아직 조치하지 않은 CVE만, 커널(linux)은 제외해 보여 줍니다. '조치 완료'·'영향 없음'으로 기록한 것은 '해결된 CVE 포함'을 켜야 보입니다.</small></div>}
     <div className="view-toggle" role="group" aria-label="CVE 보기 방식"><button type="button" className="table-button" aria-pressed={cveView === 'components'} onClick={() => { setCveView('components'); setPage({ sbomId, number: 0 }) }}>구성요소별로 보기</button><button type="button" className="table-button" aria-pressed={cveView === 'cves'} onClick={() => { setCveView('cves'); setPage({ sbomId, number: 0 }) }}>CVE별로 보기</button></div>
     {cveView === 'components' ? <div className="table-wrap"><table aria-label="구성요소별 CVE"><thead><tr><th>구성요소</th><th>영향 대상</th><th>CVE</th><th>최고 심각도</th><th>수정 버전</th><th>확인</th></tr></thead>
       <tbody>{visibleGroups.flatMap((group) => {

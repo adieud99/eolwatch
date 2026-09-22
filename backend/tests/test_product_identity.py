@@ -98,8 +98,9 @@ def test_placeholder_version_uses_embedded_version(db, unknown):
     assert item.version == "1.0"
 
 
-def test_cpe_only_upstream_does_not_absorb_distro_package(db):
+def test_cpe_only_record_is_enriched_by_the_same_packages_purl(db):
+    """A scan that could not build PURLs leaves CPE-only rows; the next scan of the same package version completes them."""
     cpe = "cpe:2.3:a:vendor:identity-demo:1.0:*:*:*:*:*:*:*"
-    _normalize_product(db, package(purl=None, cpe=cpe))
-    with pytest.raises(HTTPException, match="배포판"):
-        _normalize_product(db, package(purl="pkg:deb/ubuntu/identity-demo@1.0?distro=ubuntu-24.04", cpe=cpe))
+    first = _normalize_product(db, package(purl=None, cpe=cpe))
+    second = _normalize_product(db, package(purl="pkg:deb/ubuntu/identity-demo@1.0?distro=ubuntu-24.04", cpe=cpe))
+    assert second.id == first.id and second.purl == "pkg:deb/ubuntu/identity-demo@1.0"

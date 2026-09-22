@@ -506,3 +506,16 @@ def test_git_pipeline_clones_shallow_without_token_in_argv(client, factory, sett
     assert 'secret-token' not in (output / 'manifest.json').read_text()
     scan = next(argv for name, argv, _env in commands if name == 'syft-scan')
     assert 'dir:' + str(output / 'source') in scan
+
+
+@pytest.mark.parametrize('name', ['Stockcast (2024)', '주문 서비스', 'orders_v2', 'app [beta] #3', "kim's api"])
+def test_everyday_project_names_are_accepted(client, asset, name):
+    response = client.post(f'/api/analyses/assets/{asset}/uploads', files={'file': ('requirements.txt', b'Jinja2==3.1.4\n')}, data={'project_name': name})
+    assert response.status_code == 202, response.text
+    assert response.json()['scan_scope'] == 'source-zip:' + name
+
+
+@pytest.mark.parametrize('name', ['a/b', 'a\\b', '../x', 'x' * 81, '', 'tab\there'])
+def test_path_like_project_names_are_rejected(client, asset, name):
+    response = client.post(f'/api/analyses/assets/{asset}/uploads', files={'file': ('requirements.txt', b'Jinja2==3.1.4\n')}, data={'project_name': name})
+    assert response.status_code == 422

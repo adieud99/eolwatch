@@ -133,7 +133,7 @@ def mocked_pipeline(tmp_path, monkeypatch):
     state = {"raw": {"artifacts": [{"type": "deb", "name": "openssl"}],
                      "descriptor": {"configuration": {"catalogers": {"used": ["dpkg-db-cataloger"]}}},
                      "distro": {"id": "ubuntu", "versionID": "24.04"}},
-             "sbom": {"spdxVersion": "SPDX-2.3", "packages": [{"name": "openssl"}]},
+             "sbom": {"spdxVersion": "SPDX-2.3", "packages": [{"name": "openssl", "externalRefs": [{"referenceType": "purl", "referenceLocator": "pkg:deb/ubuntu/openssl@3.0.2?distro=ubuntu-24.04"}]}]},
              "report": {"descriptor": {"name": "grype", "db": {"built": "fixture"}}, "matches": []},
              "local_commands": [], "remote_commands": [], "closed": False, "stages": []}
 
@@ -148,7 +148,7 @@ def mocked_pipeline(tmp_path, monkeypatch):
     def remote(self, _client, name, argv, timeout, output=None, pid_file=None):
         state["remote_commands"].append((name, argv))
         path = self.directory / (output or name + ".stdout.log")
-        path.write_text("Linux aarch64\n" if name == "target-architecture" else state.get("updates", "MANAGER=none\n") if name == "package-updates" else json.dumps(state["raw"]))
+        path.write_text("Linux aarch64\n" if name == "target-architecture" else state.get("updates", "MANAGER=none\n") if name == "package-updates" else state.get("os_release", "ID=ubuntu\nVERSION_ID=\"24.04\"\nPRETTY_NAME=\"Ubuntu 24.04.4 LTS\"\n") if name == "os-release" else json.dumps(state["raw"]))
         return path
 
     def local(self, name, argv, timeout, env, output=None):
@@ -394,3 +394,24 @@ def test_os_scan_collects_updates_read_only_and_ships_them_to_the_importer(tmp_p
     grype = next(argv for name, argv in state["local_commands"] if name == "grype-scan")
     config = Path(grype[grype.index("--config") + 1]).read_text()
     assert "using-cpes: false" in config  # OS packages are judged by distro fix data only, never by upstream CPE versions
+
+
+def test_distro_comes_from_the_servers_os_release_when_syft_has_none(tmp_path, mocked_pipeline):
+    settings, state = mocked_pipeline
+    state["raw"]["distro"] = {}
+    state["os_release"] = 'NAME="Ubuntu"\nVERSION_ID="26.04"\nID=ubuntu\nPRETTY_NAME="Ubuntu 26.04 LTS"\n'
+    executor.execute_analysis({"id": 9, "ip_address": "10.77.0.21"}, tmp_path / "job", settings, state["stages"].append)
+    grype = next(argv for name, argv in state["local_commands"] if name == "grype-scan")
+    assert grype[grype.index("--distro") + 1] == "ubuntu:26.04"
+    manifest = json.loads((tmp_path / "job" / "manifest.json").read_text())
+    assert manifest["distro"]["id"] == "ubuntu" and manifest["distro"]["versionID"] == "26.04"
+    assert executor._parse_os_release("garbage {not: os-release}") == {}
+
+
+def test_os_scan_without_deb_purls_is_rejected_instead_of_matching_upstream_versions(tmp_path, mocked_pipeline):
+    settings, state = mocked_pipeline
+    state["sbom"] = {"spdxVersion": "SPDX-2.3", "packages": [{"name": "openssl"}]}   # syft found no distro -> no PURLs
+    with pytest.raises(executor.AnalysisExecutionError) as failure:
+        executor.execute_analysis({"id": 9, "ip_address": "10.77.0.21"}, tmp_path / "job", settings, state["stages"].append)
+    assert failure.value.code == "PACKAGE_IDENTITY"
+    assert "grype-scan" not in [name for name, _ in state["local_commands"]]

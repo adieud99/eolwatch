@@ -574,7 +574,7 @@ describe('SBOM 취약점 분석 흐름', () => {
     expect(findings.getByText('담당 owner')).toBeInTheDocument()
     expect(findings.getByText('기한 2026-09-30')).toBeInTheDocument()
     expect(screen.getByLabelText('확인할 SBOM')).toHaveValue('2')
-    expect(fetch.mock.calls.filter(([url]) => url === '/api/vulnerability-work?sbom_id=2&status=ALL&fix=ALL&kernel=false&limit=100&offset=0')).toHaveLength(2)
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/vulnerability-work?sbom_id=2&status=OPEN&fix=ALL&kernel=false&limit=100&offset=0')).toHaveLength(2)
   })
 
   it('조회자의 조치 이력 패널은 읽기 전용이며 닫을 수 있다', async () => {
@@ -669,7 +669,7 @@ describe('SBOM 취약점 분석 흐름', () => {
     expect(findings.queryByText('CVE-2025-30000')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '다음 페이지' })).toBeDisabled()
     expect(screen.getByText('총 101건 · 101–101건 표시')).toBeInTheDocument()
-    const pageRequest = fetch.mock.calls.find(([url]) => url === '/api/vulnerability-work?sbom_id=2&status=ALL&fix=ALL&kernel=false&limit=100&offset=100')
+    const pageRequest = fetch.mock.calls.find(([url]) => url === '/api/vulnerability-work?sbom_id=2&status=OPEN&fix=ALL&kernel=false&limit=100&offset=100')
     expect(pageRequest[1].headers.get('Authorization')).toBe('Bearer token')
     expect(fetch.mock.calls.some(([url]) => url === '/api/vulnerabilities')).toBe(false)
 
@@ -741,8 +741,8 @@ describe('SBOM 취약점 분석 흐름', () => {
     await act(async () => { finishScan(jsonResponse({ unique_vulnerabilities: 1, ignored_non_cve: 0 })) })
     expect(screen.getByText('1 / 1 페이지')).toBeInTheDocument()
     expect(within(screen.getByRole('table', { name: '선택한 SBOM의 CVE' })).getByText(newFinding.cve_id)).toBeInTheDocument()
-    expect(fetch.mock.calls.filter(([url]) => url === '/api/vulnerability-work?sbom_id=2&status=ALL&fix=ALL&kernel=false&limit=100&offset=100')).toHaveLength(2)
-    expect(fetch.mock.calls.filter(([url]) => url === '/api/vulnerability-work?sbom_id=2&status=ALL&fix=ALL&kernel=false&limit=100&offset=0')).toHaveLength(2)
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/vulnerability-work?sbom_id=2&status=OPEN&fix=ALL&kernel=false&limit=100&offset=100')).toHaveLength(2)
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/vulnerability-work?sbom_id=2&status=OPEN&fix=ALL&kernel=false&limit=100&offset=0')).toHaveLength(2)
     expect(fetch.mock.calls.some(([url]) => url === '/api/vulnerabilities')).toBe(false)
   })
 
@@ -796,7 +796,7 @@ describe('SBOM 취약점 분석 흐름', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'CVE별로 보기' })) })
     expect(screen.getByText(newFinding.cve_id)).toBeInTheDocument()
     expect(screen.queryByText(oldFinding.cve_id)).not.toBeInTheDocument()
-    const pageRequest = fetch.mock.calls.find(([url]) => url === '/api/vulnerability-work?sbom_id=2&status=ALL&fix=ALL&kernel=false&limit=100&offset=0')
+    const pageRequest = fetch.mock.calls.find(([url]) => url === '/api/vulnerability-work?sbom_id=2&status=OPEN&fix=ALL&kernel=false&limit=100&offset=0')
     expect(pageRequest[1].headers.get('Authorization')).toBe('Bearer token')
     expect(fetch.mock.calls.some(([url]) => url === '/api/auth/users')).toBe(false)
     expect(fetch.mock.calls.every(([, options]) => !options.method)).toBe(true)
@@ -839,7 +839,7 @@ describe('구성요소별 CVE 보기', () => {
     expect(table.getByText('저장소에 업데이트 없음 · 오탐 의심 2건')).toBeInTheDocument()
     expect(table.getByText('저장소에 업데이트 있음 1건')).toBeInTheDocument()
     expect(screen.getByText(/apt 대조: 저장소에 업데이트 있음 1개 · 오탐 의심 2개/)).toBeInTheDocument()
-    expect(fetch.mock.calls.some(([url]) => url === '/api/vulnerability-work?sbom_id=2&component_id=1&status=ALL&fix=ALL&kernel=true&limit=100&offset=0')).toBe(true)
+    expect(fetch.mock.calls.some(([url]) => url === '/api/vulnerability-work?sbom_id=2&component_id=1&status=OPEN&fix=ALL&kernel=true&limit=100&offset=0')).toBe(true)
     await act(async () => { fireEvent.click(table.getByRole('button', { name: 'linux-image CVE 3개 접기' })) })
     expect(screen.queryByRole('table', { name: 'linux-image CVE 목록' })).not.toBeInTheDocument()
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'CVE별로 보기' })) })

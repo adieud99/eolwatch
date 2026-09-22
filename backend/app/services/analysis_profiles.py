@@ -30,7 +30,15 @@ ANALYSIS_PROFILES = {
         package_type="deb",
         relative_directory=None,
         description="Installed Ubuntu dpkg packages; application dependencies and container images are excluded.",
-        exclusions=("./proc/**", "./sys/**", "./dev/**", "./run/**"),
+        # The dpkg cataloger only reads /var/lib/dpkg (+ /etc/os-release for the distro). Everything else is
+        # walked just to build syft's file index, which on a 1 GB EC2 got the process OOM-killed after the
+        # kernel upgrade. Skip the trees that hold most files and no dpkg data. /usr/lib itself stays: syft reads
+        # /usr/lib/os-release (the /etc/os-release symlink target) to name the distro and build pkg:deb PURLs;
+        # without those grype falls back to upstream-version matching, the classic false-positive source.
+        exclusions=("./proc/**", "./sys/**", "./dev/**", "./run/**", "./boot/**", "./snap/**", "./var/lib/snapd/**",
+                    "./usr/lib/modules/**", "./usr/lib/x86_64-linux-gnu/**", "./usr/lib/aarch64-linux-gnu/**", "./usr/lib/python3*/**", "./usr/lib/firmware/**", "./usr/lib/systemd/**", "./usr/lib/udev/**", "./usr/lib64/**", "./usr/libexec/**", "./usr/bin/**", "./usr/sbin/**", "./usr/include/**",
+                    "./usr/src/**", "./usr/share/**", "./lib/**", "./lib64/**", "./bin/**", "./sbin/**", "./var/cache/**",
+                    "./var/log/**", "./var/tmp/**", "./tmp/**", "./home/**", "./root/**", "./opt/**", "./srv/**", "./mnt/**", "./media/**"),
     ),
     DEMO_PYTHON_SCAN_SCOPE: AnalysisProfile(
         # In pinned Syft 1.51.1 python-package-cataloger reads declared packages;
@@ -78,8 +86,9 @@ def normalize_target_path(value: Optional[str]) -> str:
 
 def normalize_project_name(value: str) -> str:
     name = value.strip()
-    if not re.fullmatch(r"[\w][\w .-]{0,79}", name, flags=re.UNICODE):
-        raise ValueError("프로젝트명은 1~80자의 문자·숫자·공백·점·밑줄·하이픈으로 입력하세요.")
+    # Anything a person would call a project, except path separators and control characters.
+    if not re.fullmatch(r"[\w(\[][\w .()\[\]+#&@,'-]{0,79}", name, flags=re.UNICODE) or ".." in name:
+        raise ValueError("프로젝트명은 1~80자이며 / \\ 같은 경로 문자는 쓸 수 없습니다.")
     return name
 
 

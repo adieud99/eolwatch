@@ -45,11 +45,11 @@ class Settings(BaseSettings):
     ai_pipeline: bool = True
     analysis_git_path: str = "git"
     analysis_git_timeout_seconds: int = 300
-    analysis_git_max_bytes: int = 250 * 1024 * 1024
-    analysis_upload_max_bytes: int = 50 * 1024 * 1024
-    analysis_zip_max_unpacked_bytes: int = 250 * 1024 * 1024
-    analysis_zip_max_file_bytes: int = 32 * 1024 * 1024
-    analysis_zip_max_entries: int = 20000
+    analysis_git_max_bytes: int = 1024 * 1024 * 1024
+    analysis_upload_max_bytes: int = 500 * 1024 * 1024      # real student repos with assets run past 50 MiB
+    analysis_zip_max_unpacked_bytes: int = 2 * 1024 * 1024 * 1024
+    analysis_zip_max_file_bytes: int = 256 * 1024 * 1024
+    analysis_zip_max_entries: int = 200000
     analysis_zip_max_ratio: int = 100
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
