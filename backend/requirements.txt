@@ -11,8 +11,6 @@ paramiko==5.0.0
 jsonschema==4.25.1
 httpx==0.28.1
 reportlab==4.4.4
-cvss==3.6
 packaging==25.0
-semantic-version==2.10.0
 packageurl-python==0.17.6
 anthropic>=0.60

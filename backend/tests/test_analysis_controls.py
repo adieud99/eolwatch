@@ -1,4 +1,4 @@
-"""Cancellation and scheduler fairness, with isolated DBs and owned test processes."""
+"""Cancellation with isolated DBs and owned test processes."""
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 import json
@@ -21,7 +21,7 @@ from app import middleware, models, schemas
 from app.config import Settings
 from app.db import Base, get_db
 from app.routers import analyses, analysis_controls
-from app.services import analysis_jobs as jobs, analysis_executor as executor, analysis_schedules as schedules
+from app.services import analysis_jobs as jobs, analysis_executor as executor
 from app.services.auth import create_access_token
 
 
@@ -31,7 +31,7 @@ def env(tmp_path, monkeypatch):
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
     settings = Settings(analysis_artifacts_dir=str(tmp_path / 'artifacts'), analysis_job_lease_seconds=60)
-    for module in (jobs, schedules, middleware):
+    for module in (jobs, middleware):
         monkeypatch.setattr(module, 'SessionLocal', factory)
     monkeypatch.setattr(jobs, 'get_settings', lambda: settings)
     app = FastAPI()
@@ -333,47 +333,3 @@ def test_remote_cleanup_checks_identity_and_confirms_process_exit(tmp_path, matc
         if process.poll() is None:
             os.killpg(process.pid, 9)
         process.wait(timeout=5)
-
-
-def test_scheduler_progresses_past_fifty_blocked_due_targets(env):
-    due = models.utcnow() - timedelta(hours=1)
-    for number in range(1, 52):
-        if number <= 50:
-            _, asset_id = new_job(env, number)
-        else:
-            asset_id = asset(env, number)
-        with env.db() as db:
-            db.add(models.AnalysisSchedule(asset_id=asset_id,
-                input_spec={'scan_scope': 'ssh-python-environment', 'target_path': '/srv/app'},
-                scan_scope='ssh-python-environment:/srv/app', interval_minutes=5,
-                enabled=True, next_run_at=due))
-            db.commit()
-    assert schedules.enqueue_due_schedules() == 0
-    assert schedules.enqueue_due_schedules() == 1
-    with env.db() as db:
-        last = db.scalar(select(models.AnalysisSchedule).order_by(models.AnalysisSchedule.id.desc()))
-        assert last.last_job_id is not None
-        assert db.get(models.AnalysisJob, last.last_job_id).asset_id == last.asset_id
-        blocked = db.scalars(select(models.AnalysisSchedule).where(models.AnalysisSchedule.id != last.id)).all()
-        assert all(item.last_error and item.last_job_id is None for item in blocked)
-        assert all(item.next_run_at.replace(tzinfo=None) == due.replace(tzinfo=None) for item in blocked)
-
-
-def test_cancelled_active_job_does_not_consume_scheduled_occurrence(env):
-    job_id, asset_id = new_job(env, status='CANCEL_REQUESTED')
-    with env.db() as db:
-        schedule = models.AnalysisSchedule(asset_id=asset_id, input_spec={'scan_scope': 'ubuntu-dpkg-installed', 'target_path': None},
-            scan_scope='ubuntu-dpkg-installed', interval_minutes=5, enabled=True,
-            next_run_at=models.utcnow() - timedelta(minutes=1))
-        db.add(schedule); db.commit()
-        schedule_id = schedule.id
-    assert schedules.enqueue_due_schedules() == 0
-    with env.db() as db:
-        schedule = db.get(models.AnalysisSchedule, schedule_id)
-        assert schedule.last_job_id is None and schedule.last_error
-    receipt(env, job_id)
-    with env.db() as db:
-        job = db.get(models.AnalysisJob, job_id)
-        assert jobs._acknowledge_cancellation(db, job)
-        db.commit()
-    assert schedules.enqueue_due_schedules() == 1

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -212,8 +212,6 @@ class ComponentVulnerability(Base):
     response: Mapped[Optional[str]] = mapped_column(String(80))
     detail: Mapped[Optional[str]] = mapped_column(Text)
     review_revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
-    assignee_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL", name="fk_component_vulnerabilities_assignee_id_users"), index=True)
-    due_date: Mapped[Optional[date]] = mapped_column(Date, index=True)
     fixed_version: Mapped[Optional[str]] = mapped_column(String(160))
     analysis_run_id: Mapped[Optional[int]] = mapped_column(ForeignKey("analysis_runs.id", ondelete="SET NULL"), index=True)
     finding_source: Mapped[Optional[str]] = mapped_column(String(40))
@@ -224,14 +222,13 @@ class ComponentVulnerability(Base):
 
     component: Mapped[Component] = relationship()
     vulnerability: Mapped[Vulnerability] = relationship(back_populates="component_links")
-    assignee: Mapped[Optional[User]] = relationship(foreign_keys=[assignee_id])
     actions: Mapped[list[VulnerabilityAction]] = relationship(back_populates="link", passive_deletes="all")
 
     __table_args__ = (UniqueConstraint("component_id", "vulnerability_id", name="uq_component_vulnerability"),)
 
 
 class VulnerabilityAction(Base):
-    """Append-only application history; snapshots remain if users/evidence are removed."""
+    """Append-only remediation history; the before/after snapshots remain if the actor account is removed."""
     __tablename__ = "vulnerability_actions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -243,8 +240,6 @@ class VulnerabilityAction(Base):
     detail: Mapped[Optional[str]] = mapped_column(Text)
     before_state: Mapped[dict[str, Any]] = mapped_column(JSON)
     after_state: Mapped[dict[str, Any]] = mapped_column(JSON)
-    evidence_analysis_run_id: Mapped[Optional[int]] = mapped_column(ForeignKey("analysis_runs.id", ondelete="SET NULL"), index=True)
-    evidence_snapshot: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
     link: Mapped[ComponentVulnerability] = relationship(back_populates="actions")
@@ -310,25 +305,6 @@ class AnalysisUpload(Base):
     project_name: Mapped[str] = mapped_column(String(80))
     size_bytes: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-
-class AnalysisSchedule(Base):
-    __tablename__ = "analysis_schedules"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), index=True)
-    input_spec: Mapped[dict[str, Any]] = mapped_column(JSON)
-    scan_scope: Mapped[str] = mapped_column(String(300))
-    interval_minutes: Mapped[int] = mapped_column(Integer)
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
-    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
-    last_requested_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    last_job_id: Mapped[Optional[int]] = mapped_column(ForeignKey("analysis_jobs.id", ondelete="SET NULL"))
-    last_error: Mapped[Optional[str]] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-    asset: Mapped[Asset] = relationship()
-    __table_args__ = (UniqueConstraint("asset_id", "scan_scope", name="uq_analysis_schedule_target"),)
 
 
 class AiSummary(Base):

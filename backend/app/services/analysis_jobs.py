@@ -17,8 +17,8 @@ from .. import models, schemas
 from ..config import get_settings
 from ..db import SessionLocal
 from .analysis import import_analysis
-from .analysis_profiles import (DEFAULT_SCAN_SCOPE, GIT_SCAN_SCOPE, PATH_SCAN_SCOPES, ZIP_SCAN_SCOPE, normalize_git_ref,
-                                normalize_repository_url, normalize_target_path, scope_identity)
+from .analysis_profiles import (DEFAULT_SCAN_SCOPE, GIT_SCAN_SCOPE, ZIP_SCAN_SCOPE, normalize_git_ref,
+                                normalize_repository_url, scope_identity)
 
 logger = logging.getLogger(__name__)
 RUNNING = ('COLLECTING', 'SCANNING', 'IMPORTING')
@@ -121,8 +121,7 @@ def execute_analysis(*args, **kwargs):
 
 
 def analysis_snapshot(db: Session, asset_id: int, scan_scope: str = DEFAULT_SCAN_SCOPE,
-                      target_path: Optional[str] = None, upload_id: Optional[str] = None,
-                      git: Optional[dict] = None) -> dict:
+                      upload_id: Optional[str] = None, git: Optional[dict] = None) -> dict:
     asset = db.get(models.Asset, asset_id)
     if not asset:
         raise HTTPException(status_code=404, detail='분석할 자산이 없습니다')
@@ -149,17 +148,15 @@ def analysis_snapshot(db: Session, asset_id: int, scan_scope: str = DEFAULT_SCAN
     else:
         snapshot.update(input_type='ssh', profile=scan_scope)
     try:
-        snapshot['scan_scope'] = scope_identity(scan_scope, target_path, snapshot.get('project_name'))
-        if scan_scope in PATH_SCAN_SCOPES:
-            snapshot['target_path'] = normalize_target_path(target_path)
+        snapshot['scan_scope'] = scope_identity(scan_scope, snapshot.get('project_name'))
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     return snapshot
 
 
 def enqueue_analysis(db: Session, asset_id: int, retry_of_id: Optional[int] = None,
-                     scan_scope: str = DEFAULT_SCAN_SCOPE, target_path: Optional[str] = None,
-                     upload_id: Optional[str] = None, git: Optional[dict] = None, *, commit: bool = True) -> models.AnalysisJob:
+                     scan_scope: str = DEFAULT_SCAN_SCOPE, upload_id: Optional[str] = None,
+                     git: Optional[dict] = None) -> models.AnalysisJob:
     if retry_of_id is not None:
         previous = db.get(models.AnalysisJob, retry_of_id)
         if not previous:
@@ -167,12 +164,11 @@ def enqueue_analysis(db: Session, asset_id: int, retry_of_id: Optional[int] = No
         if previous.asset_id != asset_id or previous.status != 'FAILED':
             raise HTTPException(status_code=409, detail='실패한 동일 자산의 작업만 재시도할 수 있습니다')
         scan_scope = previous.asset_snapshot.get('profile', previous.asset_snapshot.get('scan_scope', DEFAULT_SCAN_SCOPE))
-        target_path = previous.asset_snapshot.get('target_path')
         upload_id = previous.asset_snapshot.get('upload_id')
         if previous.asset_snapshot.get('input_type') == 'git':
             git = {'repository_url': previous.asset_snapshot.get('git_url'), 'ref': previous.asset_snapshot.get('git_ref'),
                    'project_name': previous.asset_snapshot.get('project_name'), 'access_token': (git or {}).get('access_token')}
-    snapshot = analysis_snapshot(db, asset_id, scan_scope, target_path, upload_id, git)
+    snapshot = analysis_snapshot(db, asset_id, scan_scope, upload_id, git)
     identity = snapshot['scan_scope']
     if retry_of_id is not None and snapshot.get('input_type') == 'zip':
         if any(snapshot.get(key) != previous.asset_snapshot.get(key)
@@ -193,14 +189,9 @@ def enqueue_analysis(db: Session, asset_id: int, retry_of_id: Optional[int] = No
     )
     db.add(job)
     try:
-        if commit:
-            db.commit()
-        else:
-            db.flush()
+        db.commit()
     except IntegrityError:
         # Another request may have won the unique active-asset constraint.
-        if not commit:
-            raise
         db.rollback()
         existing = db.scalar(select(models.AnalysisJob).where(models.AnalysisJob.active_asset_id == asset_id))
         if existing:

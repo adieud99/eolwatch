@@ -3,7 +3,7 @@ from __future__ import annotations
 import ipaddress
 import re
 
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -270,21 +270,7 @@ class VulnerabilityRead(BaseModel):
     response: Optional[str]
     detail: Optional[str]
     review_revision: int = 0
-    assignee_id: Optional[int] = None
-    assignee_username: Optional[str] = None
-    due_date: Optional[date] = None
     modified_at: Optional[datetime]
-
-
-class VulnerabilityScanResult(BaseModel):
-    sbom_id: int
-    queried_components: int
-    vulnerability_links: int
-    unique_vulnerabilities: int
-    ignored_non_cve: int
-    skipped_components: int = 0
-    ignored_withdrawn: int = 0
-    ignored_unaffected: int = 0
 
 
 class VexUpdate(BaseModel):
@@ -301,11 +287,8 @@ class VulnerabilityActionCreate(BaseModel):
     expected_revision: int = Field(ge=0)
     status: Literal["AFFECTED", "NOT_AFFECTED", "FIXED", "UNDER_INVESTIGATION"]
     detail: str = Field(min_length=1, max_length=2000)
-    assignee_id: Optional[int] = Field(default=None, ge=1)
-    due_date: Optional[date] = None
     justification: Optional[str] = Field(default=None, max_length=80)
     response: Optional[str] = Field(default=None, max_length=80)
-    evidence_analysis_run_id: Optional[int] = Field(default=None, ge=1)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -327,8 +310,6 @@ class VulnerabilityActionRead(BaseModel):
     detail: Optional[str]
     before_state: dict[str, Any]
     after_state: dict[str, Any]
-    evidence_analysis_run_id: Optional[int]
-    evidence_snapshot: Optional[dict[str, Any]]
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -388,8 +369,7 @@ class AnalysisRead(BaseModel):
 
 
 class AnalysisJobRequest(BaseModel):
-    scan_scope: Literal["ubuntu-dpkg-installed", "demo-python-venv", "ssh-python-environment", "ssh-project-directory"] = "ubuntu-dpkg-installed"
-    target_path: Optional[str] = Field(default=None, max_length=250)
+    scan_scope: Literal["ubuntu-dpkg-installed"] = "ubuntu-dpkg-installed"
     model_config = ConfigDict(extra="forbid")
 
 
@@ -418,7 +398,6 @@ class AnalysisJobRead(BaseModel):
     retry_of_id: Optional[int]
     profile: str = "ubuntu-dpkg-installed"
     input_type: Literal["ssh", "zip", "git"] = "ssh"
-    target_path: Optional[str] = None
     upload_id: Optional[str] = None
     upload_sha256: Optional[str] = None
     upload_filename: Optional[str] = None
@@ -426,34 +405,6 @@ class AnalysisJobRead(BaseModel):
     git_url: Optional[str] = None
     git_ref: Optional[str] = None
     git_commit: Optional[str] = None
-
-
-class AnalysisScheduleCreate(AnalysisJobRequest):
-    asset_id: int = Field(gt=0)
-    interval_minutes: int = Field(ge=5, le=525600)
-    enabled: bool = True
-
-
-class AnalysisScheduleUpdate(BaseModel):
-    interval_minutes: Optional[int] = Field(default=None, ge=5, le=525600)
-    enabled: Optional[bool] = None
-    model_config = ConfigDict(extra="forbid")
-
-
-class AnalysisScheduleRead(BaseModel):
-    id: int
-    asset_id: int
-    asset_tag: str
-    asset_name: str
-    profile: str
-    scan_scope: str
-    target_path: Optional[str]
-    interval_minutes: int
-    enabled: bool
-    next_run_at: datetime
-    last_requested_at: Optional[datetime]
-    last_job_id: Optional[int]
-    last_error: Optional[str]
 
 
 class AiStatus(BaseModel):

@@ -8,7 +8,7 @@
 
 | 축 | 사용자가 하는 일 | 솔루션이 하는 일 | 결과 |
 |---|---|---|---|
-| 개발 검사 | 소스 ZIP을 업로드하고 검사 버튼을 누른다 | 의존성 목록을 뽑고(Syft → SPDX), 취약점 DB와 대조한다(Grype, OSV 검증) | 라이브러리별 CVE, 수정 버전, 심각도 |
+| 개발 검사 | 소스 ZIP을 업로드하고 검사 버튼을 누른다 | 의존성 목록을 뽑고(Syft → SPDX), 취약점 DB와 대조한다(Grype) | 라이브러리별 CVE, 수정 버전, 심각도 |
 | 인프라 검사 | 서버 IP와 SSH 계정을 등록하고 검사 버튼을 누른다 | 검사 도구를 그 서버에 복사해 실행하고, 하드웨어·OS·클라우드·통신 정보와 설치 패키지를 수집한다 | 서버 정보 카드, OS 패키지 CVE |
 | 검사 기록 | 과거 검사를 찾아본다 | DB에 저장된 검사·결과·조치 이력을 보여준다 | 이력 목록, 전후 비교, PDF·JSON 보고서, 조치 기록 |
 
@@ -23,7 +23,7 @@ SBOM은 인프라·개발 양쪽 검사의 중간 산출물이다. 화면에서�
 | 개요 | 등록 서버 수, 최근 검사, 미조치 CVE 요약 | 운영 개요(`OverviewPanel`)를 축소 |
 | 개발 검사 | ZIP 업로드 → 검사 실행 → 진행 상태 → 결과 | 프로젝트 분석(`AnalysisTargets`)의 ZIP 부분, 서버 분석 작업 표 |
 | 인프라 검사 | 서버 등록(이름·IP·SSH 계정·포트) → 정보 수집·검사 실행 → 서버 정보 카드 → 결과 | 작업 대상(자산 표)의 SSH 점검·취약점 분석, `AssetEditor`의 접속 정보 부분 |
-| 검사 기록 | 검사 이력 검색, CVE 결과, 전후 비교, 보고서 다운로드, 조치 기록 | 프로젝트·분석 이력(`ProjectHub`), CVE 조치, 조치 작업목록, 비교 화면 |
+| 검사 기록 | 검사 이력 검색, CVE 결과, 전후 비교, 보고서 다운로드, 조치 기록 | 프로젝트·분석 이력(`ProjectHub`), CVE 조치 상태, 비교 화면 |
 
 숨기는 메뉴: 고객·사이트, EOL 일정 조회, 제품·계약, 소프트웨어 원장, SBOM 원장. 라우터와 테스트는 그대로 두고 화면 진입만 없앤다. 자산 재고 필드(건물·랙·구매가·전력 등)는 서버 등록 폼에서 뺀다.
 
@@ -36,14 +36,13 @@ SBOM은 인프라·개발 양쪽 검사의 중간 산출물이다. 화면에서�
 | `services/analysis_executor.py` | Syft 서버 복사·실행, SPDX 변환, Grype 스캔. 두 축의 핵심 엔진 |
 | `services/analysis_uploads.py` | ZIP 검사·보관·SHA-256 |
 | `services/analysis_jobs.py`, `worker.py`, `routers/analysis_controls.py` | 작업 큐, 취소, 재시도 |
-| `services/analysis_profiles.py` | 검사 범위 정의 (`source-zip`, `ubuntu-dpkg-installed`, `ssh-project-directory` 등) |
-| `services/sbom.py`, `services/vulnerabilities.py`, `services/osv_matching.py` | 결과 저장, CVE 정규화, OSV 교차 검증 |
+| `services/analysis_profiles.py` | 검사 범위 정의 (`source-zip`, `source-git`, `ubuntu-dpkg-installed`) |
+| `services/sbom.py`, `services/analysis.py` | SBOM 저장, Grype 결과 반입·CVE 정규화 |
 | `services/analysis_comparison.py`, `comparison_reports.py`, `comparison_report_pdf.py` | 전후 비교, PDF·JSON |
 | `routers/analysis_history.py`, `routers/analyses.py`, `routers/sboms.py` | 이력 조회, 결과 조회 |
 | `services/vulnerability_actions.py`, `routers/vulnerability_work.py` | 조치 기록·작업목록 |
 | `services/collector.py`, `routers/checks.py` | SSH 정보 수집(현재 CPU·메모리·디스크·프로세스·패키지·OS) |
 | `services/auth.py`, `routers/auth.py`, 감사 로그 | 로그인, 관리자/조회자 |
-| `services/analysis_schedules.py` | 정기 검사. 추가 서비스로 소개 가능 |
 
 ### 이름·화면만 바꾼다
 
@@ -83,7 +82,7 @@ SBOM은 인프라·개발 양쪽 검사의 중간 산출물이다. 화면에서�
 2. 인프라 검사 보강(4절). 완료: `collector.py` 명령 추가, 파서, 서버 정보 열·카드, 테스트 (`d0592ac`).
 3. 두 축을 각각 끝까지 시연 검증. 개발: ZIP 업로드 → 결과 → 기록. 인프라: 서버 등록 → 수집·검사 → 서버 정보 카드 → 결과 → 기록. 이전에 남아 있던 브라우저 검증(ZIP 재분석·취소·과거 비교)도 여기서 같이 끝낸다.
 4. 문서 정리. 완료 (2026-09-21). 구현 현황·API·구조 문서를 새 프레임으로 고치고, EOL·계약 관련 서술은 보류 항목으로 옮긴다.
-5. 추가 서비스: 정기 검사 예약(구현됨), 결과 요약·조치 가이드의 AI 생성(2026-09-21 구현), 교수님 메모의 파이프라인 안 AI — 잠금 파일 없는 소스의 라이브러리 참조와 SSH 점검의 수집 에이전트(2026-09-21 구현, `docs/API.md` 0절), PWA로 휴대폰 화면 대응(선택).
+5. 추가 서비스: 결과 요약·조치 가이드의 AI 생성(2026-09-21 구현), 교수님 메모의 파이프라인 안 AI — 잠금 파일 없는 소스의 라이브러리 참조와 SSH 점검의 수집 에이전트(2026-09-21 구현, `docs/API.md` 0절), PWA로 휴대폰 화면 대응(선택).
 6. **발표 자료는 맨 마지막.** 교수님 8단계 순서(개요 → 솔루션 전체 구성도 → 시스템 구성도 → 서비스 구성도 → 서비스 설명 → 인프라 설명 → 추가 서비스 → 마무리)로 작성한다.
 
 ## 6. 범위 밖

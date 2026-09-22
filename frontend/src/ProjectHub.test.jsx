@@ -13,12 +13,10 @@ function route(path) {
   if (path.startsWith('/analyses/projects?')) return page([group, osGroup])
   if (path.startsWith('/analyses/history?')) return page([run(205), run(204)], 205)
   if (path.startsWith('/analyses/job-history?')) return page([job])
-  if (path.startsWith('/analyses/uploads?')) return page([upload])
-  if (path === '/analyses/storage') return { files: 2, bytes: 2048, free_disk_bytes: 1024 ** 3, referenced_files: 1, unreferenced_files: 1, missing_files: 0, size_mismatch_files: 0, unsafe_files: 0, temp_files: 0, content_verified: false, checked_at: '2026-09-16T00:00:00Z' }
   throw new Error(`Unexpected request ${path}`)
 }
 function open(overrides = {}) {
-  const props = { assets, canEdit: true, request: vi.fn(async (path) => route(path)), download: vi.fn(async () => {}), onChanged: vi.fn(), onJobQueued: vi.fn(), onViewResult: vi.fn(), onViewSbom: vi.fn(), onCompare: vi.fn(), onNewAnalysis: vi.fn(), onSelectionChange: vi.fn(), onViewWork: vi.fn(), ...overrides }
+  const props = { assets, canEdit: true, request: vi.fn(async (path) => route(path)), download: vi.fn(async () => {}), onChanged: vi.fn(), onJobQueued: vi.fn(), onViewResult: vi.fn(), onViewSbom: vi.fn(), onCompare: vi.fn(), onNewAnalysis: vi.fn(), onSelectionChange: vi.fn(), onViewCve: vi.fn(), ...overrides }
   return { ...render(<ProjectHub {...props} />), props }
 }
 async function selectZip() { fireEvent.click(await screen.findByRole('button', { name: 'APP-1 소스 ZIP · orders 이력 보기' })); await screen.findByText('검사 #204') }
@@ -90,43 +88,7 @@ describe('프로젝트별 서버 페이지 이력', () => {
     expect(props.onSelectionChange).toHaveBeenLastCalledWith({ assetId: 1, scanScope: 'ubuntu-dpkg-installed' })
   })
 
-  it('ZIP 원본 식별정보를 보여주고 다운로드 실패 후 재시도·중복 없는 재검사을 지원한다', async () => {
-    let complete
-    const request = vi.fn((path, options) => options?.method === 'POST' ? new Promise((resolve) => { complete = resolve }) : Promise.resolve(route(path)))
-    const download = vi.fn().mockRejectedValueOnce(new Error('원본 SHA-256이 일치하지 않습니다.')).mockResolvedValueOnce(undefined)
-    const { props } = open({ request, download })
-    await selectZip(); fireEvent.click(screen.getByRole('tab', { name: '저장된 ZIP' }))
-    await screen.findByText(upload.sha256)
-    fireEvent.click(screen.getByRole('button', { name: 'ZIP 다운로드' }))
-    await screen.findByText('원본 SHA-256이 일치하지 않습니다.')
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'ZIP 다운로드' })))
-    expect(download).toHaveBeenLastCalledWith('/analyses/uploads/upload-1/raw', 'orders-v1.zip', expect.any(AbortSignal))
-    const replay = screen.getByRole('button', { name: '이 ZIP 다시 검사' })
-    fireEvent.click(replay); fireEvent.click(replay)
-    const posts = request.mock.calls.filter(([, options]) => options?.method === 'POST')
-    expect(posts).toHaveLength(1); expect(posts[0][0]).toBe('/analyses/uploads/upload-1/jobs')
-    expect(posts[0][1].body).toBeUndefined()
-    await act(async () => complete({ ...job, id: 71, status: 'QUEUED' }))
-    expect(props.onJobQueued).toHaveBeenCalledWith(expect.objectContaining({ id: 71, status: 'QUEUED' }))
-  })
 
-  it('보관 파일이 없으면 다운로드·재검사을 막고 조회자는 모든 편집 기능이 없다', async () => {
-    const request = vi.fn(async (path) => path.startsWith('/analyses/uploads?') ? page([{ ...upload, storage_status: 'MISSING' }]) : route(path))
-    const view = open({ request })
-    await selectZip(); fireEvent.click(screen.getByRole('tab', { name: '저장된 ZIP' }))
-    await screen.findByText(/파일 없음/)
-    expect(screen.getByRole('button', { name: 'ZIP 다운로드' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '이 ZIP 다시 검사' })).toBeDisabled()
-    view.unmount()
-    open({ canEdit: false })
-    await selectZip(); fireEvent.click(screen.getByRole('tab', { name: '저장된 ZIP' }))
-    await screen.findByText('재검사는 관리자만')
-    expect(screen.getByRole('button', { name: 'ZIP 다운로드' })).toBeEnabled()
-    expect(screen.queryByRole('button', { name: /새.*분석|ZIP 재검사|보관 현황/ })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('tab', { name: '작업 이력' }))
-    await screen.findByText('작업 #70', { selector: 'strong' })
-    expect(screen.queryByRole('button', { name: '검사 취소' })).not.toBeInTheDocument()
-  })
 
   it('취소 요청은 한 번만 보내고 취소 처리 중 상태가 끝날 때까지 중복 취소를 막는다', async () => {
     let complete
@@ -185,7 +147,7 @@ describe('프로젝트별 서버 페이지 이력', () => {
     await act(async () => completeDownload())
   })
 
-  it('조회 실패를 빈 상태와 구분하고 재시도하며 저장 상태는 관리자 요청 시에만 조회한다', async () => {
+  it('조회 실패를 빈 상태와 구분하고 재시도한다', async () => {
     let attempts = 0
     const request = vi.fn(async (path) => { if (path.startsWith('/analyses/projects?') && ++attempts === 1) throw new Error('목록 연결 실패'); return route(path) })
     open({ request })
@@ -193,19 +155,15 @@ describe('프로젝트별 서버 페이지 이력', () => {
     expect(screen.queryByText(/조건에 맞는 프로젝트가 없습니다/)).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '다시 불러오기' }))
     await screen.findByRole('button', { name: 'APP-1 소스 ZIP · orders 이력 보기' })
-    expect(request.mock.calls.some(([path]) => path === '/analyses/storage')).toBe(false)
-    fireEvent.click(screen.getByRole('button', { name: '보관 현황 조회' }))
-    await screen.findByText(/전체 파일 내용 검증은 수행하지 않았습니다/)
-    expect(screen.getByText('접근 불가')).toBeInTheDocument()
   })
 
   it('다른 탭에서 받은 프로젝트 범위를 열고 새 분석 입력에 동일 대상·이름을 보낸다', async () => {
     const { props } = open({ initialAssetId: 1, initialScope: 'source-zip:orders' })
     await screen.findByText('검사 #204')
     fireEvent.click(screen.getByRole('button', { name: '이 프로젝트 다시 검사' }))
-    expect(props.onNewAnalysis).toHaveBeenCalledWith({ assetId: 1, scanScope: 'source-zip:orders', projectName: 'orders', targetPath: '', gitUrl: '', gitRef: '' })
-    fireEvent.click(screen.getByRole('button', { name: '이 대상의 조치 목록' }))
-    expect(props.onViewWork).toHaveBeenCalledWith(1)
+    expect(props.onNewAnalysis).toHaveBeenCalledWith(expect.objectContaining({ assetId: 1, scanScope: 'source-zip:orders', projectName: 'orders' }))
+    fireEvent.click(screen.getByRole('button', { name: '이 대상의 CVE 보기' }))
+    expect(props.onViewCve).toHaveBeenCalledWith(1)
     expect(props.request.mock.calls.some(([path]) => path.startsWith('/analyses/projects?asset_id=1&'))).toBe(true)
   })
 

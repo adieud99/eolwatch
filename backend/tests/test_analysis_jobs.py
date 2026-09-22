@@ -115,23 +115,24 @@ def test_enqueue_is_durable_and_active_requests_share_one_job(client, target, jo
     assert count_rows(jobs_db, models.AnalysisRun) == 0
 
 
-def test_application_scope_is_saved_and_retry_preserves_it(client, target, jobs_db):
-    response = client.post(f"/api/analyses/assets/{target['id']}/jobs", json={"scan_scope": "demo-python-venv"})
+def test_explicit_os_scope_is_saved_and_retry_preserves_it(client, target, jobs_db):
+    response = client.post(f"/api/analyses/assets/{target['id']}/jobs", json={"scan_scope": "ubuntu-dpkg-installed"})
     assert response.status_code == 202, response.text
     first = response.json()
-    assert first['scan_scope'] == 'demo-python-venv'
+    assert first['scan_scope'] == 'ubuntu-dpkg-installed' and first['input_type'] == 'ssh'
     with jobs_db() as db:
-        assert db.get(models.AnalysisJob, first['id']).asset_snapshot['scan_scope'] == 'demo-python-venv'
-    assert client.post(f"/api/analyses/assets/{target['id']}/jobs").status_code == 409
+        assert db.get(models.AnalysisJob, first['id']).asset_snapshot['scan_scope'] == 'ubuntu-dpkg-installed'
+    assert client.post(f"/api/analyses/assets/{target['id']}/jobs").json()['id'] == first['id']
     finish_job(jobs_db, first['id'])
     retry = client.post(f"/api/analyses/jobs/{first['id']}/retry")
     assert retry.status_code == 202, retry.text
-    assert retry.json()['scan_scope'] == 'demo-python-venv'
+    assert retry.json()['scan_scope'] == 'ubuntu-dpkg-installed'
     assert retry.json()['retry_of_id'] == first['id']
 
 
-@pytest.mark.parametrize('payload', [{'scan_scope': 'dir:/etc'}, {'scan_scope': 'demo-python-venv', 'path': '/etc'}])
-def test_scope_does_not_allow_arbitrary_directories(client, target, jobs_db, payload):
+@pytest.mark.parametrize('payload', [{'scan_scope': 'dir:/etc'}, {'scan_scope': 'ssh-project-directory', 'target_path': '/srv/app'},
+                                     {'scan_scope': 'demo-python-venv'}, {'scan_scope': 'ubuntu-dpkg-installed', 'target_path': '/etc'}])
+def test_scope_does_not_allow_other_profiles_or_directories(client, target, jobs_db, payload):
     response = client.post(f"/api/analyses/assets/{target['id']}/jobs", json=payload)
     assert response.status_code == 422
     assert count_rows(jobs_db, models.AnalysisJob) == 0

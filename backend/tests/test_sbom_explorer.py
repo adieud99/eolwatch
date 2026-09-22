@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.db import Base
-from app.routers.sboms import component_page, dependency_page, get_component, raw_sbom, sbom_detail
+from app.routers.sboms import component_page, get_component, raw_sbom, sbom_detail
 
 
 @pytest.fixture
@@ -50,18 +50,6 @@ def test_detail_and_pages_exclude_raw_and_support_literal_search(db):
     first, second = component_page(sbom_id, "", 2, 0, session), component_page(sbom_id, "", 2, 2, session)
     assert first["total"] == 3 and len(first["items"]) == 2 and len(second["items"]) == 1
     assert not {item.id for item in first["items"]} & {item.id for item in second["items"]}
-
-
-def test_dependency_direction_preserves_missing_refs_and_cycles_without_cross_sbom_join(db):
-    session, sbom_id, other_id, _ = db
-    outgoing = dependency_page(sbom_id, 2, "outgoing", 20, 0, session)
-    incoming = dependency_page(sbom_id, 2, "incoming", 20, 0, session)
-    assert outgoing["total"] == 2 and incoming["total"] == 2
-    assert outgoing["items"][0]["target"] == {"id": None, "ref": "unknown-ref", "name": "unknown-ref", "version": None, "purl": None}
-    assert incoming["items"][0]["target"]["name"] == "pkg_100%"
-    with pytest.raises(HTTPException) as error: dependency_page(sbom_id, 4, "both", 20, 0, session)
-    assert error.value.status_code == 404
-    with pytest.raises(HTTPException): get_component(other_id, 2, session)
 
 
 def test_component_exposes_shared_product_identity_without_lifecycle_fields(db):

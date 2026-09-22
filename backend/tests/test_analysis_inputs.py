@@ -1,14 +1,11 @@
 """Real archive/DB/API paths; scanner execution is mocked explicitly."""
 from __future__ import annotations
 
-from datetime import timedelta
-from concurrent.futures import ThreadPoolExecutor
 import hashlib
 from io import BytesIO
 import json
 from pathlib import Path
 import stat
-from types import SimpleNamespace
 import zipfile
 from uuid import uuid4
 
@@ -20,9 +17,8 @@ from sqlalchemy.orm import sessionmaker
 from app import main, middleware, models
 from app.config import Settings
 from app.db import Base, get_db
-from app.services import analysis_executor as executor, analysis_jobs as jobs, analysis_schedules as schedules
-from app.services.analysis_profiles import (ANALYSIS_PROFILES, SSH_PROJECT_SCAN_SCOPE, SSH_PYTHON_SCAN_SCOPE,
-                                            ZIP_SCAN_SCOPE, normalize_target_path, scope_identity)
+from app.services import analysis_executor as executor, analysis_jobs as jobs
+from app.services.analysis_profiles import ZIP_SCAN_SCOPE, scope_identity
 from app.services.analysis_uploads import InvalidArchive, archive_path, extract_upload, validate_archive
 from app.routers import analyses
 
@@ -45,7 +41,7 @@ def factory(tmp_path, monkeypatch, settings):
     engine = create_engine('sqlite:///' + str(tmp_path / 'inputs.db'), connect_args={'check_same_thread': False})
     factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     Base.metadata.create_all(engine)
-    for module in (main, middleware, jobs, schedules):
+    for module in (main, middleware, jobs):
         monkeypatch.setattr(module, 'SessionLocal', factory)
     monkeypatch.setattr(main, 'engine', engine)
     monkeypatch.setattr(jobs, 'get_settings', lambda: settings)
@@ -83,32 +79,6 @@ def complete_job(factory, job_id, status='FAILED'):
         job = db.get(models.AnalysisJob, job_id)
         job.status, job.active_asset_id = status, None
         db.commit()
-
-
-def test_paths_normalize_identity_and_retries_preserve_target(client, factory, asset):
-    request = {'scan_scope': SSH_PROJECT_SCAN_SCOPE, 'target_path': '/srv/apps/./billing/'}
-    response = client.post(f'/api/analyses/assets/{asset}/jobs', json=request)
-    assert response.status_code == 202, response.text
-    first = response.json()
-    assert first['scan_scope'] == SSH_PROJECT_SCAN_SCOPE + ':/srv/apps/billing'
-    assert first['target_path'] == '/srv/apps/billing'
-    assert first['profile'] == SSH_PROJECT_SCAN_SCOPE
-    assert client.post(f'/api/analyses/assets/{asset}/jobs', json=request).json()['id'] == first['id']
-    request['target_path'] = '/srv/apps/payments'
-    assert client.post(f'/api/analyses/assets/{asset}/jobs', json=request).status_code == 409
-    complete_job(factory, first['id'])
-    retry = client.post(f"/api/analyses/jobs/{first['id']}/retry")
-    assert retry.status_code == 202, retry.text
-    assert retry.json()['target_path'] == '/srv/apps/billing'
-    assert retry.json()['scan_scope'] == first['scan_scope']
-
-
-@pytest.mark.parametrize('path', [None, '', 'relative/project', '/', '/srv/../etc', '//srv/project', '/srv/app\nother'])
-def test_bad_project_paths_rejected_before_enqueue(client, factory, asset, path):
-    response = client.post(f'/api/analyses/assets/{asset}/jobs', json={'scan_scope': SSH_PROJECT_SCAN_SCOPE, 'target_path': path})
-    assert response.status_code == 422
-    with factory() as db:
-        assert db.scalar(select(func.count()).select_from(models.AnalysisJob)) == 0
 
 
 def test_zip_upload_needs_no_ssh_and_survives_session_restart(client, factory, settings):
@@ -195,67 +165,6 @@ def test_mutated_upload_cannot_be_retried_as_different_input(client, factory, se
         extract_upload(snapshot, Path(settings.analysis_artifacts_dir) / 'bad-source', settings)
 
 
-def test_schedule_is_durable_coalesces_missed_runs_and_can_pause(client, factory, asset):
-    request = {'asset_id': asset, 'scan_scope': SSH_PROJECT_SCAN_SCOPE, 'target_path': '/srv/project', 'interval_minutes': 5}
-    response = client.post('/api/analyses/schedules', json=request)
-    assert response.status_code == 201, response.text
-    schedule_id = response.json()['id']
-    assert client.post('/api/analyses/schedules', json=request).status_code == 409
-    with factory() as db:
-        schedule = db.get(models.AnalysisSchedule, schedule_id)
-        schedule.next_run_at = models.utcnow() - timedelta(hours=2)
-        db.commit()
-    assert schedules.enqueue_due_schedules() == 1
-    assert schedules.enqueue_due_schedules() == 0
-    listed = client.get('/api/analyses/schedules').json()[0]
-    assert listed['last_job_id'] is not None
-    with factory() as db:
-        assert db.scalar(select(func.count()).select_from(models.AnalysisJob)) == 1
-    paused = client.patch(f'/api/analyses/schedules/{schedule_id}', json={'enabled': False})
-
-    assert paused.status_code == 200
-    with factory() as db:
-        db.get(models.AnalysisSchedule, schedule_id).next_run_at = models.utcnow() - timedelta(minutes=1)
-        db.commit()
-    assert schedules.enqueue_due_schedules() == 0
-    assert client.patch(f'/api/analyses/schedules/{schedule_id}', json={'enabled': True, 'interval_minutes': 10}).json()['interval_minutes'] == 10
-    assert client.patch(f'/api/analyses/schedules/{schedule_id}', json={'enabled': None}).status_code == 422
-    # deleting frees the (asset, scope, path) slot for a new schedule
-    assert client.delete(f'/api/analyses/schedules/{schedule_id}').status_code == 204
-    assert client.get('/api/analyses/schedules').json() == [] and client.delete(f'/api/analyses/schedules/{schedule_id}').status_code == 404
-    assert client.post('/api/analyses/schedules', json=request).status_code == 201
-
-
-def test_busy_other_scope_keeps_schedule_due_until_asset_is_free(client, factory, asset):
-    active = client.post(f'/api/analyses/assets/{asset}/jobs').json()
-    response = client.post('/api/analyses/schedules', json={'asset_id': asset, 'scan_scope': SSH_PYTHON_SCAN_SCOPE,
-        'target_path': '/srv/venv', 'interval_minutes': 5})
-    schedule_id = response.json()['id']
-    with factory() as db:
-        db.get(models.AnalysisSchedule, schedule_id).next_run_at = models.utcnow() - timedelta(minutes=1)
-        db.commit()
-    assert schedules.enqueue_due_schedules() == 0
-    assert client.get('/api/analyses/schedules').json()[0]['last_error']
-    complete_job(factory, active['id'])
-    assert schedules.enqueue_due_schedules() == 1
-    listed = client.get('/api/analyses/schedules').json()[0]
-    assert listed['last_error'] is None
-    with factory() as db:
-        assert db.get(models.AnalysisJob, listed['last_job_id']).asset_snapshot['target_path'] == '/srv/venv'
-
-
-def test_due_same_scope_reuses_active_job(client, factory, asset):
-    active = client.post(f'/api/analyses/assets/{asset}/jobs').json()
-    response = client.post('/api/analyses/schedules', json={'asset_id': asset, 'interval_minutes': 5})
-    with factory() as db:
-        db.get(models.AnalysisSchedule, response.json()['id']).next_run_at = models.utcnow() - timedelta(minutes=1)
-        db.commit()
-    assert schedules.enqueue_due_schedules() == 1
-    assert client.get('/api/analyses/schedules').json()[0]['last_job_id'] == active['id']
-    with factory() as db:
-        assert db.scalar(select(func.count()).select_from(models.AnalysisJob)) == 1
-
-
 def test_zip_pipeline_uses_source_directory_and_exact_spdx(client, factory, settings, asset, monkeypatch):
     response = client.post(f'/api/analyses/assets/{asset}/uploads', data={'project_name': 'web-api'},
         files={'file': ('source.zip', source_zip(), 'application/zip')})
@@ -295,34 +204,6 @@ def test_zip_pipeline_uses_source_directory_and_exact_spdx(client, factory, sett
     assert manifest['grype_input_sha256'] == hashlib.sha256((output / 'sbom.spdx.json').read_bytes()).hexdigest()
 
 
-def test_ssh_path_is_data_and_canonical_redirect_is_rejected():
-    dangerous = '/srv/app; touch SHOULD_NOT_EXIST'
-    assert normalize_target_path(dangerous) == dangerous
-    assert scope_identity(SSH_PROJECT_SCAN_SCOPE, dangerous).endswith(dangerous)
-    class Sftp:
-        def __enter__(self): return self
-        def __exit__(self, *_args): pass
-        def get_channel(self): return SimpleNamespace(settimeout=lambda _seconds: None)
-        def stat(self, _path): return SimpleNamespace(st_mode=stat.S_IFDIR)
-        def normalize(self, _path): return '/srv/different'
-    client = SimpleNamespace(open_sftp=lambda: Sftp())
-    with pytest.raises(executor.AnalysisExecutionError) as error:
-        executor._scan_directory(client, ANALYSIS_PROFILES[SSH_PROJECT_SCAN_SCOPE], dangerous)
-    assert error.value.code == 'APP_PATH_OUT_OF_SCOPE'
-
-
-def test_two_schedule_workers_claim_one_occurrence(client, factory, asset):
-    created = client.post('/api/analyses/schedules', json={'asset_id': asset, 'interval_minutes': 5}).json()
-    with factory() as db:
-        db.get(models.AnalysisSchedule, created['id']).next_run_at = models.utcnow() - timedelta(minutes=1)
-        db.commit()
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        attempts = [pool.submit(schedules.enqueue_due_schedules) for _ in range(2)]
-        assert sum(attempt.result() for attempt in attempts) == 1
-    with factory() as db:
-        assert db.scalar(select(func.count()).select_from(models.AnalysisJob)) == 1
-
-
 def test_zip_job_worker_imports_and_api_returns_completed_result(client, factory, settings, monkeypatch):
     asset_id = client.post('/api/assets', json={'asset_tag': 'WORKER-ZIP', 'name': 'ZIP 프로젝트', 'asset_type': 'server'}).json()['id']
     job = client.post(f'/api/analyses/assets/{asset_id}/uploads', data={'project_name': 'service'},
@@ -346,13 +227,13 @@ def test_zip_job_worker_imports_and_api_returns_completed_result(client, factory
     assert client.get(f"/api/analyses/{run['id']}/bundle").json()['sbom']['packages']
 
 
-def test_analysis_comparison_rejects_two_paths_on_same_asset(client, asset):
+def test_analysis_comparison_rejects_two_projects_on_same_asset(client, asset):
     ids = []
-    for target_path in ('/srv/first-project', '/srv/second-project'):
+    for project_name in ('first-project', 'second-project'):
         document = json.loads((Path(__file__).parents[2] / 'samples' / 'spdx-2.3-blackduck-compatible.json').read_text())
         document['documentNamespace'] = 'https://eolwatch.test/path/' + str(uuid4())
         response = client.post('/api/analyses/import', json={'asset_id': asset,
-            'scan_scope': scope_identity(SSH_PROJECT_SCAN_SCOPE, target_path), 'sbom': document,
+            'scan_scope': scope_identity(ZIP_SCAN_SCOPE, project_name), 'sbom': document,
             'report': {'descriptor': {'name': 'grype', 'version': 'mock-test'}, 'source': {'type': 'sbom'}, 'matches': []}})
         assert response.status_code == 200, response.text
         ids.append(response.json()['id'])
@@ -376,8 +257,6 @@ def test_dependency_manifest_upload_is_wrapped_and_scanned_as_source_zip(client,
         assert archive.namelist() == ['requirements.txt']
         assert archive.read('requirements.txt') == b'Jinja2==3.1.4\nrequests==2.31.0\n'
     validate_archive(stored, settings)
-    download = client.get(f"/api/analyses/uploads/{job['upload_id']}/raw")
-    assert download.status_code == 200 and "requirements.txt.zip" in download.headers['content-disposition']
     assert not list(Path(settings.analysis_uploads_dir).glob('.manifest-*'))
 
 
@@ -418,7 +297,6 @@ def test_git_scan_queues_without_ssh_and_hides_the_token(client, factory, asset)
     assert 'ghp_secret' not in json.dumps(listed)
     projects = client.get('/api/analyses/projects').json()['items']
     assert projects[0]['scan_scope'] == 'source-git:orders-api' and projects[0]['project_name'] == 'orders-api'
-    assert projects[0]['upload_count'] == 0
 
 
 def test_git_worker_scrubs_token_and_records_commit(client, factory, settings, monkeypatch, asset):

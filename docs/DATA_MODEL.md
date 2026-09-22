@@ -8,22 +8,18 @@
 erDiagram
     assets ||--o{ analysis_jobs : requested_for
     assets ||--o{ analysis_uploads : source_zip_for
-    assets ||--o{ analysis_schedules : scheduled_for
     assets o|--o{ sbom_documents : associated_with
     sbom_documents ||--o{ analysis_runs : analyzed_by
     sbom_documents ||--o{ components : contains
     sbom_documents ||--o{ dependency_edges : describes
     analysis_runs o|--o{ analysis_jobs : produces_result
     analysis_jobs o|--o{ analysis_jobs : retry_of
-    analysis_jobs o|--o{ analysis_schedules : last_job
     product_releases o|--o{ components : identity
     components ||--o{ component_vulnerabilities : detected_in
     vulnerabilities ||--o{ component_vulnerabilities : identifies
     analysis_runs o|--o{ component_vulnerabilities : latest_link_source
     component_vulnerabilities ||--o{ vulnerability_actions : reviewed_by
-    users o|--o{ component_vulnerabilities : assigned_to
     users o|--o{ vulnerability_actions : acted_by
-    analysis_runs o|--o{ vulnerability_actions : attached_evidence
 
     assets {
         int id PK
@@ -45,18 +41,6 @@ erDiagram
         string project_name
         int size_bytes
         datetime created_at
-    }
-    analysis_schedules {
-        int id PK
-        int asset_id FK
-        json input_spec
-        string scan_scope
-        int interval_minutes
-        boolean enabled
-        datetime next_run_at
-        datetime last_requested_at
-        int last_job_id FK
-        text last_error
     }
     analysis_jobs {
         int id PK
@@ -159,8 +143,6 @@ erDiagram
         json fixed_versions
         string vex_status
         int review_revision
-        int assignee_id FK
-        date due_date
         string justification
         string response
         text detail
@@ -176,8 +158,6 @@ erDiagram
         text detail
         json before_state
         json after_state
-        int evidence_analysis_run_id FK
-        json evidence_snapshot
         datetime created_at
     }
 ```
@@ -188,7 +168,6 @@ erDiagram
 - `active_asset_id`는 **nullable 고유 컬럼이며 FK는 아니다.** 대기·실행 중에만 서버 ID를 넣어 같은 서버의 동시 검사를 막는다. 완료·실패·취소 시 NULL로 비운다.
 - `worker_token`은 실행 작업의 소유권 확인 값이다. API 응답이나 보고서에는 노출하지 않는다.
 - `analysis_uploads.id`는 UUID 문자열이며 원본 ZIP 파일은 `<sha256>.zip` 이름으로 업로드 볼륨에 있다.
-- `analysis_schedules`는 `(asset_id, scan_scope)`당 한 건이다. ZIP 예약은 없다.
 - `dependency_edges`는 SBOM 내부의 `source_ref`·`target_ref` 문자열을 저장한다. 구성요소 ID FK 두 개를 가진 구조가 아니다.
 - `vulnerabilities.osv_id`는 기존 이름을 유지한다. Grype 반입 경로에서는 `CVE-...`를 저장하고 CVE가 아닌 별칭은 `aliases`로 보존한다.
 
@@ -202,15 +181,15 @@ erDiagram
 | `analysis_runs.sbom_sha256` | 정규화한 SBOM JSON의 SHA-256 |
 | `analysis_runs.report_sha256` | 이름과 달리 `asset_id + sbom + report` 묶음의 SHA-256. 동일 반입 식별에도 사용 |
 | 비교·보고서 | 별도 결과 테이블 없이 원본에서 읽기 전용으로 계산 |
-| `vulnerability_actions` | 조치 시점의 작성자·전후 상태·담당자/기한·선택한 재검사 근거 스냅샷 |
+| `vulnerability_actions` | 조치 시점의 작성자·메모·전후 상태 스냅샷 |
 
 전후 비교는 변경 가능한 VEX 연결 값을 과거 탐지 근거로 사용하지 않는다. 같은 서버·범위·순서를 확인하고 원본 보고서의 CVE와 SBOM 설치 목록을 대조한다. 보고서 생성 시에는 원본 내용과 저장된 해시도 검증한다. 해시는 내용 일치 검사이며 외부 작성자의 서명은 아니다.
 
 비교의 한 행은 **버전을 제외한 구성요소 식별자 + CVE**다. 생태계·네임스페이스·배포판·아키텍처·하위 경로와 동시에 설치된 버전 집합을 보존한다. `before_versions`·`after_versions`는 해당 식별자의 설치 목록이며, `NO_LONGER_DETECTED`를 자동 `FIXED`로 저장하지 않는다.
 
-현재 조치 상태는 `component_vulnerabilities`에 있고 변경 이력은 `vulnerability_actions`에 추가한다. 클라이언트의 `expected_revision`과 현재 `review_revision`이 같을 때만 갱신한다. 상태 갱신·이력·`VULNERABILITY_ACTION` 감사 로그는 같은 트랜잭션이다. `actor_username`, `before_state`, `after_state`, `evidence_snapshot`은 기록 당시 값을 보존한다.
+현재 조치 상태는 `component_vulnerabilities`에 있고 변경 이력은 `vulnerability_actions`에 추가한다. 클라이언트의 `expected_revision`과 현재 `review_revision`이 같을 때만 갱신한다. 상태 갱신·이력·`VULNERABILITY_ACTION` 감사 로그는 같은 트랜잭션이다. `actor_username`, `before_state`, `after_state`는 기록 당시 값을 보존한다.
 
-작성자·근거 검사 FK는 삭제 시 NULL이 될 수 있으나 스냅샷은 남는다. 해당 CVE 연결 자체를 삭제하면 `link_id`의 CASCADE가 적용되므로 이 테이블을 변경 불가능한 외부 감사 저장소로 설명하지 않는다.
+작성자 FK는 삭제 시 NULL이 될 수 있으나 스냅샷은 남는다. 해당 CVE 연결 자체를 삭제하면 `link_id`의 CASCADE가 적용되므로 이 테이블을 변경 불가능한 외부 감사 저장소로 설명하지 않는다.
 
 ## 3. 인프라 점검·인증 ERD
 
@@ -246,7 +225,6 @@ erDiagram
 | 검사 원본 | `analysis_runs.report_sha256` 유일 |
 | 점검 결과 | 한 `collection_job_id`당 최대 한 행 |
 | 검사 요청 | 활성 작업에 한해 서버별 한 행. 재시도는 새 ID와 이전 작업 FK 사용 |
-| 정기 검사 | `(asset_id, scan_scope)` 유일 |
 
 SBOM의 서버 FK는 nullable이다. 일반 반입은 서버 없는 문서도 저장할 수 있지만 검사 묶음 반입·웹 검사·조치 비교는 서버를 요구한다. 입력 규칙은 API 스키마·서비스에서 검사하며 모두 DB CHECK 제약인 것은 아니다.
 
@@ -267,8 +245,12 @@ SBOM의 서버 FK는 nullable이다. 일반 반입은 서버 없는 문서도 �
   → a16c902bf743  (과거) 공개 EOL 카탈로그 캐시·적용 이력
   → b7f2a9d1e8c4  (과거) 자산 재고 필드
   → c1e4f7a9b2d6  (과거) 자산 위험도 이력
-  → d2f8c4a71e9b  EOL·재고·고객·계약·배포·알림 제거 (head)
+  → d2f8c4a71e9b  EOL·재고·고객·계약·배포·알림 제거
+  → e3a9c1d5b7f2 … d3f5b7a9c1e2  AI 요약, SSH 비밀번호·개인키, 패키지 관리자 대조, 자산 유형 3종
+  → e7c2a4b8d9f1  정기 검사 예약 테이블, 담당자·기한, 재검사 근거 컬럼 제거 (head)
 ```
+
+`e7c2a4b8d9f1`은 `analysis_schedules` 테이블과 `component_vulnerabilities.assignee_id`·`due_date`, `vulnerability_actions.evidence_analysis_run_id`·`evidence_snapshot`을 삭제한다. 다운그레이드는 없다.
 
 `d2f8c4a71e9b`는 `lifecycle_catalog_applications`, `lifecycle_catalog_cache`, `asset_risk_snapshots`, `deployments`, `contract_assets`, `contracts`, `notification_deliveries`, `sites`, `customers` 테이블을 삭제한다. `assets`에서 `site_id`, `model_release_id`와 재고 컬럼 21개, `product_releases`에서 EOL·지원·보안지원 종료일과 근거 URL·확인 시각, `components`에서 `support_end_date`·`lifecycle_source_url`, `sbom_documents`에서 `software_product_id`를 제거한다. 다운그레이드는 컬럼·테이블 구조만 되돌리며 삭제한 데이터는 복구하지 않는다.
 

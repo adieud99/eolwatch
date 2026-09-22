@@ -10,7 +10,6 @@ from app.db import Base, engine
 from app.main import app
 from app.services.collector import packages_to_spdx, parse_os_release
 from app.services.sbom import validate_spdx_schema
-from app.services.vulnerabilities import _cve_ids, _fixed_version
 
 
 def setup_module():
@@ -146,18 +145,6 @@ def test_ubuntu_packages_use_spdx_deb_purl():
     purl = document["packages"][1]["externalRefs"][0]["referenceLocator"]
     assert purl.startswith("pkg:deb/ubuntu/openssl@3.0.13-0ubuntu3.5")
     assert "arch=aarch64" in purl and "distro=ubuntu-24.04" in purl
-
-
-def test_osv_results_are_filtered_to_cve_and_keep_fixed_version():
-    finding = {
-        "id": "GHSA-xxxx-yyyy-zzzz",
-        "aliases": ["CVE-2024-12345", "PYSEC-2024-1"],
-        "affected": [{"ranges": [{"events": [{"introduced": "0"}, {"fixed": "2.0.1"}]}]}],
-    }
-    assert _cve_ids(finding) == ["CVE-2024-12345"]
-    # An advisory alone cannot establish which package/installed branch to fix.
-    assert _fixed_version(finding) is None
-    assert _cve_ids({"id": "GHSA-only"}) == []
 
 
 def test_reject_invalid_cyclonedx_schema():

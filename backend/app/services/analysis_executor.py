@@ -16,7 +16,6 @@ import re
 import shlex
 import signal
 import socket
-import stat
 import subprocess
 import time
 from typing import Callable
@@ -24,8 +23,8 @@ import uuid
 
 import paramiko
 
-from .analysis_profiles import (ANALYSIS_PROFILES, DEFAULT_SCAN_SCOPE, GIT_SCAN_SCOPE, PATH_SCAN_SCOPES, SOURCE_SCAN_SCOPES,
-                                ZIP_SCAN_SCOPE, AnalysisProfile, normalize_git_ref, normalize_repository_url, normalize_target_path, scope_identity)
+from .analysis_profiles import (ANALYSIS_PROFILES, DEFAULT_SCAN_SCOPE, GIT_SCAN_SCOPE, SOURCE_SCAN_SCOPES,
+                                normalize_git_ref, normalize_repository_url, scope_identity)
 from .analysis_uploads import InvalidArchive, extract_upload
 from . import ssh_auth
 from .ai_library_reference import LibraryReferenceError, reference_libraries
@@ -92,7 +91,7 @@ class _Run:
             "scope_description": profile.description if profile else "Unsupported scan profile.",
             "syft_config": SYFT_CONFIG, "commands": [], "artifacts": {},
             "profile": self.profile, "input_type": asset.get("input_type", "ssh"),
-            "target_path": asset.get("target_path"), "upload_id": asset.get("upload_id"),
+            "upload_id": asset.get("upload_id"),
             "upload_sha256": asset.get("upload_sha256"), "upload_filename": asset.get("upload_filename"),
             "project_name": asset.get("project_name"),
             "git_url": asset.get("git_url"), "git_ref": asset.get("git_ref"),
@@ -382,24 +381,6 @@ def _target_home(sftp) -> str:
     return home
 
 
-def _scan_directory(client, profile: AnalysisProfile, target_path=None) -> str:
-    if profile.relative_directory is None and target_path is None:
-        return "/"
-    with client.open_sftp() as sftp:
-        sftp.get_channel().settimeout(15)
-        directory = normalize_target_path(target_path) if target_path is not None else _target_home(sftp).rstrip("/") + "/" + profile.relative_directory
-        try:
-            info = sftp.stat(directory)
-            canonical = sftp.normalize(directory)
-        except FileNotFoundError as error:
-            raise AnalysisExecutionError("APP_NOT_INSTALLED", "선택한 앱 디렉터리가 대상 서버에 없습니다.") from error
-        if not stat.S_ISDIR(info.st_mode):
-            raise AnalysisExecutionError("APP_NOT_INSTALLED", "분석 대상은 앱 디렉터리여야 합니다.")
-        if canonical != directory:
-            raise AnalysisExecutionError("APP_PATH_OUT_OF_SCOPE", "앱 경로가 다른 디렉터리로 연결됩니다. 실제 절대 경로를 지정하세요.")
-        return directory
-
-
 def _provision(client, syft: Path, run: _Run):
     with client.open_sftp() as sftp:
         sftp.get_channel().settimeout(15)
@@ -559,9 +540,9 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
         profile = ANALYSIS_PROFILES.get(run.profile)
         if profile is None:
             raise AnalysisExecutionError("UNSUPPORTED_SCAN_SCOPE", "지원하지 않는 분석 범위입니다.")
-        if run.profile in PATH_SCAN_SCOPES or run.profile in SOURCE_SCAN_SCOPES:
+        if run.profile in SOURCE_SCAN_SCOPES:
             try:
-                expected_scope = scope_identity(run.profile, asset_snapshot.get('target_path'), asset_snapshot.get('project_name'))
+                expected_scope = scope_identity(run.profile, asset_snapshot.get('project_name'))
             except ValueError as error:
                 raise AnalysisExecutionError("TARGET_INVALID", str(error)) from error
             if run.scan_scope != expected_scope:
@@ -596,10 +577,7 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
             architecture_line = architecture.read_text().strip()
             remote_syft = syft if architecture_line == expected_architecture else _remote_syft(syft, architecture_line, run)
             run.manifest["target_architecture"] = architecture_line
-            if run.profile in PATH_SCAN_SCOPES:
-                directory = _scan_directory(client, profile, asset_snapshot.get('target_path'))
-            else:
-                directory = _scan_directory(client, profile)
+            directory = "/"  # the OS scan reads the whole dpkg database; the profile exclusions trim the file walk
             target, remote_config, pid_file = _provision(client, remote_syft, run)
             remote = ["env", "SYFT_CHECK_FOR_APP_UPDATE=false", target, "scan", "dir:" + directory,
                       "--config", remote_config, *scan_options]
@@ -641,8 +619,8 @@ def execute_analysis(asset_snapshot: dict, output_dir: Path, settings, stage_cal
         if run.profile == DEFAULT_SCAN_SCOPE and (distro.get("id") != "ubuntu"
                 or not re.fullmatch(r"[0-9]+(?:\.[0-9]+)*", str(distro.get("versionID", "")))):
             raise AnalysisExecutionError("DISTRO_UNSUPPORTED", "현재 분석은 배포판 버전을 식별할 수 있는 Ubuntu 서버를 지원합니다.")
-        if not ai_reference and (profile.relative_directory is not None or run.profile in PATH_SCAN_SCOPES or run.profile in SOURCE_SCAN_SCOPES) and raw.get("source", {}).get("metadata", {}).get("path") != directory:
-            raise AnalysisExecutionError("SCOPE_MISMATCH", "수집 결과의 경로가 선택한 앱 디렉터리와 다릅니다.")
+        if not ai_reference and run.profile in SOURCE_SCAN_SCOPES and raw.get("source", {}).get("metadata", {}).get("path") != directory:
+            raise AnalysisExecutionError("SCOPE_MISMATCH", "수집 결과의 경로가 검사한 소스 디렉터리와 다릅니다.")
         run.manifest.update(distro=distro, package_count=len(packages), catalogers=catalogers)
         run.heartbeat("SCANNING")
         config = run.directory / "analysis-empty.yaml"

@@ -6,12 +6,12 @@ afterEach(cleanup)
 const item = { id: 2, name: 'jinja2', version: '3.1.4', bom_ref: 'pkg2', purl: 'pkg:pypi/jinja2@3.1.4', supplier: 'Pallets', licenses: ['BSD-3-Clause'], hashes: [] }
 const metadata = { id: 12, serial_number: 'urn:sbom:12', component_count: 52, dependency_count: 2, quality_score: 90, quality_details: { checks: { component_names: true, license_information: false } }, asset: { asset_tag: 'APP-1', name: '주문 서비스' } }
 function open(overrides = {}) {
-  const request = vi.fn(async (path) => path.endsWith('/detail') ? metadata : path.includes('/dependencies?') ? { items: [{ id: 1, source: { id: 1, name: 'orders', version: '1' }, target: item }], total: 1 } : path.includes('/components/') ? item : { items: [item], total: 52 })
+  const request = vi.fn(async (path) => path.endsWith('/detail') ? metadata : path.includes('/components/') ? item : { items: [item], total: 52 })
   const props = { sbomId: 12, request, download: vi.fn(async () => {}), onChanged: vi.fn(), onClose: vi.fn(), onViewCve: vi.fn(), ...overrides }
   return { ...render(<SbomExplorer {...props} />), props }
 }
 
-describe('SBOM 상세와 관계 탐색', () => {
+describe('SBOM 상세', () => {
   it('메타데이터·품질과 라이선스를 보여주고 서버 페이지 검색을 사용한다', async () => {
     const { props } = open()
     await screen.findByRole('button', { name: 'jinja2 3.1.4 상세 보기' })
@@ -24,16 +24,6 @@ describe('SBOM 상세와 관계 탐색', () => {
     await waitFor(() => expect(props.request).toHaveBeenCalledWith('/sboms/12/component-page?q=pkg%3Apypi%2Fjinja2&limit=50&offset=0', expect.anything()))
   })
 
-  it('구성요소 관계를 열고 관계 방향을 바꿔 다시 조회한다', async () => {
-    const view = open()
-    fireEvent.click(await screen.findByRole('button', { name: 'jinja2 3.1.4 상세 보기' }))
-    await screen.findByRole('region', { name: '구성요소 상세' })
-    await screen.findByRole('button', { name: 'orders 1' })
-    expect(screen.queryByLabelText('개별 지원종료일')).not.toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('관계 방향'), { target: { value: 'incoming' } })
-    await waitFor(() => expect(view.props.request).toHaveBeenCalledWith('/sboms/12/dependencies?component_id=2&direction=incoming&limit=20&offset=0', expect.anything()))
-    expect(view.props.request.mock.calls.some(([, options]) => options?.method === 'PATCH')).toBe(false)
-  })
 
   it('메타데이터와 원본·CVE 이동을 제공한다', async () => {
     const { props } = open()

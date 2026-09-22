@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import VulnerabilityActions from './VulnerabilityActions'
-import VulnerabilityWorklist from './VulnerabilityWorklist'
 import SbomExplorer from './SbomExplorer'
 import AnalysisTargets, { scopeLabel } from './AnalysisTargets'
 import AssetEditor from './AssetEditor'
@@ -20,7 +19,7 @@ const EMPTY_SUMMARY = {
 
 const typeText = { server: '서버', vm: '가상머신', cloud: '클라우드' }
 const analysisJobText = { QUEUED: '대기', COLLECTING: '수집', SCANNING: '분석', IMPORTING: '저장', SUCCESS: '완료', FAILED: '실패', CANCEL_REQUESTED: '취소 중', CANCELLED: '취소됨' }
-const analysisScopeText = { 'ubuntu-dpkg-installed': 'OS 설치 패키지', 'demo-python-venv': '데모 앱 (Python)' }
+const analysisScopeText = { 'ubuntu-dpkg-installed': 'OS 설치 패키지' }
 const comparisonStatusText = { PERSISTENT: '계속 검출', NEW: '새로 검출', NO_LONGER_DETECTED: '재검사 미검출', COMPONENT_REMOVED: '구성요소 제거' }
 const vexStatusText = { AFFECTED: '영향 있음', NOT_AFFECTED: '영향 없음', FIXED: '조치 완료', UNDER_INVESTIGATION: '조사 중' }
 const activeAnalysisJob = (job) => ['QUEUED', 'COLLECTING', 'SCANNING', 'IMPORTING', 'CANCEL_REQUESTED'].includes(job.status)
@@ -64,9 +63,9 @@ function AgentResults({ agent }) {
 }
 
 const tabTitles = { overview: '개요', dev: '개발 검사', infra: '인프라 검사', history: '검사 기록' }
-const historyTitles = { projects: '검사 이력', cve: 'CVE 결과·조치', work: '조치 목록', sbom: '의존성 목록', comparison: '검사 전후 비교' }
+const historyTitles = { projects: '검사 이력', cve: 'CVE 결과·조치', sbom: '의존성 목록', comparison: '검사 전후 비교' }
 
-const fieldNames = { asset_tag: '서버 번호', name: '서버 이름', asset_type: '유형', ip_address: '서버 주소', ssh_port: 'SSH 포트', ssh_username: 'SSH 계정', project_name: '프로젝트 이름', repository_url: '저장소 주소', ref: '브랜치', access_token: '접근 토큰', username: '아이디', password: '비밀번호', interval_minutes: '검사 주기', target_path: '앱 경로' }
+const fieldNames = { asset_tag: '서버 번호', name: '서버 이름', asset_type: '유형', ip_address: '서버 주소', ssh_port: 'SSH 포트', ssh_username: 'SSH 계정', project_name: '프로젝트 이름', repository_url: '저장소 주소', ref: '브랜치', access_token: '접근 토큰', username: '아이디', password: '비밀번호' }
 // FastAPI validation errors arrive as a list; turn them into one readable sentence.
 export function describeDetail(detail, status) {
   if (typeof detail === 'string' && detail) return detail
@@ -213,7 +212,6 @@ function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendin
   useEffect(() => { if (focusedAssetId) setEditing(assets.find((asset) => asset.id === focusedAssetId) || null) }, [focusedAssetId])
   const [open, setOpen] = useState(false)
   const [error, setError] = useState('')
-  const [scanScopes, setScanScopes] = useState({})
   const [authMode, setAuthMode] = useState('password')
   async function submit(event) {
     const form = event.currentTarget
@@ -291,12 +289,12 @@ function Servers({ assets, checks = [], onChanged, canEdit, analysisJobs, pendin
                 <td>{asset.ip_address ? <><strong>{asset.ip_address}:{asset.ssh_port}</strong><small>{asset.ssh_username || 'SSH 계정 미입력'} · {asset.ssh_auth === 'password' ? '비밀번호' : asset.ssh_auth === 'private_key' ? '키 파일' : '관리 서버 키 (구 방식)'}</small></> : <small>주소 미입력</small>}</td>
                 <td>{info ? <><strong>{info.os_name || 'OS 미확인'}</strong><small>{[info.cpu_cores ? `${info.cpu_cores}코어` : null, gigabytes(info.memory_total_mb), platformText[info.platform] || info.platform].filter(Boolean).join(' · ')}</small>{info.cloud && <small>{info.cloud.instance_id} · {info.cloud.instance_type}</small>}</> : <small>SSH 점검 후 표시</small>}</td>
                 <td>SBOM {asset.sbom_count ?? 0}<small>CVE {asset.vulnerability_count ?? 0}건</small></td>
-                <td><label>검사 범위<select aria-label={`${asset.asset_tag} 검사 범위`} value={scanScopes[asset.id] || 'ubuntu-dpkg-installed'} disabled={!canEdit || unavailable || pending || Boolean(activeJob)} onChange={(event) => setScanScopes((current) => ({ ...current, [asset.id]: event.target.value }))}>{Object.entries(analysisScopeText).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><div className="action-row"><button className="table-button" disabled={!canEdit || !asset.ip_address || !asset.ssh_username} onClick={async () => {
+                <td><div className="action-row"><button className="table-button" disabled={!canEdit || !asset.ip_address || !asset.ssh_username} onClick={async () => {
                   try {
                     const job = await api(`/checks/assets/${asset.id}/run`, { method: 'POST' })
                     onChanged(job.status === 'SUCCESS' ? '서버 정보 수집을 완료했습니다.' : `수집 실패: ${job.failure_message}`)
                   } catch (reason) { onChanged(reason.message) }
-                }}>SSH 점검</button><button className="table-button" aria-label={`${asset.asset_tag} 취약점 검사`} disabled={!canEdit || unavailable || pending || Boolean(activeJob)} title={!canEdit ? '관리자만 검사를 요청할 수 있습니다.' : unavailable ? 'IP·SSH 계정·검사 대상 설정이 필요합니다.' : activeJob ? `검사 작업 #${activeJob.id} 진행 중` : '설치 패키지를 수집해 취약점을 검사합니다.'} onClick={() => onStartAnalysis(asset.id, undefined, scanScopes[asset.id] || 'ubuntu-dpkg-installed')}>{pending ? '요청 중…' : activeJob ? `검사 진행 중 · ${analysisJobText[activeJob.status]}` : '취약점 검사'}</button></div>{unavailable && <small>IP·SSH 계정·검사 대상 설정이 필요합니다.</small>}</td>
+                }}>SSH 점검</button><button className="table-button" aria-label={`${asset.asset_tag} 취약점 검사`} disabled={!canEdit || unavailable || pending || Boolean(activeJob)} title={!canEdit ? '관리자만 검사를 요청할 수 있습니다.' : unavailable ? 'IP·SSH 계정·검사 대상 설정이 필요합니다.' : activeJob ? `검사 작업 #${activeJob.id} 진행 중` : '설치 패키지를 수집해 취약점을 검사합니다.'} onClick={() => onStartAnalysis(asset.id, undefined, 'ubuntu-dpkg-installed')}>{pending ? '요청 중…' : activeJob ? `검사 진행 중 · ${analysisJobText[activeJob.status]}` : '취약점 검사'}</button></div>{unavailable && <small>IP·SSH 계정·검사 대상 설정이 필요합니다.</small>}</td>
               </tr>
             )})}
             {!visible.length && <tr><td colSpan="7" className="empty">{servers.length ? '검색 조건에 맞는 서버가 없습니다.' : '등록된 서버가 없습니다. 서버 IP와 SSH 계정을 등록하세요.'}</td></tr>}
@@ -464,7 +462,6 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
   const [cveView, setCveView] = useState('components')   // one row per component, CVEs folded under it
   const [expanded, setExpanded] = useState({})            // component_id -> { status, items, total }
   const loadedKey = useRef('')
-  const scanRequest = useRef(null)
   const bundleRequest = useRef(null)
   const cveSection = useRef(null)
   const pageSize = 100
@@ -499,7 +496,7 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
 
   useEffect(() => {
     setBusy(false)
-    return () => { scanRequest.current?.abort(); scanRequest.current = null }
+    return () => {}
   }, [sbomId])
 
   useEffect(() => { setExpanded({}); loadedKey.current = '' }, [sbomId])
@@ -534,22 +531,9 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
       {!nested && <td><strong>{item.component_name}</strong><small>검사 당시 {item.component_version || '버전 미상'}</small></td>}
       <td><strong>{item.fixed_versions?.length ? item.fixed_versions.join(', ') : item.fixed_version || '확인 필요'}</strong><FixCheck value={item.fix_check} /></td>
       <td><span className={`severity severity-${item.severity.toLowerCase()}`}>{item.severity}</span></td>
-      <td><span aria-label={`${item.cve_id} ${item.component_name} 조치 상태`}>{vexStatusText[item.vex_status] || item.vex_status}</span><small>담당 {item.assignee_username || '미지정'}</small>{item.due_date && <small>기한 {item.due_date}</small>}<button className="table-button" aria-label={`${item.cve_id} ${item.component_name} ${canEdit ? '조치 관리' : '조치 이력'}`} onClick={() => setSelectedFinding(item)}>{canEdit ? '조치 관리' : '조치 이력'}</button></td></tr>
+      <td><span aria-label={`${item.cve_id} ${item.component_name} 조치 상태`}>{vexStatusText[item.vex_status] || item.vex_status}</span><button className="table-button" aria-label={`${item.cve_id} ${item.component_name} ${canEdit ? '조치 관리' : '조치 이력'}`} onClick={() => setSelectedFinding(item)}>{canEdit ? '조치 관리' : '조치 이력'}</button></td></tr>
   }
 
-  async function scan() {
-    if (!canEdit || !sbomId || scanRequest.current) return
-    const controller = new AbortController()
-    scanRequest.current = controller
-    setBusy(true)
-    try {
-      const result = await api(`/vulnerabilities/scan/sbom/${sbomId}`, { method: 'POST', signal: controller.signal })
-      if (controller.signal.aborted) return
-      setSelectedFinding(null); refreshCves()
-      await onChanged(`OSV 조회 완료: ${result.unique_vulnerabilities}건 · CVE 외 ${result.ignored_non_cve}건 · 버전 미확인 ${result.skipped_components || 0}건 · 철회 ${result.ignored_withdrawn || 0}건 · 영향 구간 외 ${result.ignored_unaffected || 0}건 제외`, false, controller.signal)
-    } catch (reason) { if (!controller.signal.aborted) onChanged(reason.message, true, controller.signal) }
-    finally { if (!controller.signal.aborted) { scanRequest.current = null; setBusy(false) } }
-  }
   async function viewBundle(run) {
     bundleRequest.current?.abort()
     const controller = new AbortController(); bundleRequest.current = controller
@@ -589,10 +573,10 @@ function Security({ analyses, sboms, users, onChanged, canEdit, sbomId, onSelect
     <section ref={cveSection} className="panel full-panel compare-panel">
     <div className="panel-heading">
       <div><span className="eyebrow">CVE · VEX</span><h2>CVE 조치 현황</h2><small>선택한 검사 결과의 CVE 목록입니다. 조치 상태는 담당자가 확인한 뒤 직접 기록합니다.</small></div>
-      <div className="action-row"><label>확인할 SBOM<select value={sbomId} onChange={(event) => selectSbom(event.target.value)}><option value="">SBOM 선택</option>{sboms.map((item) => <option value={item.id} key={item.id}>#{item.id} · {analyses.find((run) => run.sbom_id === item.id)?.asset_tag || 'SBOM'} · 구성요소 {item.component_count}</option>)}</select></label>{canEdit && <button className="primary" disabled={!sbomId || busy} onClick={scan}>{busy ? '조회 중…' : 'OSV 조회'}</button>}</div>
+      <div className="action-row"><label>확인할 SBOM<select value={sbomId} onChange={(event) => selectSbom(event.target.value)}><option value="">SBOM 선택</option>{sboms.map((item) => <option value={item.id} key={item.id}>#{item.id} · {analyses.find((run) => run.sbom_id === item.id)?.asset_tag || 'SBOM'} · 구성요소 {item.component_count}</option>)}</select></label></div>
     </div>
     {sbomId && <button className="secondary" onClick={() => onViewSbom(Number(sbomId))}>이 결과의 의존성 목록 보기</button>}
-    {selectedFinding && <VulnerabilityActions key={selectedFinding.link_id} finding={selectedFinding} analyses={analyses} users={users} canEdit={canEdit} request={api} onSaved={() => { setSelectedFinding(null); refreshCves(); return onChanged('조치 내용과 이력을 저장했습니다.') }} onClose={() => setSelectedFinding(null)} />}
+    {selectedFinding && <VulnerabilityActions key={selectedFinding.link_id} finding={selectedFinding} canEdit={canEdit} request={api} onSaved={() => { setSelectedFinding(null); refreshCves(); return onChanged('조치 내용과 이력을 저장했습니다.') }} onClose={() => setSelectedFinding(null)} />}
     {cveLoading && <p role="status">CVE 결과를 불러오는 중…</p>}
     {cveError && <div role="alert"><p className="form-error">CVE 결과 조회 실패: {cveError}</p><button className="secondary" type="button" onClick={refreshCves}>CVE 조회 다시 시도</button></div>}
     {sbomId && <div className="cve-filters" role="group" aria-label="CVE 표시 조건"><label>표시<select aria-label="수정판 기준" value={cveFilter.fix} onChange={(event) => { setCveFilter({ ...cveFilter, fix: event.target.value }); setPage({ sbomId, number: 0 }) }}><option value="ALL">전체</option><option value="FIXED">수정판 있는 CVE만</option><option value="UNFIXED">수정판 없는 CVE만</option></select></label><label className="check"><input type="checkbox" checked={cveFilter.kernel} onChange={(event) => { setCveFilter({ ...cveFilter, kernel: event.target.checked }); setPage({ sbomId, number: 0 }) }} />커널(linux) CVE 포함</label><label className="check"><input type="checkbox" checked={cveFilter.resolved} onChange={(event) => { setCveFilter({ ...cveFilter, resolved: event.target.checked }); setPage({ sbomId, number: 0 }) }} />해결된 CVE 포함</label><small>기본은 아직 조치하지 않은 CVE만, 커널(linux)은 제외해 보여 줍니다. '조치 완료'·'영향 없음'으로 기록한 것은 '해결된 CVE 포함'을 켜야 보입니다.</small></div>}
@@ -657,7 +641,6 @@ export default function App() {
   const [analysisInput, setAnalysisInput] = useState({})
   const [explorerSbomId, setExplorerSbomId] = useState(null)
   const [comparison, setComparison] = useState(null)
-  const [workQuery, setWorkQuery] = useState(null)
 
   const canEdit = user?.role === 'ADMIN'
   const logout = useCallback(() => {
@@ -695,6 +678,10 @@ export default function App() {
     setMessage('검사 요청을 저장했습니다. 작업 진행 상태를 확인하세요.')
   }
 
+  function viewAssetCves(assetId) {
+    const run = analyses.find((item) => item.asset_id === assetId)   // list is newest first
+    if (run) viewAnalysisResult(run.sbom_id); else openHistory('cve')
+  }
   function viewProjects(assetId = null) {
     setProjectContext({ assetId }); openHistory('projects')
   }
@@ -703,10 +690,6 @@ export default function App() {
     setExplorerSbomId(sbomId); openHistory('sbom')
   }
 
-  function viewAssetWork(assetId) {
-    setWorkQuery({ filters: { q: '', asset_id: String(assetId), status: 'OPEN', severity: '', assignee_id: '', unassigned: false, overdue: false }, offset: 0, limit: 25, revision: 0 })
-    openHistory('work')
-  }
 
   async function viewComparison(baseId, targetId, signal) {
     if (comparisonRequest.current || signal?.aborted) return
@@ -849,7 +832,7 @@ export default function App() {
   const zipJobs = analysisJobs.filter((job) => isZipScope(job.scan_scope))
   const serverJobs = analysisJobs.filter((job) => !isZipScope(job.scan_scope))
   const jobsProps = { error: jobsError, pendingAssets, onRetry: (job) => requestAnalysis(job.asset_id, job.id), onCancel: cancelAnalysis, onViewResult: viewAnalysisResult, canEdit }
-  const historyViews = [['projects', historyTitles.projects], ['cve', historyTitles.cve], ['work', historyTitles.work], ...(explorerSbomId ? [['sbom', historyTitles.sbom]] : []), ...(comparison ? [['comparison', historyTitles.comparison]] : [])]
+  const historyViews = [['projects', historyTitles.projects], ['cve', historyTitles.cve], ...(explorerSbomId ? [['sbom', historyTitles.sbom]] : []), ...(comparison ? [['comparison', historyTitles.comparison]] : [])]
 
   return (
     <div className="app-shell">
@@ -873,12 +856,11 @@ export default function App() {
         {tab === 'history' && <div className="analysis-input-tabs" role="tablist" aria-label="검사 기록 종류">{historyViews.map(([value, label]) => <button key={value} className="secondary" role="tab" aria-selected={historyView === value} aria-pressed={historyView === value} onClick={() => setHistoryView(value)}>{label}</button>)}</div>}
         {loading ? <div className="loading">데이터를 불러오는 중입니다…</div>
           : tab === 'overview' ? <Overview summary={summary} onViewResult={viewAnalysisResult} analysisJobs={analysisJobs} />
-          : tab === 'dev' ? <><AnalysisTargets mode="zip" assets={assets} canEdit={canEdit} request={api} onJobQueued={acceptedAnalysisJob} onAssetCreated={() => load()} initialAssetId={analysisInput.assetId} initialProjectName={analysisInput.projectName} initialScope={analysisInput.scanScope} initialTargetPath={analysisInput.targetPath} initialGitUrl={analysisInput.gitUrl} initialGitRef={analysisInput.gitRef} /><AnalysisJobs jobs={zipJobs} title="소스 검사 작업" hint="올린 파일이나 Git 저장소에서 의존성 목록을 뽑아 취약점을 대조합니다. 완료되면 결과 보기가 열립니다." {...jobsProps} /></>
-          : tab === 'infra' ? <><Servers assets={assets} checks={checks} onChanged={load} canEdit={canEdit} analysisJobs={analysisJobs} pendingAssets={pendingAssets} onStartAnalysis={requestAnalysis} focusedAssetId={focusedAssetId} onViewProjects={viewProjects} onViewCve={viewAssetWork} onViewSbom={viewSbom} /><AnalysisJobs jobs={serverJobs} title="서버 검사 작업" hint="검사 도구를 서버에 복사해 실행하고 설치 패키지를 수집해 취약점을 검사합니다." {...jobsProps} /><AnalysisTargets mode="ssh" assets={assets.filter((asset) => asset.ip_address || asset.ssh_username || asset.monitored)} canEdit={canEdit} request={api} onJobQueued={acceptedAnalysisJob} initialAssetId={analysisInput.assetId} initialProjectName={analysisInput.projectName} initialScope={analysisInput.scanScope} initialTargetPath={analysisInput.targetPath} /><Checks checks={checks} canEdit={canEdit} /></>
+          : tab === 'dev' ? <><AnalysisTargets assets={assets} canEdit={canEdit} request={api} onJobQueued={acceptedAnalysisJob} onAssetCreated={() => load()} initialAssetId={analysisInput.assetId} initialProjectName={analysisInput.projectName} initialScope={analysisInput.scanScope} initialGitUrl={analysisInput.gitUrl} initialGitRef={analysisInput.gitRef} /><AnalysisJobs jobs={zipJobs} title="소스 검사 작업" hint="올린 파일이나 Git 저장소에서 의존성 목록을 뽑아 취약점을 대조합니다. 완료되면 결과 보기가 열립니다." {...jobsProps} /></>
+          : tab === 'infra' ? <><Servers assets={assets} checks={checks} onChanged={load} canEdit={canEdit} analysisJobs={analysisJobs} pendingAssets={pendingAssets} onStartAnalysis={requestAnalysis} focusedAssetId={focusedAssetId} onViewProjects={viewProjects} onViewCve={viewAssetCves} onViewSbom={viewSbom} /><AnalysisJobs jobs={serverJobs} title="서버 검사 작업" hint="검사 도구를 서버에 복사해 실행하고 설치 패키지를 수집해 취약점을 검사합니다." {...jobsProps} /><Checks checks={checks} canEdit={canEdit} /></>
           : tab === 'history' ? (
-            historyView === 'projects' ? <ProjectHub assets={assets} canEdit={canEdit} request={api} download={download} onChanged={load} onJobQueued={acceptedAnalysisJob} onViewResult={viewAnalysisResult} onViewSbom={viewSbom} onCompare={viewComparison} onNewAnalysis={(input) => { setAnalysisInput(input); setTab(input.scanScope && !isZipScope(input.scanScope) ? 'infra' : 'dev') }} initialAssetId={projectContext.assetId} initialScope={projectContext.scanScope} onSelectionChange={setProjectContext} onViewWork={viewAssetWork} />
+            historyView === 'projects' ? <ProjectHub assets={assets} canEdit={canEdit} request={api} download={download} onChanged={load} onJobQueued={acceptedAnalysisJob} onViewResult={viewAnalysisResult} onViewSbom={viewSbom} onCompare={viewComparison} onNewAnalysis={(input) => { setAnalysisInput(input); setTab(input.scanScope && !isZipScope(input.scanScope) ? 'infra' : 'dev') }} initialAssetId={projectContext.assetId} initialScope={projectContext.scanScope} onSelectionChange={setProjectContext} onViewCve={viewAssetCves} />
             : historyView === 'cve' ? <Security analyses={analyses} sboms={sboms} users={users} onChanged={load} canEdit={canEdit} sbomId={selectedSbomId} onSelectSbom={setSelectedSbomId} onViewSbom={viewSbom} onViewHistory={() => viewProjects()} />
-            : historyView === 'work' ? <VulnerabilityWorklist assets={assets} users={users} analyses={analyses} canEdit={canEdit} request={api} onChanged={load} onViewResult={viewAnalysisResult} initialQuery={workQuery} onQueryChange={setWorkQuery} />
             : historyView === 'comparison' && comparison ? <><button className="secondary" onClick={() => setHistoryView('projects')}>검사 이력으로 돌아가기</button><AnalysisComparison key={`${comparison.baseId}-${comparison.targetId}`} analyses={comparison.runs} initialBaseId={comparison.baseId} initialTargetId={comparison.targetId} /></>
             : explorerSbomId ? <SbomExplorer key={explorerSbomId} sbomId={explorerSbomId} request={api} download={download} canEdit={canEdit} onChanged={load} onClose={() => { setExplorerSbomId(null); setHistoryView('projects') }} onViewCve={viewAnalysisResult} />
             : <p className="empty">검사 이력에서 결과를 선택하세요.</p>

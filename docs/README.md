@@ -13,7 +13,7 @@
 | 5 | [웹 검사 실행](WEB_ANALYSIS.md) | 개발 검사·인프라 검사·검사 기록 화면 사용법과 운영 설정 |
 | 6 | [조치 시연 안내](REMEDIATION_DEMO.md) | 데모 앱 업데이트 전후 재검사 순서 |
 | 7 | [비교 보고서 안내](COMPARISON_REPORTS.md) | 검사 전후 비교 PDF·JSON 다운로드와 해시 |
-| 8 | [CVE 조치 관리](VULNERABILITY_ACTIONS.md) | 담당자·기한·조치 내용·재검사 근거와 변경 이력 |
+| 8 | [CVE 조치 관리](VULNERABILITY_ACTIONS.md) | 조치 상태·조치 내용과 변경 이력 |
 | 9 | [검사 이력·저장 ZIP·취소](PROJECT_HISTORY.md) | 전체 이력 검색, 저장 ZIP 재검사, 취소, 현재 기준 집계 |
 | 10 | [교수님 설명 안내](PROFESSOR_PROJECT_GUIDE.md) | 전체 구조, 화면별 시연 시나리오, 예상 질문 |
 | 11 | [운영 백업](BACKUP_OPERATIONS.md) | DB·원본 ZIP 백업, 복구 검증과 정기 실행 |
@@ -48,7 +48,7 @@
 
 | 문서 | 당시 완료한 범위 |
 |---|---|
-| [프로젝트 확장 검증](PROJECT_EXPANSION_VERIFICATION.md) | 2026-09-15~16 실제 ZIP·서버 경로·예약 검사, 당시 관리 화면, OSV, 백업 복구 |
+| [프로젝트 확장 검증](PROJECT_EXPANSION_VERIFICATION.md) | 2026-09-15~16 실제 ZIP 검사, 당시 관리 화면, 백업 복구 (서버 경로·예약·OSV는 이후 제거) |
 | [AWS 실제 배포 기록](AWS_DEPLOYMENT_RECORD.md) | 과거 AWS 생성·배치·검증 기록. 현재 실행 상태를 보증하지 않음 |
 | [기본 상태 검증](archive/VERIFICATION_2026-09-15.md) | 로컬 환경·SSH 수집·자체 SPDX 생성 |
 | [도구 연동 검증](archive/ANALYSIS_VERIFICATION_2026-09-15.md) | 초기 스크립트 기반 Syft·Grype 연동과 결과 저장 |

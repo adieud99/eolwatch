@@ -162,7 +162,7 @@ def delete_asset(asset_id: int, purge: bool = Query(False), db: Session = Depend
     if not asset:
         raise HTTPException(status_code=404, detail="대상이 없습니다")
     if not purge:
-        for model in (models.AnalysisJob, models.CollectionJob, models.SbomDocument, models.AnalysisUpload, models.AnalysisSchedule):
+        for model in (models.AnalysisJob, models.CollectionJob, models.SbomDocument, models.AnalysisUpload):
             if db.scalar(select(model.asset_id).where(model.asset_id == asset_id).limit(1)) is not None:
                 raise HTTPException(status_code=409, detail="검사·점검·결과 이력이 있는 대상입니다. 이력까지 지우려면 '이력 포함 삭제'를 선택하세요")
     else:
@@ -223,7 +223,6 @@ def _purge_history(db: Session, asset_id: int) -> None:
         db.execute(delete(models.DependencyEdge).where(models.DependencyEdge.sbom_id.in_(sbom_ids)))
         db.execute(delete(models.Component).where(models.Component.sbom_id.in_(sbom_ids)))
         db.execute(delete(models.SbomDocument).where(models.SbomDocument.id.in_(sbom_ids)))
-    db.execute(delete(models.AnalysisSchedule).where(models.AnalysisSchedule.asset_id == asset_id))
     db.execute(delete(models.AnalysisJob).where(models.AnalysisJob.asset_id == asset_id))
     uploads = list(db.scalars(select(models.AnalysisUpload).where(models.AnalysisUpload.asset_id == asset_id)))
     for upload in uploads:

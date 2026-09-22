@@ -4,7 +4,6 @@ import AnalysisTargets from './AnalysisTargets'
 
 afterEach(cleanup)
 const assets = [{ id: 1, asset_tag: 'APP-1', name: '검사 서버', monitored: true, ip_address: '10.0.0.1', ssh_username: 'operator' }, { id: 2, asset_tag: 'UPLOAD-2', name: '업로드 전용', monitored: false }]
-const schedule = { id: 9, asset_id: 1, asset_tag: 'APP-1', asset_name: '검사 서버', scan_scope: 'ssh-project-directory:/opt/orders', interval_minutes: 60, enabled: true, next_run_at: '2026-09-16T01:00:00Z' }
 function open(overrides = {}) {
   const props = { assets, canEdit: true, request: vi.fn(async () => []), onJobQueued: vi.fn(), ...overrides }
   return { ...render(<AnalysisTargets {...props} />), props }
@@ -17,18 +16,15 @@ describe('실제 프로젝트 분석 입력', () => {
     expect(screen.getByLabelText('프로젝트 이름')).toHaveValue('')
     expect(screen.queryByLabelText('검사 방식')).not.toBeInTheDocument()
     expect(screen.getByText(/이전 검사의 입력 정보가 없어 새 ZIP 입력/)).toBeInTheDocument()
-    await waitFor(() => expect(props.request).toHaveBeenCalledWith('/analyses/schedules', expect.any(Object)))
     expect(props.request.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false)
   })
-  it('프로젝트에서 넘어온 ZIP 이름과 서버 범위·경로를 입력에 이어받는다', async () => {
+  it('프로젝트에서 넘어온 ZIP 이름을 입력에 이어받는다', () => {
     const view = open({ initialAssetId: 2, initialScope: 'source-zip:orders', initialProjectName: 'orders' })
-    expect(screen.getByRole('combobox', { name: /^(결과를 저장할 대상|검사할 서버)/ })).toHaveValue('2')
+    expect(screen.getByRole('combobox', { name: /^결과를 저장할 대상/ })).toHaveValue('2')
     expect(screen.getByLabelText('프로젝트 이름')).toHaveValue('orders')
-    view.rerender(<AnalysisTargets {...view.props} initialAssetId={1} initialScope="ssh-python-environment:/opt/orders/.venv" initialProjectName="" initialTargetPath="/opt/orders/.venv" />)
-    expect(screen.getByRole('combobox', { name: /^(결과를 저장할 대상|검사할 서버)/ })).toHaveValue('1')
-    expect(screen.getByLabelText('검사 방식')).toHaveValue('ssh-python-environment')
-    expect(screen.getByLabelText('서버 앱 절대 경로')).toHaveValue('/opt/orders/.venv')
-    await waitFor(() => expect(view.props.request).toHaveBeenCalledWith('/analyses/schedules', expect.any(Object)))
+    view.rerender(<AnalysisTargets {...view.props} initialAssetId={1} initialScope="source-zip:billing" initialProjectName="billing" />)
+    expect(screen.getByRole('combobox', { name: /^결과를 저장할 대상/ })).toHaveValue('1')
+    expect(screen.getByLabelText('프로젝트 이름')).toHaveValue('billing')
   })
   it('SSH 설정 없는 대상에도 ZIP과 프로젝트 이름으로 분석 요청을 보낸다', async () => {
     const job = { id: 55, asset_id: 2, status: 'QUEUED', scan_scope: 'source-zip:orders' }
@@ -53,52 +49,19 @@ describe('실제 프로젝트 분석 입력', () => {
     expect(props.onJobQueued).toHaveBeenCalledWith(job)
   })
 
-  it('서버의 실제 프로젝트 경로를 보내고 정기 예약을 별도로 등록한다', async () => {
-    const request = vi.fn(async (path, options) => options?.method === 'POST' ? schedule : [schedule])
-    open({ request })
-    fireEvent.click(screen.getByRole('button', { name: '서버 앱 경로' }))
-    fireEvent.change(screen.getByRole('combobox', { name: /^(결과를 저장할 대상|검사할 서버)/ }), { target: { value: '1' } })
-    fireEvent.change(screen.getByLabelText('서버 앱 절대 경로'), { target: { value: '/opt/orders' } })
-    fireEvent.change(screen.getByLabelText('정기 검사 주기 (분)'), { target: { value: '60' } })
-    fireEvent.click(screen.getByRole('button', { name: '정기 검사 등록' }))
-    await screen.findByText(/정기 검사를 등록했습니다/)
-    const post = request.mock.calls.find(([, options]) => options?.method === 'POST')
-    expect(post[0]).toBe('/analyses/schedules')
-    expect(JSON.parse(post[1].body)).toEqual({ asset_id: 1, scan_scope: 'ssh-project-directory', target_path: '/opt/orders', interval_minutes: 60, enabled: true })
-  })
 
-  it('예약 주기와 일시 중지를 저장하고 조회자는 수정할 수 없다', async () => {
-    const request = vi.fn(async (path, options) => options?.method === 'PATCH' ? { ...schedule, interval_minutes: 120, enabled: false } : [schedule])
-    const view = open({ request })
-    await screen.findByLabelText('예약 9 주기')
-    fireEvent.change(screen.getByLabelText('예약 9 주기'), { target: { value: '120' } })
-    fireEvent.click(screen.getByRole('button', { name: '일시 중지' }))
-    await screen.findByRole('button', { name: '다시 실행' })
-    const patch = request.mock.calls.find(([, options]) => options?.method === 'PATCH')
-    expect(JSON.parse(patch[1].body)).toEqual({ interval_minutes: 120, enabled: false })
-    view.unmount(); open({ request, canEdit: false })
-    await screen.findByText('실행 중')
-    expect(screen.queryByRole('button', { name: '검사 시작' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '일시 중지' })).not.toBeInTheDocument()
-  })
 
-  it('예약을 삭제하면 목록에서 사라진다', async () => {
-    const request = vi.fn(async (path, options) => options?.method === 'DELETE' ? null : [schedule])
-    open({ request })
-    await screen.findByLabelText('예약 9 주기')
-    fireEvent.click(screen.getByRole('button', { name: '예약 9 삭제' }))
-    await screen.findByText('등록된 정기 검사가 없습니다.')
-    expect(request).toHaveBeenCalledWith('/analyses/schedules/9', expect.objectContaining({ method: 'DELETE' }))
-  })
 
   it('패널을 떠나면 업로드 요청을 취소하고 늦은 응답으로 화면을 이동하지 않는다', async () => {
     let resolve
     const request = vi.fn((path, options) => options?.method === 'POST' ? new Promise((done) => { resolve = done }) : Promise.resolve([]))
     const { unmount, props } = open({ request })
-    fireEvent.click(screen.getByRole('button', { name: '서버 앱 경로' }))
-    fireEvent.change(screen.getByRole('combobox', { name: /^(결과를 저장할 대상|검사할 서버)/ }), { target: { value: '1' } })
-    fireEvent.change(screen.getByLabelText('서버 앱 절대 경로'), { target: { value: '/opt/orders' } })
-    fireEvent.click(screen.getByRole('button', { name: '검사 시작' }))
+    fireEvent.change(screen.getByRole('combobox', { name: /^결과를 저장할 대상/ }), { target: { value: '1' } })
+    fireEvent.change(screen.getByLabelText('프로젝트 이름'), { target: { value: 'orders' } })
+    fireEvent.change(screen.getByLabelText('소스 ZIP 또는 의존성 파일'), { target: { files: [new File(['zip'], 'orders.zip', { type: 'application/zip' })] } })
+    const form = screen.getByLabelText('프로젝트 이름').closest('form')
+    vi.spyOn(form, 'reportValidity').mockReturnValue(true)
+    fireEvent.submit(form)
     await waitFor(() => expect(resolve).toBeDefined())
     const signal = request.mock.calls.find(([, options]) => options?.method === 'POST')[1].signal
     unmount(); expect(signal.aborted).toBe(true)
@@ -111,7 +74,7 @@ describe('새 대상 만들기', () => {
   it('개발 검사에서 대상을 만들면 목록에 추가되고 바로 선택된다', async () => {
     const request = vi.fn(async (path, options) => options?.method === 'POST' && path === '/assets' ? { id: 77, asset_tag: 'PROJ-ORDERS', name: '주문 서비스' } : [])
     const onAssetCreated = vi.fn()
-    open({ request, onAssetCreated, mode: 'zip' })
+    open({ request, onAssetCreated })
     fireEvent.click(screen.getByRole('button', { name: '+ 새 대상' }))
     fireEvent.change(screen.getByLabelText('대상 번호'), { target: { value: 'PROJ-ORDERS' } })
     fireEvent.change(screen.getByLabelText('대상 이름'), { target: { value: '주문 서비스' } })
@@ -124,7 +87,7 @@ describe('새 대상 만들기', () => {
     expect(screen.queryByLabelText('대상 번호')).not.toBeInTheDocument()
   })
   it('조회자에게는 새 대상 버튼이 없다', () => {
-    open({ mode: 'zip', canEdit: false })
+    open({ canEdit: false })
     expect(screen.queryByRole('button', { name: '+ 새 대상' })).not.toBeInTheDocument()
   })
 })
@@ -134,7 +97,7 @@ describe('Git 저장소와 의존성 파일 입력', () => {
     const queued = { id: 9, asset_id: 2, scan_scope: 'source-git:orders', status: 'QUEUED', input_type: 'git' }
     const request = vi.fn(async (path, options) => options?.method === 'POST' ? queued : [])
     const onJobQueued = vi.fn()
-    render(<AnalysisTargets mode="zip" assets={assets} canEdit request={request} onJobQueued={onJobQueued} />)
+    render(<AnalysisTargets assets={assets} canEdit request={request} onJobQueued={onJobQueued} />)
     fireEvent.click(screen.getByRole('button', { name: 'Git 저장소' }))
     fireEvent.change(screen.getByRole('combobox', { name: /^결과를 저장할 대상/ }), { target: { value: '2' } })
     fireEvent.change(screen.getByLabelText('프로젝트 이름'), { target: { value: 'orders' } })
@@ -155,7 +118,7 @@ describe('Git 저장소와 의존성 파일 입력', () => {
   })
 
   it('Git 프로젝트 이력에서 넘어오면 저장소 입력을 이어받고 파일 입력은 의존성 파일도 받는다', () => {
-    render(<AnalysisTargets mode="zip" assets={assets} canEdit request={vi.fn(async () => [])} onJobQueued={vi.fn()} initialAssetId={2} initialScope="source-git:orders" initialProjectName="orders" initialGitUrl="https://github.com/org/orders" initialGitRef="main" />)
+    render(<AnalysisTargets assets={assets} canEdit request={vi.fn(async () => [])} onJobQueued={vi.fn()} initialAssetId={2} initialScope="source-git:orders" initialProjectName="orders" initialGitUrl="https://github.com/org/orders" initialGitRef="main" />)
     expect(screen.getByLabelText('저장소 주소 (https)')).toHaveValue('https://github.com/org/orders')
     expect(screen.getByLabelText('브랜치 또는 태그')).toHaveValue('main')
     expect(screen.getByLabelText('프로젝트 이름')).toHaveValue('orders')

@@ -71,7 +71,7 @@ def add_pair(factory, *, count=3, verified=True):
                 } for n in range(count)] if index == 0 else [],
             }
             run = import_analysis(db, schemas.AnalysisImport(asset_id=asset.id, sbom=sbom, report=report,
-                                                             scan_scope='demo-python-venv'), commit=False)
+                                                             scan_scope='source-zip:report-app'), commit=False)
             run.imported_at = datetime(2026, 9, 15, tzinfo=timezone.utc) + timedelta(seconds=index)
             if verified:
                 db.add(models.AnalysisJob(asset_id=asset.id, asset_snapshot={

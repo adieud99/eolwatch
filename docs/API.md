@@ -34,10 +34,6 @@
 |---|---|---|---|
 | POST | `/api/analyses/assets/{asset_id}/uploads` | ADMIN | 소스 ZIP 또는 의존성 파일 하나(requirements.txt·package-lock.json·pom.xml 등) 업로드와 검사 요청 · multipart `file`, `project_name`. 의존성 파일은 한 항목 ZIP으로 보관 |
 | POST | `/api/analyses/assets/{asset_id}/git` | ADMIN | Git 저장소 검사 요청 · JSON `repository_url`(https, 계정 정보 불가), `ref`(선택), `project_name`, `access_token`(선택, 저장하지 않음) → 범위 `source-git:<project_name>` |
-| GET | `/api/analyses/uploads` | 로그인 | 보관된 ZIP 페이지 · `asset_id`, `scan_scope`, `limit`(1~100), `offset` |
-| GET | `/api/analyses/uploads/{upload_id}/raw` | 로그인 | SHA-256 검증 후 원본 ZIP 다운로드 |
-| POST | `/api/analyses/uploads/{upload_id}/jobs` | ADMIN | 저장된 ZIP으로 재검사 |
-| GET | `/api/analyses/storage` | ADMIN | ZIP 보관소 현황(파일 수·바이트·미참조·누락·임시 파일) |
 
 검사 작업 공통 API는 개발·인프라 두 축이 함께 쓴다.
 
@@ -64,11 +60,7 @@
 | POST | `/api/checks/assets/{asset_id}/run` | ADMIN | SSH 점검 실행 · CPU·메모리·디스크·프로세스·설치 패키지·OS·서버 정보 수집 |
 | GET | `/api/checks/{job_id}/result` | 로그인 | 점검 결과 · `raw_metrics.server_info`에 호스트·커널·CPU 모델·메모리 총량·디스크 총량·가상화·DMI·클라우드·IP·수신 포트·실행 서비스 |
 | POST | `/api/checks/{job_id}/sbom` | ADMIN | 성공한 점검의 패키지 목록에서 자체 SPDX 생성 |
-| POST | `/api/analyses/assets/{asset_id}/jobs` | ADMIN | 서버 취약점 검사 요청 · JSON `scan_scope`, `target_path` |
-| GET | `/api/analyses/schedules` | 로그인 | 정기 검사 예약 목록 |
-| POST | `/api/analyses/schedules` | ADMIN | 정기 검사 예약 생성 |
-| PATCH | `/api/analyses/schedules/{schedule_id}` | ADMIN | 예약 주기·활성 상태 수정 |
-| DELETE | `/api/analyses/schedules/{schedule_id}` | ADMIN | 정기 검사 삭제 (204) |
+| POST | `/api/analyses/assets/{asset_id}/jobs` | ADMIN | 서버 취약점 검사 요청 · JSON `scan_scope`(`ubuntu-dpkg-installed`, 본문 생략 가능) |
 
 서버 필드는 `asset_tag`, `name`, `asset_type`(`server`, `storage`, `network`, `security`, `vm`, `cloud`, `other`), `ip_address`, `ssh_port`, `ssh_username`, `monitored`다. 응답에는 `sbom_count`, `vulnerability_counts`(심각도별), `vulnerability_count`가 붙는다. 건물·랙·구매가·담당자 같은 재고 필드는 없다.
 
@@ -81,7 +73,6 @@
 | GET | `/api/analyses/job-history` | 로그인 | 작업 이력 페이지 · 위 필터와 `status` |
 | GET | `/api/analyses/projects` | 로그인 | 서버·범위별 프로젝트 요약 · `asset_id`, `scan_scope`, `q`, 페이지 |
 | GET | `/api/analyses/runs/{run_id}` | 로그인 | 원본 JSON을 제외한 검사 메타데이터 |
-| GET | `/api/analyses/runs/{run_id}/candidates` | 로그인 | 같은 서버·범위의 이후 검사 후보 · `limit`, `offset` |
 | GET | `/api/analyses/{base_id}/compare/{target_id}` | 로그인 | 검사 원본 전후 비교 |
 | GET | `/api/analyses/{run_id}/bundle` | 로그인 | 해당 검사의 SPDX·Grype 원본 |
 | POST | `/api/analyses/import` | ADMIN | SPDX·Grype 묶음 반입 (API 전용, 화면 없음) |
@@ -93,16 +84,14 @@
 | GET | `/api/sboms/{sbom_id}/detail` | 로그인 | SBOM 상세·서버·연결 검사 ID |
 | GET | `/api/sboms/{sbom_id}/raw` | 로그인 | 원본 JSON 다운로드 |
 | GET | `/api/sboms/{sbom_id}/component-page` | 로그인 | 구성요소 서버 페이지 · `q`, `limit`(1~200), `offset` |
-| GET | `/api/sboms/{sbom_id}/dependencies` | 로그인 | 의존관계 페이지 · `component_id`, `direction`, `limit`, `offset` |
 | GET | `/api/sboms/{sbom_id}/components/{component_id}` | 로그인 | 구성요소 상세 |
 | GET | `/api/sboms/{sbom_id}/components` | 로그인 | 구성요소 목록 · `q` |
 | GET | `/api/vulnerabilities` | 로그인 | 구성요소·CVE·VEX 조회 · `sbom_id`, `vex_status` |
-| POST | `/api/vulnerabilities/scan/sbom/{sbom_id}` | ADMIN | OSV 직접 조회(교차 검증) |
 | GET | `/api/vulnerabilities/{link_id}` | 로그인 | 개별 CVE 연결의 현재 조치 상태 |
 | PATCH | `/api/vulnerabilities/{link_id}/vex` | ADMIN | 수동 VEX 상태 변경 |
-| POST | `/api/vulnerabilities/{link_id}/actions` | ADMIN | 담당자·기한·조치 내용·재검사 근거 기록 |
+| POST | `/api/vulnerabilities/{link_id}/actions` | ADMIN | 조치 상태·조치 내용 기록 |
 | GET | `/api/vulnerabilities/{link_id}/actions` | 로그인 | 조치 이력 · `limit`, `before_id` |
-| GET, HEAD | `/api/vulnerability-work` | 로그인 | 조치 작업목록 서버 페이지 |
+| GET, HEAD | `/api/vulnerability-work` | 로그인 | CVE 목록 서버 페이지 (검사 기록 · CVE 결과·조치 화면이 사용) |
 | GET | `/api/dashboard/summary` | 로그인 | 개요 요약 |
 
 `/api/dashboard/summary` 필드는 `assets`, `sbom_documents`, `components`, `dependencies`, `open_cves`, `affected_assets`, `current_open_cves`, `current_affected_assets`, `failed_checks_24h`, `sbom_quality`, `latest_analyses`다. `open_cves`·`affected_assets`는 전체 보관 이력 기준, `current_*`는 서버·범위별 최신 성공 SBOM 기준이다.
@@ -151,7 +140,7 @@ ZIP은 별도 endpoint를 사용하며 일반 jobs 본문에 `source-zip`을 보
 - 상태는 `QUEUED`, `COLLECTING`, `SCANNING`, `IMPORTING`, `CANCEL_REQUESTED`, `CANCELLED`, `SUCCESS`, `FAILED`다.
 - 재시도는 실패한 작업만 허용하며 이전 입력을 유지한다. ZIP은 보관한 원본의 해시·크기를 검증한 뒤 사용한다.
 
-## 7. 인프라 검사 요청과 정기 검사
+## 7. 인프라 검사 요청
 
 ```bash
 curl --fail-with-body -X POST \
@@ -161,27 +150,7 @@ curl --fail-with-body -X POST \
   -d '{"scan_scope":"ubuntu-dpkg-installed"}'
 ```
 
-| `scan_scope` 입력 | 추가 필드 | 의미 | 화면 |
-|---|---|---|---|
-| `ubuntu-dpkg-installed` | 없음 | Ubuntu dpkg 설치 패키지, 본문 생략 시 기본값 | 인프라 검사 |
-| `demo-python-venv` | 없음 | 고정 `~/eolwatch-demo/.venv` | 인프라 검사 |
-| `ssh-python-environment` | `target_path` | 절대 경로의 설치 Python 메타데이터 | API 전용 |
-| `ssh-project-directory` | `target_path` | 절대 경로의 프로젝트 자료 | API 전용 |
-
-경로는 `/` 이외의 절대 디렉터리로 정규화하며 `..`·제어 문자·220자를 넘는 정규화 경로를 거부한다. 경로 프로필의 저장 범위는 `<프로필>:<정규화 경로>`다. 서버에는 검사 대상 설정(`monitored`)·IP·SSH 계정이 필요하고 키·호스트 키는 관리 서버에 설정한다. 임의 명령·개인키·허용하지 않은 필드는 받지 않는다.
-
-정기 검사 예약 본문:
-
-```json
-{
-  "asset_id": 1,
-  "scan_scope": "ubuntu-dpkg-installed",
-  "interval_minutes": 1440,
-  "enabled": true
-}
-```
-
-`POST /api/analyses/schedules`는 **201**이며 `interval_minutes` 범위는 5~525600이다. 같은 서버·범위의 중복 예약은 **409**다. ZIP 예약은 지원하지 않는다. `PATCH /api/analyses/schedules/{id}`로 주기와 `enabled`를 수정하며 명시적 null·추가 필드는 거부한다. 예약은 현재 화면 메뉴에 없고 API로 제공하는 추가 서비스다.
+서버 검사 범위는 `ubuntu-dpkg-installed` 하나다(본문 생략 시 기본값). 서버에는 검사 대상 설정(`monitored`)·IP·SSH 계정이 필요하고 키·호스트 키는 관리 서버에 설정한다. 임의 명령·개인키·경로·허용하지 않은 필드는 받지 않는다.
 
 `/api/checks/...`는 SSH로 서버 정보를 수집하는 흐름이다. Syft·Grype 취약점 검사(`/api/analyses/...`)와 별개이며, 성공한 점검의 패키지 목록에서 자체 SPDX를 만들 수 있다.
 
@@ -206,7 +175,6 @@ curl --fail-with-body -X POST \
 - `GET /api/vulnerability-work?sbom_id=12&status=ALL&limit=100&offset=0`: 선택 SBOM의 서버 페이지 CVE 조회.
 - `GET /api/vulnerabilities?sbom_id=12`: 기존 호환 전체 목록이며 페이지 매개변수가 없다. 현재 웹은 큰 CVE 목록을 이 경로로 전수 다운로드하지 않는다.
 - `GET /api/sboms/{id}/component-page`: `{items,total,limit,offset}`. 검색은 패키지 이름·버전·PURL·CPE·공급자, 기본 50행이다.
-- `GET /api/sboms/{id}/dependencies`: 기본 50행, 최대 200행. `direction=both|outgoing|incoming`; `component_id`는 같은 SBOM에 속해야 하며 불일치는 404다.
 - 구성요소 상세는 라이선스·해시·PURL·CPE·`product_release_id`를 포함한다. 지원 종료일 필드는 제거했다.
 
 ## 9. 검사 전후 비교와 보고서
@@ -232,7 +200,7 @@ PDF·JSON에는 검사·작업·서버·범위·도구·해시·비교 결과·�
 
 `/api/sboms/{base_sbom_id}/compare/{target_sbom_id}`는 구성요소 목록 차이 기능이다. 동일 패키지의 여러 버전·중복 설치를 보존하고 명확한 대응만 변경으로 묶으며, 모호한 여러 버전 전환은 추가·제거로 반환한다. `unchanged_count`는 구성요소 발생 건수다. 조치 시연에는 서버·범위·원본 근거를 확인하는 **검사 비교 API**를 사용한다.
 
-## 10. 담당자·기한·조치 이력
+## 10. 조치 이력
 
 `GET /api/vulnerabilities/{link_id}`로 현재 `review_revision`을 읽고 다음 요청에 넣는다.
 
@@ -240,31 +208,27 @@ PDF·JSON에는 검사·작업·서버·범위·도구·해시·비교 결과·�
 {
   "expected_revision": 0,
   "status": "UNDER_INVESTIGATION",
-  "detail": "업데이트 일정과 담당자를 확인했습니다.",
-  "assignee_id": 2,
-  "due_date": "2026-10-01"
+  "detail": "업데이트 일정을 확인했습니다.",
+  "justification": "reviewing",
+  "response": "update"
 }
 ```
 
-`POST /api/vulnerabilities/{link_id}/actions`는 로그인한 관리자에서 작성자를 결정한다. 클라이언트가 작성자·증거 원본을 직접 지정할 수 없다. `expected_revision`은 0 이상, `detail`은 공백을 제거한 1~2000자, 담당자는 존재하는 활성 계정이어야 한다. 지정한 사용자가 VIEWER여도 담당자로 연결할 수 있지만 조치 쓰기 권한이 생기는 것은 아니다.
+`POST /api/vulnerabilities/{link_id}/actions`는 로그인한 관리자에서 작성자를 결정한다. 클라이언트가 작성자를 직접 지정할 수 없다. `expected_revision`은 0 이상, `detail`은 공백을 제거한 1~2000자다. `justification`·`response`는 선택이다.
 
-응답은 갱신된 CVE 연결에 `review_revision`, `assignee_id`, `assignee_username`, `due_date`를 포함한다. 같은 이전 버전의 요청이 경합하면 한 건만 반영되고 나머지는 **409**다. 현재 상태·전후 스냅샷·작성자·도메인 감사 로그를 한 트랜잭션으로 저장한다. 선택 필드의 생략은 현재 값을 유지하고 명시적 `null`은 값을 지운다.
+응답은 갱신된 CVE 연결에 `review_revision`을 포함한다. 같은 이전 버전의 요청이 경합하면 한 건만 반영되고 나머지는 **409**다. 현재 상태·전후 스냅샷·작성자·도메인 감사 로그를 한 트랜잭션으로 저장한다. 선택 필드의 생략은 현재 값을 유지하고 명시적 `null`은 값을 지운다. `FIXED`는 메모를 남긴 운영자의 판단이며 재검사 결과로 자동 처리하지 않는다. 재검사 미검출은 [검사 전후 비교](COMPARISON_REPORTS.md)로 따로 확인한다.
 
-`evidence_analysis_run_id`에 이후 검사 ID를 넣으면 해당 CVE·구성요소·이전 버전에 맞는 비교 근거를 첨부한다. 다른 서버·범위·기준 검사·잘못된 해시는 거부한다. 첨부 결과가 `PERSISTENT` 또는 `NEW`인데 `FIXED`를 요청하면 **409**다. 유효한 미검출 근거를 첨부해도 자동 검증·승인이 아니며 수동 결정으로 기록한다. 근거 없는 `FIXED`도 메모를 요구하고 `manual_without_analysis`로 구분한다.
-
-`GET /api/vulnerabilities/{link_id}/actions?limit=100&before_id=...`는 최신 ID부터 `items`, `has_more`, `next_before_id`를 반환한다. `limit`은 1~100이다. 작성 당시 사용자 이름과 근거 스냅샷을 보관하며 이후 이름·원본이 달라져도 기존 이력을 다시 계산하지 않는다.
+`GET /api/vulnerabilities/{link_id}/actions?limit=100&before_id=...`는 최신 ID부터 `items`, `has_more`, `next_before_id`를 반환한다. `limit`은 1~100이다. 작성 당시 사용자 이름과 전후 상태 스냅샷을 보관하며 이후 이름이 달라져도 기존 이력을 다시 계산하지 않는다.
 
 화면·판단 기준·검증 범위는 [조치 이력 안내](VULNERABILITY_ACTIONS.md)를 따른다.
 
-## 11. 수동 VEX와 OSV 교차 검증
+## 11. 수동 VEX
 
 `PATCH /api/vulnerabilities/{link_id}/vex`의 필수 입력은 `status`다. 허용 값은 `AFFECTED`, `NOT_AFFECTED`, `FIXED`, `UNDER_INVESTIGATION`이며 `justification`, `response`, `detail`을 함께 남길 수 있다. 이 경로도 같은 조치 서비스로 상태·이력을 함께 저장한다. `expected_revision`을 제공하면 경합을 검사하고, 생략하면 잠근 최신 버전을 사용한다. 메모 생략은 `legacy_vex`, `note_provided: false`로 이력에 표시하고 기존 현재 메모는 유지한다. 미검출 결과만으로 자동 호출하지 않는다.
 
-OSV 직접 조회는 PURL 생태계·이름·설치 버전이 맞는 advisory만 연결한다. PyPI PEP440, 명시적 SEMVER, npm·Go·Cargo SemVer 순서를 지원하며 미지원 순서/Git 그래프의 수정 버전은 추정하지 않는다. 여러 advisory의 동일 CVE는 별칭·참조·심각도 최댓값으로 병합하고 다른 advisory에서 여전히 취약한 수정 후보는 제외한다. CVSS 2/3/4는 라이브러리로 계산하고 유효한 정보가 없으면 UNKNOWN이다.
+CVE 매칭은 Grype 한 곳에서 하며 외부 OSV 조회는 없다. 전체 모델·입력 필드는 [데이터 모델](DATA_MODEL.md)과 실제 OpenAPI를 확인한다.
 
-응답은 기존 건수와 `skipped_components`(식별 PURL/설치 버전 없음), `ignored_withdrawn`, `ignored_unaffected`를 포함한다. 모든 batch 페이지와 상세 응답을 확인하며 개수 불일치·잘못된 응답·외부 실패는 **502**다. 철회나 조회 미검출만으로 기존 기록·사람의 검토를 삭제하거나 자동 FIXED하지 않는다. OSV 재조회가 기존 Grype 연결의 검사 ID·수정 버전 등 근거를 덮어쓰지 않도록 구분하며 새 OSV 연결은 저장할 수 있다. 전체 모델·입력 필드는 [데이터 모델](DATA_MODEL.md)과 실제 OpenAPI를 확인한다.
-
-## 12. 조치 작업목록과 서버 페이지
+## 12. CVE 목록 서버 페이지
 
 `GET /api/vulnerability-work`와 HEAD를 지원한다. 기본 대상은 **전체 SBOM 이력의 미완료 조치**다.
 
@@ -274,13 +238,10 @@ OSV 직접 조회는 PURL 생태계·이름·설치 버전이 맞는 advisory만
 | `q` | CVE·패키지·서버 번호/이름 검색, 최대 200자 |
 | `asset_id`, `sbom_id` | 선택 서버·SBOM, 1 이상. 없는 SBOM은 404 |
 | `severity` | UNKNOWN, NONE, LOW, MEDIUM, HIGH, CRITICAL |
-| `assignee_id` | 담당자 ID, 1 이상 |
-| `unassigned` | 미지정만, 기본 false |
-| `overdue` | 기한이 지난 미완료 조치만, 기본 false |
 | `limit`, `offset` | 기본 25/0, limit 1~100, offset 0 이상 |
 
-담당자와 미지정을 동시에 지정하거나 완료 상태와 기한 초과를 함께 지정하면 **422**다. 정렬은 미완료 기한 초과 → 심각도 높은 순 → 연결 ID 순이다. 오늘이 기한인 항목은 초과가 아니다.
+정렬은 심각도 높은 순 → 연결 ID 순이다.
 
-응답은 `{items,total,limit,offset,as_of,scope}`이며 `scope`는 `ALL_SBOM_HISTORY`다. 각 항목은 기존 CVE 응답과 `asset_id`, `overdue`를 포함한다. 이전 SBOM의 미완료 조치를 새 검사 때문에 숨기지 않는다. count와 페이지를 DB에서 계산하며 원본 SBOM·Grype JSON은 읽지 않는다.
+응답은 `{items,total,limit,offset,as_of,scope}`이며 `scope`는 `ALL_SBOM_HISTORY`다. 각 항목은 기존 CVE 응답과 `asset_id`를 포함한다. 이전 SBOM의 미완료 조치를 새 검사 때문에 숨기지 않는다. count와 페이지를 DB에서 계산하며 원본 SBOM·Grype JSON은 읽지 않는다.
 
 전체 구현과 실제 검증의 구분은 [구현 현황](IMPLEMENTATION_STATUS.md)을 확인한다.

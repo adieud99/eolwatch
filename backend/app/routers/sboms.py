@@ -3,9 +3,9 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, aliased, defer, joinedload
+from sqlalchemy.orm import Session, defer, joinedload
 from fastapi.responses import JSONResponse
 
 from .. import models, schemas
@@ -70,33 +70,6 @@ def component_page(sbom_id: int, q: str = Query(default="", max_length=200),
     items = db.scalars(select(models.Component)
                        .where(*filters).order_by(models.Component.name, models.Component.id).limit(limit).offset(offset)).all()
     return {"items": [_read_component(item) for item in items], "total": total, "limit": limit, "offset": offset}
-
-
-@router.get("/{sbom_id}/dependencies")
-def dependency_page(sbom_id: int, component_id: Optional[int] = None,
-                    direction: str = Query(default="both", pattern="^(both|outgoing|incoming)$"),
-                    limit: int = Query(default=50, ge=1, le=200), offset: int = Query(default=0, ge=0),
-                    db: Session = Depends(get_db)):
-    _document(db, sbom_id)
-    edge = models.DependencyEdge
-    filters = [edge.sbom_id == sbom_id]
-    if component_id is not None:
-        component = db.get(models.Component, component_id)
-        if not component or component.sbom_id != sbom_id:
-            raise HTTPException(status_code=404, detail="이 SBOM의 구성요소가 아닙니다")
-        outgoing, incoming = edge.source_ref == component.bom_ref, edge.target_ref == component.bom_ref
-        filters.append(outgoing if direction == "outgoing" else incoming if direction == "incoming" else or_(outgoing, incoming))
-    total = db.scalar(select(func.count(edge.id)).where(*filters))
-    source, target = aliased(models.Component), aliased(models.Component)
-    rows = db.execute(select(edge, source, target).outerjoin(source, and_(source.sbom_id == edge.sbom_id, source.bom_ref == edge.source_ref))
-                      .outerjoin(target, and_(target.sbom_id == edge.sbom_id, target.bom_ref == edge.target_ref))
-                      .where(*filters).order_by(edge.id).limit(limit).offset(offset)).all()
-    def endpoint(component, ref):
-        return {"id": component.id if component else None, "ref": ref,
-                "name": component.name if component else ref, "version": component.version if component else None,
-                "purl": component.purl if component else None}
-    return {"items": [{"id": row.id, "source": endpoint(before, row.source_ref), "target": endpoint(after, row.target_ref)}
-                      for row, before, after in rows], "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/{sbom_id}/components/{component_id}", response_model=schemas.ComponentRead)

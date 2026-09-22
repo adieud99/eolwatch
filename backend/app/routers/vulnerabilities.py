@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import httpx
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from .. import models, schemas
 from ..db import get_db
-from ..services.vulnerabilities import scan_sbom
 from ..services.vulnerability_actions import action_history, read_link, record_action
 from .auth import current_user
 
@@ -42,9 +40,6 @@ def _read(link: models.ComponentVulnerability) -> schemas.VulnerabilityRead:
         response=link.response,
         detail=link.detail,
         review_revision=link.review_revision,
-        assignee_id=link.assignee_id,
-        assignee_username=link.assignee.username if link.assignee else None,
-        due_date=link.due_date,
         modified_at=vulnerability.modified_at,
     )
 
@@ -61,7 +56,6 @@ def list_vulnerabilities(sbom_id: Optional[int] = None, vex_status: Optional[str
             .defer(models.SbomDocument.raw_document)
             .joinedload(models.SbomDocument.asset),
             joinedload(models.ComponentVulnerability.vulnerability),
-            joinedload(models.ComponentVulnerability.assignee),
         )
         .order_by(models.ComponentVulnerability.updated_at.desc())
     )
@@ -70,17 +64,6 @@ def list_vulnerabilities(sbom_id: Optional[int] = None, vex_status: Optional[str
     if vex_status:
         query = query.where(models.ComponentVulnerability.vex_status == vex_status)
     return [_read(item) for item in db.scalars(query).unique().all()]
-
-
-@router.post("/scan/sbom/{sbom_id}", response_model=schemas.VulnerabilityScanResult)
-def scan_sbom_vulnerabilities(sbom_id: int, db: Session = Depends(get_db)):
-    if not db.get(models.SbomDocument, sbom_id):
-        raise HTTPException(status_code=404, detail="SBOM이 없습니다")
-    try:
-        return scan_sbom(db, sbom_id)
-    except (httpx.HTTPError, ValueError) as exc:
-        db.rollback()
-        raise HTTPException(status_code=502, detail=f"OSV 조회에 실패했습니다: {exc}") from exc
 
 
 @router.patch("/{link_id}/vex", response_model=schemas.VulnerabilityRead)

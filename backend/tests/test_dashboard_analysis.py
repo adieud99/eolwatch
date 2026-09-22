@@ -15,7 +15,7 @@ from app.routers.dashboard import latest_analysis_overview, summary
 
 
 NOW = datetime(2026, 9, 15, 8, tzinfo=timezone.utc)
-APP = "demo-python-venv"
+APP = "source-zip:demo-app"
 OS = "ubuntu-dpkg-installed"
 
 

@@ -9,32 +9,12 @@ function Pager({ total, offset, size, busy, onChange, label }) {
   return <div className="workspace-pagination"><span>{total}건 · {total ? offset + 1 : 0}–{Math.min(offset + size, total)}건 표시</span><div className="action-row"><button className="table-button" aria-label={`${label} 이전 페이지`} disabled={busy || !offset} onClick={() => onChange(Math.max(0, offset - size))}>이전</button><button className="table-button" aria-label={`${label} 다음 페이지`} disabled={busy || offset + size >= total} onClick={() => onChange(offset + size)}>다음</button></div></div>
 }
 
-function ComponentDetail({ component, sbomId, request, onSelect, onClose }) {
+function ComponentDetail({ component, onClose }) {
   const panel = useRef(null)
   useEffect(() => { panel.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }) }, [component.id])
-  const [direction, setDirection] = useState('both')
-  const [offset, setOffset] = useState(0)
-  const [relations, setRelations] = useState({ items: [], total: 0 })
-  const [busy, setBusy] = useState(false)
-  const [relationError, setRelationError] = useState('')
-  const [reload, setReload] = useState(0)
-  useEffect(() => {
-    const controller = new AbortController(); setBusy(true); setRelationError(''); setRelations({ items: [], total: 0 })
-    request(`/sboms/${sbomId}/dependencies?component_id=${component.id}&direction=${direction}&limit=20&offset=${offset}`, { signal: controller.signal })
-      .then((value) => { if (!controller.signal.aborted) setRelations(value) })
-      .catch((reason) => { if (!controller.signal.aborted) setRelationError(reason.message) })
-      .finally(() => { if (!controller.signal.aborted) setBusy(false) })
-    return () => controller.abort()
-  }, [sbomId, component.id, direction, offset, reload, request])
-
   return <section className="workspace-detail" aria-label="구성요소 상세" ref={panel}>
     <div className="workspace-title"><div><h3>{component.name} {component.version}</h3><p>검사 당시 구성요소 · {component.supplier || '공급자 미기록'}</p></div><button className="secondary" onClick={onClose}>상세 닫기</button></div>
     <dl className="workspace-metadata"><dt>PURL</dt><dd><code>{component.purl || '미기록'}</code></dd><dt>CPE</dt><dd><code>{component.cpe || '미기록'}</code></dd><dt>문서 내 식별자</dt><dd><code>{component.bom_ref}</code></dd><dt>라이선스</dt><dd>{component.licenses?.map(display).join(', ') || '미기록'}</dd><dt>해시</dt><dd>{component.hashes?.length ? component.hashes.map((hash, index) => <code key={index} className="workspace-line">{display(hash)}</code>) : '미기록'}</dd></dl>
-    <div className="workspace-title"><h3>의존·포함 관계</h3><label>관계 방향<select value={direction} onChange={(event) => { setDirection(event.target.value); setOffset(0) }}><option value="both">양쪽 관계</option><option value="outgoing">이 구성요소가 참조</option><option value="incoming">이 구성요소를 참조</option></select></label></div>
-    <p className="workspace-help">원본 SBOM의 의존·포함 관계를 정규화한 연결입니다. 관계가 기록되지 않은 경우에도 실제 의존성이 없다고 단정할 수 없습니다.</p>
-    {relationError && <p className="form-error" role="alert">{relationError} <button className="table-button" onClick={() => setReload((value) => value + 1)}>관계 다시 조회</button></p>}
-    {busy ? <p role="status">관계를 불러오는 중…</p> : <ul className="dependency-list">{relations.items.map((edge) => <li key={edge.id}>{['source', 'target'].map((side, index) => <span key={side}>{index === 1 && <span className="dependency-arrow" aria-label="참조 방향">→</span>}{edge[side].id ? <button className="table-button" disabled={edge[side].id === component.id} onClick={() => onSelect(edge[side].id)}>{edge[side].name} {edge[side].version}</button> : <code>{edge[side].ref} (문서 내 대상 정보 없음)</code>}</span>)}</li>)}{!relations.items.length && !relationError && <li>선택한 방향의 기록된 관계가 없습니다.</li>}</ul>}
-    <Pager total={relations.total} offset={offset} size={20} busy={busy} onChange={setOffset} label="관계" />
   </section>
 }
 
@@ -87,7 +67,7 @@ export default function SbomExplorer({ sbomId, request, download, onClose, onVie
     <form className="workspace-search" onSubmit={(event) => { event.preventDefault(); setQuery(search.trim()); setOffset(0); setSelected(null) }}><label>구성요소 검색<input value={search} maxLength={200} onChange={(event) => setSearch(event.target.value)} placeholder="패키지 이름, 버전, PURL, CPE, 공급자" /></label><button className="primary">검색</button></form>
     {error && <p className="form-error" role="alert">{error} <button className="table-button" onClick={() => setReload((value) => value + 1)}>다시 조회</button></p>}
     {detailError && <p className="form-error" role="alert">{detailError}</p>}
-    {selected && <ComponentDetail key={selected.id} component={selected} sbomId={sbomId} request={request} onClose={() => { detailRequest.current?.abort(); setSelected(null) }} onSelect={choose} />}
+    {selected && <ComponentDetail key={selected.id} component={selected} onClose={() => { detailRequest.current?.abort(); setSelected(null) }} />}
     {busy ? <p role="status">구성요소를 불러오는 중…</p> : <div className="table-wrap"><table aria-label="의존성 목록"><thead><tr><th>패키지</th><th>검사 당시 버전</th><th>공급자</th><th>라이선스</th><th>상세</th></tr></thead><tbody>{page.items.map((item) => <tr key={item.id}><td><strong>{item.name}</strong><small>{item.purl || item.bom_ref}</small></td><td>{item.version || '미기록'}</td><td>{item.supplier || '미기록'}</td><td>{item.licenses?.map(display).join(', ') || '미기록'}</td><td><button className="table-button" aria-label={`${item.name} ${item.version || ''} 상세 보기`} onClick={() => choose(item.id)}>상세·관계</button></td></tr>)}{!page.items.length && !error && <tr><td colSpan={5} className="empty">검색 조건에 맞는 구성요소가 없습니다.</td></tr>}</tbody></table></div>}
     <Pager total={page.total} offset={offset} size={50} busy={busy} onChange={setOffset} label="구성요소" />
   </section>

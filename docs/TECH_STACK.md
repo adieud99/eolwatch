@@ -14,8 +14,8 @@
 | 웹 | React 19.3.0, Vite 8.3.0 | 개발 검사·인프라 검사·검사 기록·관리 화면 |
 | 수집 | Paramiko 5.0.0, Syft 1.51.1 | 키 기반 SSH 접속, 서버 정보 수집, 설치 구성요소 식별 |
 | SBOM | SPDX 2.3 JSON | 검사 경로의 기준 교환 형식. CycloneDX 1.4~1.7 반입 API도 유지 |
-| 취약점 대조 | Grype 0.118.0, OSV API | SPDX 구성요소와 취약점 DB 대조, 선택적 교차 검증 |
-| 작업 실행 | APScheduler 3.11.0 + DB 작업 큐 | 기본 3초 큐 확인, 정기 검사 예약, 일일 SSH 점검 |
+| 취약점 대조 | Grype 0.118.0 | SPDX 구성요소와 취약점 DB 대조 |
+| 작업 실행 | APScheduler 3.11.0 + DB 작업 큐 | 기본 3초 큐 확인, 일일 SSH 점검 |
 | PDF | ReportLab 4.4.4, 번들 Nanum Gothic 글꼴 | 한글 검사 전후 비교 PDF |
 | 웹 제공 | Nginx 1.27 계열, Docker Compose | 정적 웹·API 프록시, API·worker·DB 배치 |
 | 시연 VM | VirtualBox, Ubuntu 24.04 ARM64 | 노트북 안의 관리 VM 1대와 대상 VM 2대 |
@@ -39,7 +39,7 @@ Syft의 구성요소 식별과 Grype의 취약점 대조를 활용한다. 직접
 
 ### DB 작업 큐와 APScheduler
 
-현재 규모는 관리 VM 한 대와 대상 두 대다. 별도 Redis·Celery를 추가하지 않고 `analysis_jobs`와 worker의 주기 실행을 사용한다. 고유 활성 서버 값, 작업 확보, 소유권 토큰과 heartbeat를 사용한다. 이는 대규모 분산 큐의 성능을 검증했다는 뜻이 아니다. APScheduler가 예약하는 것은 검사 큐 확인, 정기 검사 예약 변환, 일일 SSH 점검이다.
+현재 규모는 관리 VM 한 대와 대상 두 대다. 별도 Redis·Celery를 추가하지 않고 `analysis_jobs`와 worker의 주기 실행을 사용한다. 고유 활성 서버 값, 작업 확보, 소유권 토큰과 heartbeat를 사용한다. 이는 대규모 분산 큐의 성능을 검증했다는 뜻이 아니다. APScheduler가 예약하는 것은 검사 큐 확인과 일일 SSH 점검이다.
 
 ### 제한된 SSH 수집 범위
 

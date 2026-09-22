@@ -66,7 +66,7 @@ python3 scripts/analyze-lab.py --asset-tag LAB-VM-01 --upload-existing-dir infra
 
 ## 화면
 
-분석 묶음 JSON을 가져오는 화면은 2026-09-18 재범위화에서 제거했다. 반입은 위 `POST /api/analyses/import` API와 `analyze-lab.py` 스크립트로만 수행한다. 반입한 결과는 `검사 기록` → `검사 이력`에서 도구 버전, 검사 범위, 구성요소 및 CVE 수를 확인하고 원본을 내려받을 수 있다. CVE 목록은 `CVE 결과·조치`에서 선택한 SBOM에 한정해 확인한다. OSV 교차 검증은 별도 API로 유지한다.
+분석 묶음 JSON을 가져오는 화면은 2026-09-18 재범위화에서 제거했다. 반입은 위 `POST /api/analyses/import` API와 `analyze-lab.py` 스크립트로만 수행한다. 반입한 결과는 `검사 기록` → `검사 이력`에서 도구 버전, 검사 범위, 구성요소 및 CVE 수를 확인하고 원본을 내려받을 수 있다. CVE 목록은 `CVE 결과·조치`에서 선택한 SBOM에 한정해 확인한다.
 
 ## 데이터 처리 원칙
 

@@ -37,7 +37,7 @@ def test_naive_timestamp_does_not_silently_use_the_host_timezone():
         business_date.business_today(datetime(2026, 9, 15, 23, 30))
 
 
-def test_work_as_of_and_overdue_query_use_one_business_date(monkeypatch):
+def test_work_as_of_uses_the_configured_business_date(monkeypatch):
     freeze(monkeypatch, datetime(2026, 9, 15, 23, 30, tzinfo=timezone.utc))
     settings = SimpleNamespace(scheduler_timezone="Asia/Seoul")
     monkeypatch.setattr(business_date, "get_settings", lambda: settings)
@@ -49,18 +49,17 @@ def test_work_as_of_and_overdue_query_use_one_business_date(monkeypatch):
             document = models.SbomDocument(serial_number="timezone-boundary", spec_version="2.3", raw_document={})
             component = models.Component(sbom=document, product_release=product, bom_ref="pkg", name="timezone-boundary", version="1")
             vulnerability = models.Vulnerability(osv_id="CVE-2026-12345", severity="HIGH", aliases=[], references=[])
-            finding = models.ComponentVulnerability(component=component, vulnerability=vulnerability, vex_status="AFFECTED", due_date=date(2026, 9, 15))
+            finding = models.ComponentVulnerability(component=component, vulnerability=vulnerability, vex_status="AFFECTED")
             db.add(finding); db.commit()
-            def page(overdue):
-                return list_work(q="", asset_id=None, sbom_id=None, component_id=None, status="ALL", severity=None, assignee_id=None,
-                                 unassigned=False, overdue=overdue, limit=25, offset=0, db=db)
-            korean = page(True)
+            def page():
+                return list_work(q="", asset_id=None, sbom_id=None, component_id=None, status="ALL", severity=None,
+                                 fix="ALL", kernel=True, limit=25, offset=0, db=db)
+            korean = page()
             assert korean.as_of == date(2026, 9, 16)
-            assert korean.total == 1 and korean.items[0].overdue is True
+            assert korean.total == 1
             settings.scheduler_timezone = "UTC"
-            assert page(True).total == 0
-            utc = page(False)
+            utc = page()
             assert utc.as_of == date(2026, 9, 15)
-            assert utc.total == 1 and utc.items[0].overdue is False
+            assert utc.total == 1
     finally:
         engine.dispose()

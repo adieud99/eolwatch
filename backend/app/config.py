@@ -20,7 +20,6 @@ class Settings(BaseSettings):
     access_token_minutes: int = 480
     admin_username: str = "admin"
     admin_password: str = "Eolwatch!2026"
-    osv_api_url: str = "https://api.osv.dev/v1/querybatch"
     public_base_url: str = "http://localhost:8080"
     demo_target_ips: str = ""
     analysis_syft_path: str = "/opt/analysis-tools/syft"

@@ -2,15 +2,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import posixpath
 import re
 from typing import Optional, Tuple
 
 
 DEFAULT_SCAN_SCOPE = "ubuntu-dpkg-installed"
-DEMO_PYTHON_SCAN_SCOPE = "demo-python-venv"
-SSH_PYTHON_SCAN_SCOPE = "ssh-python-environment"
-SSH_PROJECT_SCAN_SCOPE = "ssh-project-directory"
 ZIP_SCAN_SCOPE = "source-zip"
 GIT_SCAN_SCOPE = "source-git"
 
@@ -19,7 +15,6 @@ GIT_SCAN_SCOPE = "source-git"
 class AnalysisProfile:
     cataloger: Optional[str]
     package_type: Optional[str]
-    relative_directory: Optional[str]
     description: str
     exclusions: Tuple[str, ...] = ()
 
@@ -28,7 +23,6 @@ ANALYSIS_PROFILES = {
     DEFAULT_SCAN_SCOPE: AnalysisProfile(
         cataloger="dpkg-db-cataloger",
         package_type="deb",
-        relative_directory=None,
         description="Installed Ubuntu dpkg packages; application dependencies and container images are excluded.",
         # The dpkg cataloger only reads /var/lib/dpkg (+ /etc/os-release for the distro). Everything else is
         # walked just to build syft's file index, which on a 1 GB EC2 got the process OOM-killed after the
@@ -40,48 +34,19 @@ ANALYSIS_PROFILES = {
                     "./usr/src/**", "./usr/share/**", "./lib/**", "./lib64/**", "./bin/**", "./sbin/**", "./var/cache/**",
                     "./var/log/**", "./var/tmp/**", "./tmp/**", "./home/**", "./root/**", "./opt/**", "./srv/**", "./mnt/**", "./media/**"),
     ),
-    DEMO_PYTHON_SCAN_SCOPE: AnalysisProfile(
-        # In pinned Syft 1.51.1 python-package-cataloger reads declared packages;
-        # this cataloger reads the installed Python package metadata instead.
-        cataloger="python-installed-package-cataloger",
-        package_type="python",
-        relative_directory="eolwatch-demo/.venv",
-        description="Installed Python packages in the SSH user's fixed ~/eolwatch-demo/.venv; OS packages and requirements files are excluded.",
-    ),
-    SSH_PYTHON_SCAN_SCOPE: AnalysisProfile(
-        cataloger="python-installed-package-cataloger", package_type="python", relative_directory=None,
-        description="Installed Python package metadata in the selected absolute SSH directory; no application code is executed.",
-    ),
-    SSH_PROJECT_SCAN_SCOPE: AnalysisProfile(
-        cataloger=None, package_type=None, relative_directory=None,
-        description="Installed and declared dependencies in the selected SSH project directory; no build or dependency installation.",
-        exclusions=("./.git/**",),
-    ),
     ZIP_SCAN_SCOPE: AnalysisProfile(
-        cataloger=None, package_type=None, relative_directory=None,
+        cataloger=None, package_type=None,
         description="Installed and declared dependencies in an immutable source ZIP; nested archives and application execution are excluded.",
         exclusions=("./.git/**",),
     ),
     GIT_SCAN_SCOPE: AnalysisProfile(
-        cataloger=None, package_type=None, relative_directory=None,
+        cataloger=None, package_type=None,
         description="Declared dependencies in a shallow, read-only clone of a Git repository; no build, install or application execution.",
         exclusions=("./.git/**",),
     ),
 }
 SUPPORTED_SCAN_SCOPES = frozenset(ANALYSIS_PROFILES)
-PATH_SCAN_SCOPES = frozenset((SSH_PYTHON_SCAN_SCOPE, SSH_PROJECT_SCAN_SCOPE))
 SOURCE_SCAN_SCOPES = frozenset((ZIP_SCAN_SCOPE, GIT_SCAN_SCOPE))
-
-
-def normalize_target_path(value: Optional[str]) -> str:
-    if (not isinstance(value, str) or not value.startswith("/") or value.startswith("//")
-            or any(ord(char) < 32 or ord(char) == 127 for char in value)
-            or ".." in value.split("/")):
-        raise ValueError("앱 경로는 상위 이동(..)이 없는 절대 경로여야 합니다.")
-    normalized = posixpath.normpath(value)
-    if normalized == "/" or len(normalized) > 220:
-        raise ValueError("앱 디렉터리를 지정하세요. 경로는 최대 220자입니다.")
-    return normalized
 
 
 def normalize_project_name(value: str) -> str:
@@ -110,13 +75,9 @@ def normalize_git_ref(value: Optional[str]) -> Optional[str]:
     return ref
 
 
-def scope_identity(profile: str, target_path: Optional[str] = None, project_name: Optional[str] = None) -> str:
-    if profile in PATH_SCAN_SCOPES:
-        return profile + ":" + normalize_target_path(target_path)
+def scope_identity(profile: str, project_name: Optional[str] = None) -> str:
     if profile in SOURCE_SCAN_SCOPES:
         return profile + ":" + normalize_project_name(project_name or "")
     if profile not in SUPPORTED_SCAN_SCOPES:
         raise ValueError("지원하지 않는 분석 범위입니다.")
-    if target_path:
-        raise ValueError("이 분석 범위에서는 앱 경로를 지정할 수 없습니다.")
     return profile

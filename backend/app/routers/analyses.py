@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, defer, joinedload
@@ -14,7 +14,6 @@ from ..services.cve_breakdown import breakdown
 from ..services.analysis_jobs import enqueue_analysis
 from ..services.analysis_comparison import compare_analyses
 from ..services.analysis_uploads import save_upload
-from ..services.analysis_schedules import create_schedule, update_schedule
 
 router = APIRouter(prefix='/analyses', tags=['SBOM analysis tools'])
 
@@ -29,7 +28,7 @@ def read_job(job: models.AnalysisJob) -> schemas.AnalysisJobRead:
         analysis_run_id=job.analysis_run_id,
         sbom_id=job.analysis_run.sbom_id if job.analysis_run else None, retry_of_id=job.retry_of_id,
         profile=job.asset_snapshot.get('profile', job.asset_snapshot.get('scan_scope', 'ubuntu-dpkg-installed')),
-        input_type=job.asset_snapshot.get('input_type', 'ssh'), target_path=job.asset_snapshot.get('target_path'),
+        input_type=job.asset_snapshot.get('input_type', 'ssh'),
         upload_id=job.asset_snapshot.get('upload_id'), upload_sha256=job.asset_snapshot.get('upload_sha256'),
         upload_filename=job.asset_snapshot.get('upload_filename'), project_name=job.asset_snapshot.get('project_name'),
         git_url=job.asset_snapshot.get('git_url'), git_ref=job.asset_snapshot.get('git_ref'), git_commit=job.asset_snapshot.get('git_commit'),
@@ -48,7 +47,7 @@ def list_jobs(db: Session = Depends(get_db)):
 def create_job(asset_id: int, payload: Optional[schemas.AnalysisJobRequest] = Body(default=None),
                db: Session = Depends(get_db)):
     request = payload or schemas.AnalysisJobRequest()
-    return read_job(enqueue_analysis(db, asset_id, scan_scope=request.scan_scope, target_path=request.target_path))
+    return read_job(enqueue_analysis(db, asset_id, scan_scope=request.scan_scope))
 
 
 @router.post('/assets/{asset_id}/uploads', response_model=schemas.AnalysisJobRead, status_code=202)
@@ -62,7 +61,7 @@ async def upload_source(asset_id: int, file: UploadFile = File(), project_name: 
             return await run_in_threadpool(_queue_upload, db, asset_id, upload.id)
         except HTTPException as error:
             if error.status_code == 409:
-                raise HTTPException(status_code=409, detail='ZIP 원본은 보관했습니다. 진행 중인 분석이 끝나면 프로젝트 이력의 저장된 ZIP에서 재분석하세요.') from error
+                raise HTTPException(status_code=409, detail='이 대상의 다른 검사가 진행 중입니다. 검사가 끝나면 같은 파일을 다시 올리세요.') from error
             raise
     except HTTPException:
         await run_in_threadpool(db.rollback)
@@ -80,41 +79,6 @@ def scan_repository(asset_id: int, payload: schemas.AnalysisGitRequest, db: Sess
 
 def _queue_upload(db, asset_id, upload_id):
     return read_job(enqueue_analysis(db, asset_id, scan_scope='source-zip', upload_id=upload_id))
-
-
-def read_schedule(schedule: models.AnalysisSchedule) -> schemas.AnalysisScheduleRead:
-    return schemas.AnalysisScheduleRead(id=schedule.id, asset_id=schedule.asset_id,
-        asset_tag=schedule.asset.asset_tag, asset_name=schedule.asset.name,
-        profile=schedule.input_spec['scan_scope'], scan_scope=schedule.scan_scope,
-        target_path=schedule.input_spec.get('target_path'), interval_minutes=schedule.interval_minutes,
-        enabled=schedule.enabled, next_run_at=schedule.next_run_at,
-        last_requested_at=schedule.last_requested_at, last_job_id=schedule.last_job_id, last_error=schedule.last_error)
-
-
-@router.get('/schedules', response_model=list[schemas.AnalysisScheduleRead])
-def list_schedules(db: Session = Depends(get_db)):
-    return [read_schedule(item) for item in db.scalars(select(models.AnalysisSchedule)
-        .options(joinedload(models.AnalysisSchedule.asset)).order_by(models.AnalysisSchedule.id.desc())).all()]
-
-
-@router.post('/schedules', response_model=schemas.AnalysisScheduleRead, status_code=201)
-def add_schedule(payload: schemas.AnalysisScheduleCreate, db: Session = Depends(get_db)):
-    return read_schedule(create_schedule(db, payload))
-
-
-@router.patch('/schedules/{schedule_id}', response_model=schemas.AnalysisScheduleRead)
-def change_schedule(schedule_id: int, payload: schemas.AnalysisScheduleUpdate, db: Session = Depends(get_db)):
-    return read_schedule(update_schedule(db, schedule_id, payload))
-
-
-@router.delete('/schedules/{schedule_id}', status_code=204)
-def remove_schedule(schedule_id: int, db: Session = Depends(get_db)):
-    schedule = db.get(models.AnalysisSchedule, schedule_id)
-    if not schedule:
-        raise HTTPException(status_code=404, detail='정기 검사가 없습니다')
-    db.delete(schedule)
-    db.commit()
-    return Response(status_code=204)
 
 
 @router.post('/jobs/{job_id}/retry', response_model=schemas.AnalysisJobRead, status_code=202)

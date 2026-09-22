@@ -39,7 +39,7 @@ _STATUS = {
     "PERSISTENT": "계속 검출", "NEW": "새로 검출",
     "NO_LONGER_DETECTED": "재분석 미검출", "COMPONENT_REMOVED": "구성요소 제거",
 }
-_SCOPES = {"ubuntu-dpkg-installed": "Ubuntu 설치 패키지", "demo-python-venv": "데모 앱 · Python 가상환경"}
+_SCOPES = {"ubuntu-dpkg-installed": "Ubuntu 설치 패키지"}
 _IDENTITY_SOURCES = {"job_snapshot": "분석 요청 시점의 자산 정보", "current_asset_record": "현재 자산 정보 (요청 기록 없음)"}
 _BASE_LIMITS = (
     "이 보고서는 저장된 두 분석 원본의 탐지 차이를 보여줍니다. 조치 상태를 자동으로 FIXED로 변경하지 않습니다.",

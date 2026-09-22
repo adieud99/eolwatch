@@ -20,14 +20,12 @@ flowchart LR
     end
     Target[등록 서버 · 원격 Syft · 서버 정보]
     Feed[Grype DB 배포처]
-    OSV[OSV API]
     Backup[백업 CLI · DB 및 ZIP · 임시 DB 복원]
     Browser --> Web --> API
     API --> DB
     API -->|개발 검사: ZIP 저장| Upload
     API -->|인프라 검사: SSH 점검·서버 정보| Target
-    API -->|선택적 CVE 교차 검증| OSV
-    Worker -->|예약 확인·작업 확보| DB
+    Worker -->|대기 작업 확보| DB
     Worker -->|인프라 검사: SSH| Target
     Target -->|Syft JSON| Worker
     Upload -->|원본 해시 검증·제한된 해제| Worker
@@ -48,9 +46,6 @@ flowchart LR
 |---|---|---|---|
 | 개발 검사 | `source-zip` | 관리 worker의 작업별 해제 경로, 기본 패키지 cataloger | `source-zip:<프로젝트 이름>` |
 | 인프라 검사 | `ubuntu-dpkg-installed` | 대상 서버, `dpkg-db-cataloger` | 프로필명 |
-| 인프라 검사 | `demo-python-venv` | 대상의 고정 가상환경, `python-installed-package-cataloger` | 프로필명 |
-| 인프라 검사 (API 전용) | `ssh-python-environment` | 지정한 절대 경로의 설치 Python 메타데이터 | `ssh-python-environment:<경로>` |
-| 인프라 검사 (API 전용) | `ssh-project-directory` | 지정한 프로젝트 경로, 기본 패키지 cataloger | `ssh-project-directory:<경로>` |
 
 다른 경로·프로젝트의 검사를 같은 범위로 합치지 않는다. 전후 비교는 여기에 서버와 시간 순서까지 확인한다. 일반 폴더/ZIP은 빌드·설치를 하지 않으며 `.git`과 중첩 압축 내부 탐색을 제외한다. 대상 SSH 서버는 worker와 같은 CPU 아키텍처의 Linux arm64 또는 amd64가 필요하다. ZIP은 대상 서버에 SSH로 접속하지 않는다.
 
@@ -70,7 +65,7 @@ ZIP 기본 한도는 업로드 500 MiB, 해제 합계 2 GiB, 파일당 256 MiB, 
 
 플랫폼은 `aws`/`gcp`/`azure`/`physical`/가상화 종류(`kvm`, `vmware` 등)/`unknown`으로 판정한다. 클라우드 계정 API는 연동하지 않으며 서버 안에서 읽을 수 있는 메타데이터·DMI로 한정한다. 이 정보는 화면 설명용이며 취약점 판정에 쓰지 않는다. 화면에서는 서버 목록의 `서버 정보` 열(OS·코어·메모리·실행 환경)과 수집 이력의 `서버 정보` 카드(호스트·OS·하드웨어·실행 환경·통신 정보·실행 서비스)로 보여준다.
 
-## 4. DB 큐와 예약
+## 4. DB 큐
 
 ```mermaid
 sequenceDiagram
@@ -78,10 +73,9 @@ sequenceDiagram
     participant A as API
     participant D as PostgreSQL
     participant W as worker
-    U->>A: 즉시 검사 또는 예약 등록
-    A->>D: AnalysisJob 또는 AnalysisSchedule 저장
-    A-->>U: 작업 202 또는 예약 201
-    W->>D: 기한이 된 예약을 작업으로 변환
+    U->>A: 검사 요청
+    A->>D: AnalysisJob 저장
+    A-->>U: 작업 202
     W->>D: 대기 작업 확보 · COLLECTING
     W->>W: SSH 수집 또는 ZIP 검사·수집
     W->>D: SCANNING
@@ -100,7 +94,6 @@ sequenceDiagram
 - 기본 큐 확인 주기는 3초이며 한 worker의 검사 실행은 동시에 하나다. 작업 확보·`worker_token`·생존 확인으로 중복 실행과 오래된 worker의 뒤늦은 저장을 막는다.
 - 실행 중 약 5초마다 생존 시각을 갱신한다. 기본 180초 이상 끊긴 작업은 실패로 전환하며 재시도는 새 작업 이력을 만든다.
 - 취소는 대기 작업이면 즉시, 실행 중이면 프로세스 종료 확인 후 확정한다. [취소 운영](ANALYSIS_CANCELLATION.md)을 따른다.
-- 예약은 DB에 남고 5~525600분 주기로 설정한다. 중지·재개·주기 변경을 지원하며 같은 서버·범위의 중복 예약은 거부한다. 밀린 예약 횟수를 모두 재생하지 않고 다음 예정 시각을 계산한다.
 - SSH 점검(`CollectionJob`)은 API가 동기로 실행하는 별도 흐름이며 APScheduler가 일일 자동 점검도 예약한다.
 
 ## 5. 데이터와 업무 관계
@@ -110,19 +103,19 @@ sequenceDiagram
 | Asset | 등록 서버의 식별·SSH 접속 정보 |
 | CollectionJob·CheckResult | SSH 점검 이력과 자원 사용률·설치 패키지·서버 정보 |
 | AnalysisUpload | 서버·프로젝트명·파일명·크기·원본 SHA-256 |
-| AnalysisSchedule·AnalysisJob | 예약과 요청 범위·입력 스냅샷·진행·실패·재시도·취소 |
+| AnalysisJob | 요청 범위·입력 스냅샷·진행·실패·재시도·취소 |
 | SbomDocument·Component·DependencyEdge | 원본과 검색용 구성요소·라이선스·해시·의존관계 |
 | ProductRelease | 구성요소 식별용 내부 테이블 (제품 버전 묶음) |
 | AnalysisRun | 특정 시점의 SPDX·Grype 원본, 도구/DB 정보·해시·탐지 건수 |
 | Vulnerability·ComponentVulnerability | CVE와 설치 구성요소 연결, 출처별 심각도·수정 버전·현재 검토 상태 |
-| VulnerabilityAction | 담당자·기한·메모·작성자·전후 상태·재검사 근거의 추가형 이력 |
+| VulnerabilityAction | 메모·작성자·전후 상태의 추가형 이력 |
 | User·AuditLog | 관리자/조회자 계정과 변경 감사 로그 |
 
-CVE 작업목록은 전체 SBOM 이력을 대상으로 서버에서 개수·정렬·페이지를 계산한다. 단건 조치와 의존성 목록 탐색도 큰 원본을 필요할 때만 읽는다. 개요 화면은 서버·범위별 마지막 성공 메타데이터를 사용하며, 과거 미완료 조치를 최신 탐지 수로 표현하지 않는다.
+CVE 작업목록은 전체 SBOM 이력을 대상으로 서버에서 개수·정렬·페이지를 계산한다. 단건 조치와 구성요소 목록 탐색도 큰 원본을 필요할 때만 읽는다. 개요 화면은 서버·범위별 마지막 성공 메타데이터를 사용하며, 과거 미완료 조치를 최신 탐지 수로 표현하지 않는다.
 
 ## 6. CVE 정확성과 조치 근거
 
-Grype는 실제 생성한 SPDX를 입력으로 사용하며 원본 보고서와 매칭 출처를 저장한다. OSV 교차 검증은 기존 Grype 연결·검사 ID·담당자 검토를 덮어쓰지 않는다. OSV는 PURL을 파싱하고 설치 버전을 확인한 뒤 모든 페이지와 advisory 상세를 읽는다. 일부 응답 누락은 정상 0건으로 저장하지 않는다.
+Grype는 실제 생성한 SPDX를 입력으로 사용하며 원본 보고서와 매칭 출처를 저장한다. OS 패키지는 pkg:deb PURL로 배포판 수정 버전 기준으로 매칭하고, 서버의 패키지 관리자가 실제로 제공하는 업데이트와 대조한다.
 
 수정 버전은 같은 패키지·현재 버전이 포함된 구간에서 찾는다. 같은 CVE의 다른 advisory가 여전히 취약하다고 하는 후보는 제외한다. CVSS 2/3/4는 검증된 라이브러리로 계산하며 유효한 정보가 없으면 UNKNOWN이다. 미지원 생태계 순서·Git 그래프는 수정 버전 추정을 보류한다.
 
