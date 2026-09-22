@@ -178,8 +178,27 @@ function Overview({ summary, onViewResult, analysisJobs }) {
     latest.set(key, { ...previous, latest_attempt_id: job.id, latest_attempt_status: job.status, latest_attempt_requested_at: job.requested_at, latest_attempt_finished_at: job.finished_at, latest_attempt_is_newer: !previous.last_success_at || requestTime > new Date(previous.last_success_at).getTime() })
   }
   const hasCurrent = summary.current_open_cves != null
+  const severity = summary.current_cve_severity || {}
+  const severityLevels = [['CRITICAL', '치명'], ['HIGH', '높음'], ['MEDIUM', '보통'], ['LOW', '낮음'], ['UNKNOWN', '미분류']]
+  const severityTotal = severityLevels.reduce((sum, [level]) => sum + (severity[level] || 0), 0)
   return (
     <>
+      <section className="cve-total" aria-label="탐지된 CVE 총계">
+        <div className="cve-total-head">
+          <span>탐지된 CVE 총 개수</span>
+          <strong>{summary.current_total_cves ?? 0}<small>개</small></strong>
+          <small>최신 검사 기준 · CVE 번호마다 1회 · 미조치 {hasCurrent ? summary.current_open_cves : '미확인'} · 전체 이력 {summary.total_cves ?? 0}개</small>
+        </div>
+        <div className="cve-total-chart">
+          <div className="severity-bar" role="img" aria-label={severityTotal ? severityLevels.map(([level, label]) => `${label} ${severity[level] || 0}개`).join(', ') : '탐지된 CVE 없음'}>
+            {severityTotal ? severityLevels.filter(([level]) => severity[level]).map(([level]) => <span key={level} className={`severity-seg severity-seg-${level.toLowerCase()}`} style={{ flexGrow: severity[level] }} />) : <span className="severity-seg severity-seg-empty" style={{ flexGrow: 1 }} />}
+          </div>
+          <ul className="severity-legend">
+            {severityLevels.map(([level, label]) => <li key={level}><i className={`severity-dot severity-seg-${level.toLowerCase()}`} />{label} <b>{severity[level] || 0}</b></li>)}
+          </ul>
+        </div>
+      </section>
+
       <section className="metric-grid">
         <Metric label="검사 대상" value={summary.assets} detail="서버와 프로젝트" />
         <Metric label="최신 검사 기준 미조치 CVE" value={hasCurrent ? summary.current_open_cves : '미확인'} detail={hasCurrent ? `대상·범위별 마지막 검사 기준 · ${summary.current_affected_assets ?? 0}대` : '현재 검사 집계 정보 없음'} />

@@ -104,6 +104,9 @@ def test_vex_changes_affect_historical_open_count_but_not_run_count_or_history(d
     db.add(link); db.commit()
     before = summary(db)
     assert before.open_cves == 1
+    # Totals ignore the remediation state: the CVE was found once in history, but not in the current inventory.
+    assert before.total_cves == 1 and before.current_total_cves == 0
+    assert before.current_cve_severity == {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "UNKNOWN": 0}
     # The open finding sits on the superseded SBOM, so the current-inventory view is clean.
     assert before.current_open_cves == 0 and before.current_affected_assets == 0
     assert before.affected_assets == 1
@@ -111,6 +114,7 @@ def test_vex_changes_affect_historical_open_count_but_not_run_count_or_history(d
     link.vex_status = "FIXED"; db.commit()
     after = summary(db)
     assert after.open_cves == 0
+    assert after.total_cves == 1  # a FIXED CVE is still a detected CVE
     assert after.latest_analyses[0].analysis_run_id == latest.id
     assert after.latest_analyses[0].cve_count == 0
     assert db.scalars(select(models.AnalysisRun).order_by(models.AnalysisRun.id)).all() == [historical, latest]

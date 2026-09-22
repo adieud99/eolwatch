@@ -417,6 +417,17 @@ describe('웹에서 서버 취약점 분석 실행', () => {
     expect(fetch.mock.calls.filter(([url]) => url === '/api/vulnerabilities')).toHaveLength(0)
   })
 
+  it('탐지된 CVE 총 개수를 최신 검사 기준으로 맨 위에 보여 주고 심각도별로 나눈다', async () => {
+    data['/api/dashboard/summary'] = { ...data['/api/dashboard/summary'], current_total_cves: 42, total_cves: 58, current_open_cves: 40, current_cve_severity: { CRITICAL: 2, HIGH: 10, MEDIUM: 20, LOW: 10, UNKNOWN: 0 } }
+    await openApp('VIEWER')
+    const headline = within(screen.getByLabelText('탐지된 CVE 총계'))
+    expect(headline.getByText('탐지된 CVE 총 개수')).toBeInTheDocument()
+    expect(headline.getByText('42')).toBeInTheDocument()
+    expect(headline.getByText('최신 검사 기준 · CVE 번호마다 1회 · 미조치 40 · 전체 이력 58개')).toBeInTheDocument()
+    expect(headline.getByRole('img', { name: '치명 2개, 높음 10개, 보통 20개, 낮음 10개, 미분류 0개' })).toBeInTheDocument()
+    expect(headline.getByText('치명').parentElement).toHaveTextContent('치명 2')
+  })
+
   it('현재 범위의 미조치 수와 전체 이력의 미조치 수를 구분하고 집계가 없으면 미확인으로 표시한다', async () => {
     data['/api/dashboard/summary'] = { ...data['/api/dashboard/summary'], open_cves: 300, affected_assets: 7, current_open_cves: 0, current_affected_assets: 0 }
     const view = await openApp('VIEWER')

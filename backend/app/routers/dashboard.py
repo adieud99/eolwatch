@@ -119,6 +119,25 @@ def summary(db: Session = Depends(get_db)):
                models.ComponentVulnerability.vex_status.in_(OPEN_STATUSES))
     ) or 0
 
+    # Total detected CVEs: every status counts, each CVE number once.
+    total_cves = db.scalar(select(func.count(func.distinct(models.ComponentVulnerability.vulnerability_id)))) or 0
+    current_links = select(models.ComponentVulnerability.vulnerability_id).join(
+        models.Component, models.ComponentVulnerability.component_id == models.Component.id
+    ).where(models.Component.sbom_id.in_(selected))
+    current_total_cves = db.scalar(select(func.count()).select_from(current_links.distinct().subquery())) or 0
+    severity_rows = db.execute(
+        select(models.ComponentVulnerability.vulnerability_id,
+               func.max(func.upper(func.coalesce(models.ComponentVulnerability.finding_severity, models.Vulnerability.severity, "UNKNOWN"))))
+        .join(models.Component, models.ComponentVulnerability.component_id == models.Component.id)
+        .join(models.Vulnerability, models.ComponentVulnerability.vulnerability_id == models.Vulnerability.id)
+        .where(models.Component.sbom_id.in_(selected))
+        .group_by(models.ComponentVulnerability.vulnerability_id)
+    ).all()
+    current_cve_severity = {level: 0 for level in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN")}
+    for _vulnerability_id, severity in severity_rows:
+        level = str(severity or "UNKNOWN")
+        current_cve_severity[level if level in current_cve_severity else "UNKNOWN"] += 1
+
     return schemas.DashboardSummary(
         assets=db.scalar(select(func.count(models.Asset.id))) or 0,
         sbom_documents=sbom_count,
@@ -131,4 +150,7 @@ def summary(db: Session = Depends(get_db)):
         latest_analyses=latest_analysis_overview(db),
         current_open_cves=current_open_cves,
         current_affected_assets=current_affected_assets,
+        current_total_cves=current_total_cves,
+        total_cves=total_cves,
+        current_cve_severity=current_cve_severity,
     )

@@ -160,6 +160,11 @@ class DashboardSummary(BaseModel):
     # 자산·검사 범위별 최신 성공 SBOM(및 자산별 최신 수동 import SBOM) 기준의 미조치 CVE 수
     current_open_cves: int = 0
     current_affected_assets: int = 0
+    # 탐지된 CVE 총수(조치 상태와 무관, CVE 번호 기준 1회): 최신 검사 기준과 전체 이력 기준
+    current_total_cves: int = 0
+    total_cves: int = 0
+    # 최신 검사 기준 CVE를 최고 심각도로 나눈 수 (CRITICAL/HIGH/MEDIUM/LOW/UNKNOWN)
+    current_cve_severity: dict[str, int] = Field(default_factory=dict)
 
 
 class CollectionJobRead(BaseModel):
