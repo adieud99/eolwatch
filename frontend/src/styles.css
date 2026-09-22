@@ -181,7 +181,10 @@ tr.nested th { padding: 8px 12px; font-size: 12px; }
 .new-target { grid-column: 1 / -1; margin: 4px 0 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 6px; display: grid; gap: 10px; }
 .new-target legend { font-size: 12px; color: var(--green); font-weight: 700; padding: 0 4px; }
 .new-target small { color: var(--muted); }
-label > .table-button { margin-top: 6px; width: fit-content; }
+/* a control with a button beside it stays one 42px row, so neighbouring fields line up */
+.with-button { display: flex; gap: 8px; align-items: stretch; }
+.with-button select, .with-button input { flex: 1; }
+.with-button .table-button { height: 42px; margin: 0; padding: 0 12px; white-space: nowrap; }
 .cve-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; margin: 8px 0 10px; font-size: 13px; }
 .cve-filters label { display: flex; flex-direction: row; align-items: center; gap: 6px; white-space: nowrap; margin: 0; width: auto; }
 .cve-filters input[type="checkbox"] { width: auto; margin: 0; }
