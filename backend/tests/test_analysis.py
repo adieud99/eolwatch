@@ -314,6 +314,11 @@ def test_runs_split_fixable_and_kernel_cves_and_work_list_filters_them(client, b
     assert (body["cve_count"], body["fixable_cve_count"], body["kernel_cve_count"], body["kernel_fixable_cve_count"]) == (3, 2, 2, 1)
     listed = next(run for run in client.get("/api/analyses").json() if run["id"] == body["id"])
     assert (listed["fixable_cve_count"], listed["kernel_cve_count"], listed["kernel_fixable_cve_count"]) == (2, 2, 1)
+    # The single-run and history responses carry the same frozen split (they used to answer zeros).
+    detail = client.get(f"/api/analyses/runs/{body['id']}").json()
+    assert (detail["fixable_cve_count"], detail["kernel_cve_count"], detail["kernel_fixable_cve_count"]) == (2, 2, 1)
+    history = next(run for run in client.get("/api/analyses/history").json()["items"] if run["id"] == body["id"])
+    assert (history["fixable_cve_count"], history["kernel_cve_count"]) == (2, 2)
     sbom_id = body["sbom_id"]
     def cves(**params):
         page = client.get("/api/vulnerability-work", params={"sbom_id": sbom_id, "status": "ALL", **params})

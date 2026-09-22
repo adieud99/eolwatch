@@ -92,6 +92,9 @@ def retry_job(job_id: int, payload: Optional[schemas.AnalysisJobRequest] = Body(
 
 def read(run: models.AnalysisRun, counts: Optional[dict[str, int]] = None) -> schemas.AnalysisRead:
     asset = run.sbom.asset
+    if counts is None and isinstance(run.database_info, dict) and run.database_info.get('counts'):
+        # Single-run and history responses used to drop the frozen fixable/kernel split and report zeros.
+        counts = run.database_info['counts']
     return schemas.AnalysisRead(**(counts or {}), package_updates=(run.database_info or {}).get('package_updates') if isinstance(run.database_info, dict) else None,
         id=run.id, sbom_id=run.sbom_id, asset_id=run.sbom.asset_id,
         asset_tag=asset.asset_tag if asset else None, asset_name=asset.name if asset else None,
